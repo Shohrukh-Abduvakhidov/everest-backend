@@ -1,0 +1,115 @@
+export const up = pgm => {
+  pgm.sql(`
+-- H ИИ: Личный общий чат или чат по курсу
+CREATE TABLE ai_conversations (
+id UUID PRIMARY KEY,
+user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT, course_id UUID REFERENCES courses(id) ON DELETE RESTRICT, title TEXT,
+created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+archived_at TIMESTAMPTZ, UNIQUE (id,user_id)
+);
+
+-- H ИИ: История диалога; нельзя получить чужую беседу
+CREATE TABLE ai_messages (
+id UUID PRIMARY KEY,
+conversation_id UUID NOT NULL, user_id UUID NOT NULL,
+role VARCHAR(16) NOT NULL CHECK (role IN ('user','assistant','system')),
+content JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+FOREIGN KEY (conversation_id,user_id) REFERENCES ai_conversations(id,user_id) ON DELETE RESTRICT, UNIQUE (id,conversation_id,user_id)
+);
+
+-- H ИИ: Совместно действующие ограничения глобально/группа/курс/ученик
+CREATE TABLE ai_limit_policies (
+id UUID PRIMARY KEY,
+code TEXT NOT NULL UNIQUE, group_id UUID REFERENCES groups(id) ON DELETE RESTRICT, course_id UUID REFERENCES courses(id) ON DELETE RESTRICT,
+user_id UUID REFERENCES users(id) ON DELETE RESTRICT, max_daily_requests INTEGER CHECK (max_daily_requests >= 0),
+max_daily_tokens BIGINT CHECK (max_daily_tokens >= 0),
+max_daily_cost_microunits BIGINT CHECK (max_daily_cost_microunits >= 0),
+timezone VARCHAR(64) NOT NULL DEFAULT 'Asia/Dushanbe', is_active BOOLEAN NOT NULL DEFAULT TRUE,
+created_by UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+CHECK (num_nonnulls(group_id,course_id,user_id) <= 1),
+CHECK (num_nonnulls(max_daily_requests,max_daily_tokens,max_daily_cost_microunits) > 0)
+);
+
+-- H ИИ: Жёсткий денежный бюджет провайдеров на период
+CREATE TABLE ai_budget_periods (
+id UUID PRIMARY KEY,
+provider_code TEXT NOT NULL, currency VARCHAR(3) NOT NULL, begins_at TIMESTAMPTZ NOT NULL,
+ends_at TIMESTAMPTZ NOT NULL, limit_microunits BIGINT NOT NULL CHECK (limit_microunits >= 0),
+reserved_microunits BIGINT NOT NULL DEFAULT 0 CHECK (reserved_microunits >= 0),
+spent_microunits BIGINT NOT NULL DEFAULT 0 CHECK (spent_microunits >= 0),
+is_active BOOLEAN NOT NULL DEFAULT TRUE, CHECK (ends_at > begins_at),
+UNIQUE (provider_code,currency,begins_at)
+);
+
+-- H ИИ: Общий суточный счётчик политики; группа делит свой лимит
+CREATE TABLE ai_daily_usage (
+id UUID PRIMARY KEY,
+policy_id UUID NOT NULL REFERENCES ai_limit_policies(id) ON DELETE RESTRICT, usage_date DATE NOT NULL,
+used_requests INTEGER NOT NULL DEFAULT 0 CHECK (used_requests >= 0),
+reserved_requests INTEGER NOT NULL DEFAULT 0 CHECK (reserved_requests >= 0),
+used_tokens BIGINT NOT NULL DEFAULT 0 CHECK (used_tokens >= 0),
+reserved_tokens BIGINT NOT NULL DEFAULT 0 CHECK (reserved_tokens >= 0),
+used_cost_microunits BIGINT NOT NULL DEFAULT 0 CHECK (used_cost_microunits >= 0),
+reserved_cost_microunits BIGINT NOT NULL DEFAULT 0 CHECK (reserved_cost_microunits >= 0),
+limits_snapshot JSONB NOT NULL, UNIQUE (policy_id,usage_date)
+);
+
+-- H ИИ: Запрос, резервирование и фактическое потребление
+CREATE TABLE ai_requests (
+id UUID PRIMARY KEY,
+user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT, conversation_id UUID NOT NULL,
+budget_period_id UUID NOT NULL REFERENCES ai_budget_periods(id) ON DELETE RESTRICT,
+provider_code TEXT NOT NULL, model_code TEXT NOT NULL, provider_request_id TEXT,
+idempotency_key TEXT NOT NULL, status VARCHAR(16) NOT NULL DEFAULT 'reserved'
+CHECK (status IN ('reserved','running','succeeded','failed','unknown','cancelled')),
+reserved_cost_microunits BIGINT NOT NULL CHECK (reserved_cost_microunits >= 0),
+actual_cost_microunits BIGINT CHECK (actual_cost_microunits >= 0),
+input_tokens BIGINT CHECK (input_tokens >= 0), output_tokens BIGINT CHECK (output_tokens >= 0),
+error_code TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, finished_at TIMESTAMPTZ,
+UNIQUE (user_id,idempotency_key), UNIQUE (id,user_id),
+FOREIGN KEY (conversation_id,user_id) REFERENCES ai_conversations(id,user_id) ON DELETE RESTRICT
+);
+
+-- H ИИ: Один запрос резервирует все применимые суточные политики
+CREATE TABLE ai_request_reservations (
+request_id UUID NOT NULL REFERENCES ai_requests(id) ON DELETE RESTRICT, daily_usage_id UUID NOT NULL REFERENCES ai_daily_usage(id) ON DELETE RESTRICT,
+reserved_requests INTEGER NOT NULL DEFAULT 1 CHECK (reserved_requests >= 0),
+reserved_tokens BIGINT NOT NULL CHECK (reserved_tokens >= 0),
+reserved_cost_microunits BIGINT NOT NULL CHECK (reserved_cost_microunits >= 0),
+settled_at TIMESTAMPTZ, PRIMARY KEY (request_id,daily_usage_id)
+);
+
+-- H ИИ: Журнал резервов, фактических расходов и освобождения
+CREATE TABLE ai_usage_ledger (
+id UUID PRIMARY KEY,
+request_id UUID NOT NULL REFERENCES ai_requests(id) ON DELETE RESTRICT,
+event_type VARCHAR(16) NOT NULL CHECK (event_type IN ('reserve','settle','release','adjust')),
+reserved_delta_microunits BIGINT NOT NULL DEFAULT 0,
+spent_delta_microunits BIGINT NOT NULL DEFAULT 0,
+idempotency_key TEXT NOT NULL UNIQUE, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- H ИИ: История разборов; последний выбирается по created_at
+CREATE TABLE ai_analyses (
+id UUID PRIMARY KEY,
+user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT, course_id UUID REFERENCES courses(id) ON DELETE RESTRICT,
+attempt_id UUID REFERENCES test_attempts(id) ON DELETE RESTRICT, request_id UUID NOT NULL REFERENCES ai_requests(id) ON DELETE RESTRICT,
+analysis_type VARCHAR(24) NOT NULL CHECK (analysis_type IN ('mistakes','recommendations','nct_progress')),
+content JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+  `);
+};
+
+export const down = pgm => {
+  pgm.sql(`
+DROP TABLE ai_analyses;
+DROP TABLE ai_usage_ledger;
+DROP TABLE ai_request_reservations;
+DROP TABLE ai_requests;
+DROP TABLE ai_daily_usage;
+DROP TABLE ai_budget_periods;
+DROP TABLE ai_limit_policies;
+DROP TABLE ai_messages;
+DROP TABLE ai_conversations;
+  `);
+};

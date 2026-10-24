@@ -1,0 +1,48 @@
+export const up = pgm => {
+  pgm.sql(`
+-- K Инфраструктура: Редкие события для активности и streak; не видеотелеметрия каждую секунду
+CREATE TABLE learning_activity_events (
+id UUID PRIMARY KEY,
+user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT, lesson_id UUID REFERENCES lessons(id) ON DELETE RESTRICT,
+attempt_id UUID REFERENCES test_attempts(id) ON DELETE RESTRICT, event_code TEXT NOT NULL, source_event_key TEXT NOT NULL,
+occurred_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, metadata JSONB NOT NULL DEFAULT '{}',
+UNIQUE (user_id,source_event_key)
+);
+
+-- K Инфраструктура: Очередь PostgreSQL с lease и retry
+CREATE TABLE background_jobs (
+id UUID PRIMARY KEY,
+job_type TEXT NOT NULL, payload JSONB NOT NULL DEFAULT '{}', dedupe_key TEXT NOT NULL UNIQUE,
+status VARCHAR(16) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','running','completed','failed','cancelled')),
+available_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+locked_by TEXT, lease_expires_at TIMESTAMPTZ,
+attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0), max_attempts INTEGER NOT NULL DEFAULT 5 CHECK (max_attempts > 0),
+last_error_code TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, finished_at TIMESTAMPTZ
+);
+
+-- K Инфраструктура: Повтор HTTP-запроса возвращает тот же результат
+CREATE TABLE idempotency_keys (
+id UUID PRIMARY KEY,
+user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT, operation TEXT NOT NULL, idempotency_key TEXT NOT NULL,
+request_hash TEXT NOT NULL, status VARCHAR(16) NOT NULL DEFAULT 'running' CHECK (status IN ('running','completed','failed')),
+response_code INTEGER, response_body JSONB,
+created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, expires_at TIMESTAMPTZ NOT NULL,
+UNIQUE (user_id,operation,idempotency_key), CHECK (expires_at > created_at)
+);
+
+-- K Инфраструктура: Публичные/служебные настройки, но не API-ключи
+CREATE TABLE platform_settings (
+key TEXT PRIMARY KEY, value JSONB NOT NULL, updated_by UUID REFERENCES users(id) ON DELETE RESTRICT,
+updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+  `);
+};
+
+export const down = pgm => {
+  pgm.sql(`
+DROP TABLE platform_settings;
+DROP TABLE idempotency_keys;
+DROP TABLE background_jobs;
+DROP TABLE learning_activity_events;
+  `);
+};

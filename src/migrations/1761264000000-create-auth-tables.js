@@ -1,0 +1,213 @@
+export const up = pgm => {
+  pgm.sql(`
+CREATE TABLE users (
+    id UUID PRIMARY KEY,
+    status VARCHAR(16) NOT NULL DEFAULT 'pending',
+    onboarding_completed_at TIMESTAMPTZ,
+    approved_by UUID REFERENCES users(id) ON DELETE RESTRICT,
+    approved_at TIMESTAMPTZ,
+    blocked_by UUID REFERENCES users(id) ON DELETE RESTRICT,
+    blocked_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_login_at TIMESTAMPTZ,
+    CONSTRAINT users_status_check CHECK (status IN ('pending','active','blocked','rejected')),
+    CONSTRAINT users_blocked_check CHECK (status <> 'blocked' OR blocked_at IS NOT NULL),
+    CONSTRAINT users_approval_actor_check CHECK (approved_by IS NULL OR approved_at IS NOT NULL)
+);
+
+CREATE TABLE user_profiles (
+    user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE RESTRICT,
+    first_name VARCHAR(100),
+    last_name VARCHAR(100),
+    language_code VARCHAR(2) NOT NULL DEFAULT 'ru',
+    timezone VARCHAR(64) NOT NULL DEFAULT 'Asia/Dushanbe',
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT profiles_language_check CHECK (language_code IN ('tg','ru','en')),
+    CONSTRAINT profiles_first_name_check CHECK (first_name IS NULL OR length(trim(first_name)) > 0),
+    CONSTRAINT profiles_last_name_check CHECK (last_name IS NULL OR length(trim(last_name)) > 0)
+);
+
+CREATE TABLE user_phones (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    phone_e164 VARCHAR(16) NOT NULL UNIQUE,
+    is_primary BOOLEAN NOT NULL DEFAULT FALSE,
+    verified_at TIMESTAMPTZ,
+    verification_method VARCHAR(24),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT phones_id_user_unique UNIQUE (id, user_id),
+    CONSTRAINT phones_e164_check CHECK (phone_e164 ~ '^\\+[1-9][0-9]{1,14}$'),
+    CONSTRAINT phones_verification_check CHECK (
+        (verified_at IS NULL AND verification_method IS NULL) OR
+        (verified_at IS NOT NULL AND verification_method IS NOT NULL AND
+         verification_method IN ('sms','telegram_verified','admin_verified'))
+    ),
+    CONSTRAINT phones_primary_verified_check CHECK (NOT is_primary OR verified_at IS NOT NULL)
+);
+
+CREATE TABLE user_passwords (
+    user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE RESTRICT,
+    password_hash TEXT NOT NULL,
+    changed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT passwords_hash_check CHECK (length(password_hash) > 0)
+);
+
+CREATE TABLE auth_identities (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    provider VARCHAR(24) NOT NULL,
+    issuer TEXT NOT NULL,
+    provider_subject TEXT NOT NULL,
+    provider_profile JSONB NOT NULL DEFAULT '{}',
+    linked_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_used_at TIMESTAMPTZ,
+    CONSTRAINT identities_subject_unique UNIQUE (provider, issuer, provider_subject),
+    CONSTRAINT identities_user_provider_unique UNIQUE (user_id, provider, issuer),
+    CONSTRAINT identities_provider_check CHECK (provider = 'telegram'),
+    CONSTRAINT identities_nonempty_check CHECK (length(issuer) > 0 AND length(provider_subject) > 0),
+    CONSTRAINT identities_profile_check CHECK (jsonb_typeof(provider_profile) = 'object')
+);
+
+CREATE TABLE roles (
+    id UUID PRIMARY KEY,
+    code VARCHAR(24) NOT NULL UNIQUE,
+    CONSTRAINT roles_code_check CHECK (code IN ('owner','admin','teacher','student'))
+);
+
+CREATE TABLE user_roles (
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    role_id UUID NOT NULL REFERENCES roles(id) ON DELETE RESTRICT,
+    assigned_by UUID REFERENCES users(id) ON DELETE RESTRICT,
+    assigned_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, role_id)
+);
+
+CREATE TABLE auth_sessions (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMPTZ NOT NULL,
+    last_used_at TIMESTAMPTZ,
+    revoked_at TIMESTAMPTZ,
+    revoke_reason VARCHAR(40),
+    user_agent TEXT,
+    ip_address INET,
+    CONSTRAINT sessions_expiry_check CHECK (expires_at > created_at),
+    CONSTRAINT sessions_revoke_check CHECK (revoke_reason IS NULL OR revoked_at IS NOT NULL)
+);
+
+CREATE TABLE auth_refresh_tokens (
+    id UUID PRIMARY KEY,
+    session_id UUID NOT NULL REFERENCES auth_sessions(id) ON DELETE RESTRICT,
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMPTZ NOT NULL,
+    used_at TIMESTAMPTZ,
+    revoked_at TIMESTAMPTZ,
+    CONSTRAINT refresh_hash_check CHECK (length(token_hash) > 0),
+    CONSTRAINT refresh_expiry_check CHECK (expires_at > created_at)
+);
+
+CREATE TABLE auth_challenges (
+    id UUID PRIMARY KEY,
+    user_id UUID REFERENCES users(id) ON DELETE RESTRICT,
+    user_phone_id UUID,
+    purpose VARCHAR(32) NOT NULL,
+    channel VARCHAR(16) NOT NULL DEFAULT 'sms',
+    target_phone_e164 VARCHAR(16) NOT NULL,
+    secret_hash TEXT NOT NULL,
+    attempts_count SMALLINT NOT NULL DEFAULT 0,
+    max_attempts SMALLINT NOT NULL DEFAULT 5,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMPTZ NOT NULL,
+    consumed_at TIMESTAMPTZ,
+    invalidated_at TIMESTAMPTZ,
+    CONSTRAINT challenges_phone_owner_fk FOREIGN KEY (user_phone_id, user_id)
+        REFERENCES user_phones(id, user_id) ON DELETE RESTRICT,
+    CONSTRAINT challenges_purpose_check CHECK (purpose IN ('register_phone','verify_phone','reset_password','change_phone')),
+    CONSTRAINT challenges_channel_check CHECK (channel = 'sms'),
+    CONSTRAINT challenges_phone_check CHECK (target_phone_e164 ~ '^\\+[1-9][0-9]{1,14}$'),
+    CONSTRAINT challenges_owner_check CHECK (user_phone_id IS NULL OR user_id IS NOT NULL),
+    CONSTRAINT challenges_reset_binding_check CHECK (
+        purpose <> 'reset_password' OR (user_id IS NOT NULL AND user_phone_id IS NOT NULL)
+    ),
+    CONSTRAINT challenges_secret_check CHECK (length(secret_hash) > 0),
+    CONSTRAINT challenges_attempts_check CHECK (max_attempts > 0 AND attempts_count BETWEEN 0 AND max_attempts),
+    CONSTRAINT challenges_expiry_check CHECK (expires_at > created_at)
+);
+
+CREATE TABLE sms_deliveries (
+    id UUID PRIMARY KEY,
+    challenge_id UUID NOT NULL REFERENCES auth_challenges(id) ON DELETE RESTRICT,
+    provider_code VARCHAR(40) NOT NULL,
+    provider_message_id TEXT,
+    idempotency_key UUID NOT NULL UNIQUE,
+    status VARCHAR(16) NOT NULL DEFAULT 'pending',
+    error_code VARCHAR(80),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    sent_at TIMESTAMPTZ,
+    delivered_at TIMESTAMPTZ,
+    CONSTRAINT sms_status_check CHECK (status IN ('pending','sent','delivered','failed','unknown')),
+    CONSTRAINT sms_provider_message_unique UNIQUE (provider_code, provider_message_id)
+);
+
+CREATE TABLE audit_events (
+    id UUID PRIMARY KEY,
+    actor_user_id UUID REFERENCES users(id) ON DELETE RESTRICT,
+    subject_user_id UUID REFERENCES users(id) ON DELETE RESTRICT,
+    event_code VARCHAR(80) NOT NULL,
+    metadata JSONB NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT audit_metadata_check CHECK (jsonb_typeof(metadata) = 'object')
+);
+
+CREATE INDEX users_approved_by_idx ON users(approved_by);
+CREATE INDEX users_blocked_by_idx ON users(blocked_by);
+CREATE INDEX users_status_created_idx ON users(status, created_at);
+CREATE UNIQUE INDEX user_phones_one_primary_idx ON user_phones(user_id) WHERE is_primary;
+CREATE INDEX user_phones_user_idx ON user_phones(user_id);
+CREATE INDEX user_roles_role_idx ON user_roles(role_id);
+CREATE INDEX user_roles_assigned_by_idx ON user_roles(assigned_by);
+CREATE INDEX sessions_user_idx ON auth_sessions(user_id);
+CREATE INDEX sessions_expiry_idx ON auth_sessions(expires_at);
+CREATE INDEX refresh_session_idx ON auth_refresh_tokens(session_id);
+CREATE INDEX challenges_user_idx ON auth_challenges(user_id);
+CREATE INDEX challenges_phone_owner_idx ON auth_challenges(user_phone_id, user_id);
+CREATE INDEX challenges_target_created_idx ON auth_challenges(target_phone_e164, purpose, created_at);
+CREATE INDEX challenges_expiry_idx ON auth_challenges(expires_at);
+CREATE INDEX sms_challenge_idx ON sms_deliveries(challenge_id);
+CREATE INDEX audit_actor_idx ON audit_events(actor_user_id, created_at);
+CREATE INDEX audit_subject_idx ON audit_events(subject_user_id, created_at);
+
+
+-- A Авторизация: Приглашения без автоматического повышения роли
+CREATE TABLE user_invitations (
+id UUID PRIMARY KEY,
+invited_phone_e164 VARCHAR(16), token_hash TEXT NOT NULL UNIQUE,
+invited_by UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+accepted_by UUID REFERENCES users(id) ON DELETE RESTRICT, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+expires_at TIMESTAMPTZ NOT NULL, accepted_at TIMESTAMPTZ, revoked_at TIMESTAMPTZ,
+CHECK (expires_at > created_at), CHECK (accepted_at IS NULL OR accepted_by IS NOT NULL),
+CHECK (invited_phone_e164 IS NULL OR invited_phone_e164 ~ '^\\+[1-9][0-9]{1,14}$')
+);
+  `);
+};
+
+export const down = pgm => {
+  pgm.sql(`
+DROP TABLE user_invitations;
+DROP TABLE audit_events;
+DROP TABLE sms_deliveries;
+DROP TABLE auth_challenges;
+DROP TABLE auth_refresh_tokens;
+DROP TABLE auth_sessions;
+DROP TABLE user_roles;
+DROP TABLE roles;
+DROP TABLE auth_identities;
+DROP TABLE user_passwords;
+DROP TABLE user_phones;
+DROP TABLE user_profiles;
+DROP TABLE users;
+  `);
+};

@@ -1,0 +1,35 @@
+export const up = pgm => {
+  pgm.sql(`
+    CREATE TABLE telegram_oidc_states (
+      id UUID PRIMARY KEY,
+      state_hash VARCHAR(64) NOT NULL UNIQUE,
+      nonce_hash VARCHAR(64) NOT NULL,
+      code_verifier_ciphertext TEXT NOT NULL,
+      intent VARCHAR(16) NOT NULL,
+      initiating_user_id UUID REFERENCES users(id) ON DELETE RESTRICT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      expires_at TIMESTAMPTZ NOT NULL,
+      consumed_at TIMESTAMPTZ,
+      CONSTRAINT telegram_oidc_states_intent_check
+        CHECK (intent IN ('login', 'link')),
+      CONSTRAINT telegram_oidc_states_link_user_check
+        CHECK ((intent = 'link') = (initiating_user_id IS NOT NULL)),
+      CONSTRAINT telegram_oidc_states_expiry_check
+        CHECK (expires_at > created_at),
+      CONSTRAINT telegram_oidc_states_state_hash_check
+        CHECK (state_hash ~ '^[a-f0-9]{64}$'),
+      CONSTRAINT telegram_oidc_states_nonce_hash_check
+        CHECK (nonce_hash ~ '^[a-f0-9]{64}$')
+    );
+
+    CREATE INDEX telegram_oidc_states_expiry_idx
+      ON telegram_oidc_states (expires_at);
+  `);
+};
+
+export const down = pgm => {
+  pgm.sql(`
+    DROP INDEX telegram_oidc_states_expiry_idx;
+    DROP TABLE telegram_oidc_states;
+  `);
+};

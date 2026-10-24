@@ -1,0 +1,9 @@
+node_modules/
+.npm-cache/
+.env
+.env.*
+!.env.example
+coverage/
+*.log
+uploads/*
+!uploads/.gitkeep
