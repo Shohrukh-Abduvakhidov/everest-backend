@@ -4,7 +4,7 @@ Updated: 2026-10-25.
 
 ## Current increment
 
-Milestone 2A: Telegram OpenID Connect authentication, account linking, and bot connection testing.
+Milestone 2B: phone/password registration and active-account login. Implementation and verification are complete; M02C account approval is next.
 
 ## Implemented
 
@@ -22,6 +22,10 @@ Milestone 2A: Telegram OpenID Connect authentication, account linking, and bot c
 - Added authenticated Telegram link, unlink, and test-message operations. Login identities use verified issuer/subject in `auth_identities`; bot messaging state remains in `telegram_connections`.
 - Added EVEREST session JWT creation and middleware that validates the JWT, live session, and active account. The callback stores the token in an HttpOnly cookie and omits it from JSON.
 - Added repository-owned parameterized SQL, service-owned transactions, audit events, stable identity-conflict responses, and mock-based Telegram tests.
+- Added `POST /api/v1/auth/register` with strict allowed fields, E.164 normalization, name/password validation, asynchronous salted `scrypt` hashing, and one transaction for the pending user, profile, unverified phone, password, student role, and audit event.
+- Added `POST /api/v1/auth/login/password` with generic invalid credentials, constant-work unknown-phone verification, active-account enforcement under a row lock, shared session issuance, HttpOnly cookie transport, `last_login_at`, and an atomic audit event.
+- Added a shared session-issuance service used by Telegram and password login without changing the existing session/token contract.
+- Added password/input unit tests and real-PostgreSQL integration coverage for validation, role injection, normalization, hashing, duplicate and concurrent phones, rollback, pending/blocked/rejected denial, generic credentials, session creation, auditing, and response secrecy.
 
 Implemented foundation files include `src/app.js`, `src/server.js`, `src/configs/{env,db,migrate,error-handler}.js`, the health route/controller/service/repository chain, `src/repositories/transaction-repository.js`, shared utilities, and the verification scripts under `scripts/`.
 
@@ -72,6 +76,10 @@ The Milestone 1 run applied the 12 baseline migrations. Milestone 2A applied the
 - Telegram unit/integration tests: PKCE, state/nonce hashing, encrypted verifier, discovery/JWKS doubles, signature, issuer, audience, expiry, nonce, start, callback, provider denial, replay, expired state, linking, duplicate prevention, login cookie, test message, and unlinking: passed.
 - Telegram tests use mock providers and never call the live Telegram OIDC or Bot API.
 - `npm test` (`test:sources`, `test:integrity`, `test:telegram`, `test:server`): passed.
+- M02B focused password/input unit tests: 3 passed.
+- M02B focused PostgreSQL integration tests: 8 subtests passed (9 reported tests including the parent).
+- Post-M02B `npm test`: passed all 22 reported auth tests plus migration-source, schema-integrity, and server lifecycle checks.
+- Post-M02B `npm run migrate:up`: passed as a no-op; `verify-database.js` confirmed the expected 82-table, 13-migration catalog.
 - `npm run migrate:down` with `DB_NAME=everest_db`: rejected before migration execution with exit code 1, as required by the safety guard.
 
 ## Blocker and unrun check
@@ -88,4 +96,4 @@ SMS provider and limits, whether Telegram-authenticated accounts must later veri
 
 ## Next concrete milestone
 
-M02B: implement phone/password registration and login only. Normalize E.164 phones; atomically create a pending student account, profile, phone record, and password hash; permit password login only for active accounts; reuse session issuance; audit safely; and cover duplicate/concurrent registration. SMS/OTP, approval endpoints, refresh/logout/session management, password recovery, RBAC, rate limiting, and CSRF belong to later milestones.
+M02C: implement account approval state management with a narrowly scoped authenticated administrator guard: list pending accounts; approve, reject, block, and unblock; audit decisions; and atomically revoke sessions when blocking. General RBAC remains M02F. SMS/OTP, refresh/logout/session management, password recovery, learning domains, and unrelated refactors remain excluded.

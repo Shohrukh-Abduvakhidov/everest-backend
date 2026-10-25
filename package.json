@@ -18,8 +18,9 @@
     "test:integrity": "node scripts/test-schema-integrity.js",
     "test:server": "node scripts/test-server.js",
     "test:migrations": "node scripts/test-migration-cycle.js",
-    "test:telegram": "node --test --test-concurrency=1 tests/all.test.js",
-    "test": "npm run test:sources && npm run test:integrity && npm run test:telegram && npm run test:server"
+    "test:auth": "node --test --test-concurrency=1 tests/all.test.js",
+    "test:telegram": "npm run test:auth",
+    "test": "npm run test:sources && npm run test:integrity && npm run test:auth && npm run test:server"
   },
   "dependencies": {
     "cors": "^2.8.5",

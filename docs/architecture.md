@@ -22,7 +22,7 @@ The current backend is a small layered modular monolith. The foundation, full da
 | Security/token library | `jose` 6.2.13 |
 | Configuration | `dotenv` 17.4.2 and validated readers in `src/configs/env.js` |
 | Tests | Node's built-in test runner plus PostgreSQL integration/verification scripts |
-| Current milestone | M02A, Telegram OIDC authentication and account linking, complete in code |
+| Current milestone | M02B, phone/password registration and login, complete in code; M02C planned next |
 
 ## 2. Repository tree
 
@@ -83,6 +83,8 @@ Routes under `/api/v1` are:
 
 - `GET /health`: process liveness only; no database access.
 - `GET /ready`: repository-owned `SELECT 1` readiness check.
+- `POST /auth/register`: transactional pending-student phone/password registration.
+- `POST /auth/login/password`: active-account password login and session issuance.
 - `/auth/*`: Telegram routes described below.
 
 ## 4. Layered architecture
@@ -111,7 +113,7 @@ flowchart LR
 
 `withTransaction()` acquires one client, issues `BEGIN`, invokes the service callback, commits or rolls back, and releases in `finally`. Telegram link/login/unlink services pass that same client to every transaction-only repository method. No runtime application SQL or `.query()` call was found outside repositories; tests and operational scripts are intentional exceptions. No CommonJS usage was found.
 
-Validation is currently lightweight and service-owned: Telegram intent, callback state/code, configuration, verified claims, account state, session state, identity conflicts, and unlink safety are checked in services/providers. There is no general request-schema validator. Authorization currently stops at authenticated active-user resolution; RBAC/action/resource authorization is planned.
+Validation is currently lightweight and service-owned: password-auth request shape, E.164/name/password rules, Telegram intent, callback state/code, configuration, verified claims, account state, session state, identity conflicts, and unlink safety are checked in services/providers. There is no general request-schema validator. Authorization currently stops at authenticated active-user resolution; RBAC/action/resource authorization is planned.
 
 Errors propagate through `asyncHandler` or explicit middleware `try/catch` to the global error handler.
 
@@ -217,18 +219,18 @@ erDiagram
     users ||--o{ audit_events : acts_or_subject
 ```
 
-- `users` is the platform identity and account lifecycle (`pending`, `active`, `blocked`, `rejected`). Telegram login checks `active`; approval APIs do not exist.
-- `user_profiles` stores names, language, timezone, and optional avatar relation. Schema only.
-- `user_phones` represents E.164 ownership and verification. Schema only.
-- `user_passwords` stores one password hash per user. Schema exists; hashing and password APIs do not.
+- `users` is the platform identity and account lifecycle (`pending`, `active`, `blocked`, `rejected`). Telegram and password login check `active`; approval APIs do not exist.
+- `user_profiles` stores names, language, timezone, and optional avatar relation. Registration creates the initial name record; profile APIs remain planned.
+- `user_phones` represents E.164 ownership and verification. M02B creates an unverified phone for registration and resolves password login by its normalized value; verification APIs remain planned.
+- `user_passwords` stores one self-describing salted `scrypt` hash per password user. Registration and password verification are implemented.
 - `auth_identities` stores verified external login identity. Only Telegram `(provider, issuer, provider_subject)` is permitted and implemented.
-- `auth_sessions` stores server-side session state. Creation and validation are implemented for Telegram login.
+- `auth_sessions` stores server-side session state. Creation is shared by Telegram/password login and live-session validation is implemented.
 - `auth_refresh_tokens` models hashed refresh history. No refresh service exists.
 - `auth_challenges` and `sms_deliveries` model OTP and delivery state. No service/provider exists.
 - `telegram_oidc_states` stores short-lived login/link protocol state and is implemented.
 - `telegram_connections` is bot messaging permission/destination, separate from login identity; link/test/disconnect behavior is implemented.
 - `roles` contains seeded `owner`, `admin`, `teacher`, `student`; `user_roles` links users. No RBAC middleware exists.
-- `audit_events` is generic audit storage. Telegram link and unlink write events; broader auditing is planned.
+- `audit_events` is generic audit storage. Telegram link/unlink and password registration/successful login write events; broader auditing is planned.
 
 ## 9. Telegram OIDC architecture
 
@@ -319,7 +321,9 @@ Secrets, authorization codes, provider tokens, raw state/nonce, and verifiers ar
 | Refresh-token rotation | Planned | Table only |
 | Logout/session revocation | Planned | No route/service/repository mutation |
 | Session listing | Planned | No API |
-| Device management | Planned | User agent/IP stored on Telegram login only |
+| Device management | Planned | User agent/IP stored on Telegram and password login only |
+
+Password and Telegram login share `src/services/auth/session-service.js`, so both create the same `auth_sessions` row and access-token form. Password login also updates `users.last_login_at`; broader last-used/device lifecycle remains M02D.
 
 The current access-token TTL defaults to 15 minutes and matches the database session expiry. `last_used_at` is not updated by authentication.
 
@@ -333,8 +337,8 @@ The schema seeds four roles and records assignments, but no middleware or servic
 
 | Domain | Principal tables | API / service / repository | Status |
 |---|---|---|---|
-| Authentication | `users`, profiles/phones/passwords, identities, sessions, refresh tokens, challenges, roles | Telegram auth only; auth repository | Partial |
-| Profiles | `user_profiles`, `user_phones`, `assets` | None | Planned (schema only) |
+| Authentication | `users`, profiles/phones/passwords, identities, sessions, refresh tokens, challenges, roles | Telegram OIDC plus phone/password registration/login | Partial |
+| Profiles | `user_profiles`, `user_phones`, `assets` | Registration creates the initial private profile/phone; profile APIs absent | Partial |
 | Groups | `groups`, `group_members`, `group_teachers`, announcements/assets | None | Planned (schema only) |
 | Courses/access | `courses`, teachers, enrollments, modules, module grants | None | Planned (schema + DB access function) |
 | Lessons/progress | `lessons`, resources, progress, notes, favorites, offline downloads | None | Planned (schema only) |
@@ -407,16 +411,17 @@ No AI route, service, repository, prompt, worker, model selection, or provider c
 
 | Script | Purpose |
 |---|---|
-| `npm test` | Source integrity → schema constraint tests → Telegram tests → server lifecycle |
+| `npm test` | Source integrity → schema constraint tests → authentication tests → server lifecycle |
 | `npm run test:sources` | Baseline migration/source digest and guard counts |
 | `npm run test:integrity` | Eight negative database constraint cases, final rollback |
-| `npm run test:telegram` | Node unit and HTTP/PostgreSQL integration tests |
+| `npm run test:auth` | All Node authentication unit and HTTP/PostgreSQL integration tests |
+| `npm run test:telegram` | Compatibility alias for `test:auth` |
 | `npm run test:server` | Liveness, readiness, and explicit graceful shutdown |
 | `npm run test:migrations` | Disposable database create/up/down/up/drop cycle; currently blocked |
 
-Telegram unit tests cover PKCE, state/nonce hashing, verifier encryption, JWKS signature, issuer, audience, expiry, and nonce. Integration tests mock discovery/token/JWKS behavior through an injected OIDC provider and mock Bot API delivery; they exercise start, unknown login, replay, expiry, provider denial, invalid claims, link, duplicate link, login cookie, blocked connection, and unlink. They never contact real Telegram. PostgreSQL is real and fixtures are removed in `finally`.
+Telegram unit tests cover PKCE, state/nonce hashing, verifier encryption, JWKS signature, issuer, audience, expiry, and nonce. Telegram integration tests mock discovery/token/JWKS behavior and Bot API delivery; they exercise start, unknown login, replay, expiry, provider denial, invalid claims, link, duplicate link, login cookie, blocked connection, and unlink. Password tests cover E.164/password validation, salted hashing, pending registration, role injection denial, duplicate/concurrent phone protection, rollback, account-state denial, generic credentials, session creation, auditing, and safe responses. PostgreSQL integration is real, external providers are not contacted, and fixtures are removed in `finally`.
 
-Last result, 25 October 2026: `npm test` passed all 10 reported tests plus migration-source, eight schema-integrity cases, and server lifecycle. Both `npm run migrate:up` runs returned no pending migrations. `verify-database.js` passed. Rollback remains unverified because a disposable database cannot be created with the current role.
+Last result, 25 October 2026: `npm test` passed all 22 reported authentication tests plus migration-source verification, eight schema-integrity cases, and server lifecycle. Post-M02B `npm run migrate:up` returned no pending migrations and `verify-database.js` confirmed the expected 82-table, 13-migration catalog. Rollback remains unverified because a disposable database cannot be created with the current role.
 
 ## 20. Security architecture
 
@@ -427,6 +432,8 @@ Implemented controls:
 - OIDC signature/issuer/audience/expiry/nonce/subject verification and one-time state.
 - Hash-only state/nonce storage and authenticated encryption for the verifier.
 - External identity based only on verified issuer/subject; no profile-based merging.
+- Salted asynchronous `scrypt` password hashing, timing-safe comparison, dummy-hash work for unknown phones, and generic invalid-credential responses.
+- Transactional pending registration with database-enforced concurrent phone uniqueness and no client-selected role/status.
 - HttpOnly, SameSite cookie, production Secure flag, short expiry, and server-side revocation check.
 - Credentialed CORS restricted to configured origins; `x-powered-by` disabled.
 - Database FK/UNIQUE/CHECK constraints, immutability triggers, append-only journals, and idempotency keys.
@@ -437,7 +444,7 @@ Known security gaps:
 - Local `JWT_ACCESS_SECRET` is missing; live authentication is unavailable until configured.
 - No rate limiting, brute-force protection, OTP controls, or SMS provider exists.
 - No explicit CSRF token/origin middleware; cookie protection currently relies on SameSite and configured CORS. CORS is not itself a CSRF defense.
-- No password hashing/verification implementation, refresh rotation, logout, or session-management API.
+- No refresh rotation, logout, or session-management API.
 - No RBAC/action/resource authorization middleware.
 - No Helmet/content-security header package; only `x-powered-by` is disabled.
 - No production deployment, secret manager, TLS termination, webhook handler/signature check, or operational monitoring is implemented.
@@ -466,12 +473,12 @@ Actual response envelopes:
 | Project foundation | Done | ESM Express app/server, config, Pool, errors, tests |
 | Database schema | Done | 82-table current catalog; baseline verified |
 | Telegram OIDC | Done | Login/link/unlink/session/test-message routes and tests |
-| Phone/password authentication | Planned | Tables only; next increment |
+| Phone/password authentication | Done | Pending registration, salted `scrypt`, active-only login, shared session, audit, tests |
 | Account approval | Planned | User status columns only |
 | Session refresh/rotation | Planned | Refresh table only |
 | Password recovery | Planned | Challenge/SMS tables only |
 | Roles and permissions | Planned | Seeded schema, no enforcement |
-| Profiles | Planned | Schema only |
+| Profiles | Partial | Registration creates the initial private profile; profile APIs remain planned |
 | Groups | Planned | Schema only |
 | Courses/access | Planned | Schema/DB constraints only |
 | Question bank | Planned | Schema/DB guards only |
@@ -485,7 +492,7 @@ Actual response envelopes:
 
 ## 23. Known gaps, risks, and documentation consistency
 
-Confirmed implementation gaps are the missing local JWT secret, unavailable disposable rollback database, unselected SMS provider, absent phone/password and approval APIs, absent refresh/logout flows, absent RBAC/resource checks, schema-only product domains, and no deployment/worker infrastructure.
+Confirmed implementation gaps are the missing local JWT secret, unavailable disposable rollback database, unselected SMS provider, absent approval APIs, absent refresh/logout flows, absent RBAC/resource checks, schema-only product domains, and no deployment/worker infrastructure.
 
 Documentation was normalized on 25 October 2026:
 
@@ -502,7 +509,7 @@ No unresolved contradiction affecting the current implementation was found. Prod
 
 ### M02B — Phone and password registration/login
 
-This is the next implementation milestone.
+Implemented on 25 October 2026. The two routes, transactional registration, `scrypt` password handling, active-only login, shared session issuance, audit events, and focused/regression tests are complete. SMS/OTP, approval, refresh/logout, recovery, and general authorization remain excluded.
 
 Scope:
 
@@ -518,24 +525,24 @@ Scope:
 - prevent duplicate phones, including concurrent registration;
 - use generic authentication errors that do not reveal unnecessary account details.
 
-Proposed M02B routes:
+Implemented M02B routes:
 
 - `POST /api/v1/auth/register`
 - `POST /api/v1/auth/login/password`
 
 Tables involved: `users`, `user_profiles`, `user_phones`, `user_passwords`, `roles`, `user_roles`, `auth_sessions`, and `audit_events`.
 
-Required repositories: users, profiles, phones, passwords, roles, sessions, and audit. Reuse an existing repository when it already owns the relevant table; do not duplicate responsibility.
+Implementation repositories: `user-repository.js` owns user/profile/phone/password/role persistence, while the existing auth repository retains session and audit ownership.
 
-Required services: registration, password login, and shared session issuance.
+Implementation services: password registration/login and shared session issuance reused by Telegram login.
 
-Required tests: phone normalization, invalid E.164, weak/invalid password, duplicate phone, concurrent duplicate registration, password hashing, successful registration, transaction rollback, pending/blocked/rejected login rejection, incorrect password, active-account login, session creation, safe errors, and proof that hashes never appear in responses or logs.
+Verified tests cover phone normalization, invalid E.164, weak/invalid password, duplicate phone, concurrent duplicate registration, password hashing, successful registration, transaction rollback, pending/blocked/rejected login rejection, incorrect password, active-account login, session creation, safe errors, and proof that hashes never appear in responses.
 
 Explicit M02B exclusions: SMS, OTP, password recovery, Telegram recovery, administrator approval endpoints, refresh rotation, logout/session listing, device management, RBAC, rate limiting implementation, CSRF implementation, and all learning domains.
 
 ### M02C — Account approval
 
-Planned separately: list pending accounts, approve/reject, block/unblock, audit administrator decisions, and revoke sessions when an active account is blocked.
+This is the next implementation milestone: list pending accounts, approve/reject, block/unblock, audit administrator decisions, and revoke sessions when an active account is blocked. It requires a narrowly scoped authenticated administrator guard; general RBAC remains M02F.
 
 ### M02D — Session lifecycle
 
@@ -549,7 +556,7 @@ Planned separately: recovery through a linked Telegram identity; an SMS provider
 
 Planned separately: RBAC, action permissions, resource authorization, rate limiting, brute-force protection, CSRF strategy, and security hardening.
 
-M02B documentation updates: `docs/api.md`, `docs/decisions.md`, `docs/progress.md`, and this file. Unrelated schema refactors and later milestones are excluded.
+M02B documentation is recorded in `docs/api.md`, `docs/decisions.md`, `docs/progress.md`, the roadmap, handoff, and this file. Unrelated schema refactors and later milestones remain excluded.
 
 ## 25. Major domain dependencies
 

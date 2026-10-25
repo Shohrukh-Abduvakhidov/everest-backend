@@ -1,9 +1,9 @@
 ---
 project: EVEREST Backend
-current_milestone: M02B
+current_milestone: M02C
 status: ready
-branch: docs/project-roadmap
-last_verified_commit:
+branch: feat/m02b-phone-password-auth
+last_verified_commit: ecbaa18
 updated_at: 2026-10-25
 ---
 
@@ -11,87 +11,78 @@ updated_at: 2026-10-25
 
 ## Completed work
 
-- M00 project foundation, M01 database foundation, and M02A Telegram OIDC are complete in code, relevant migrations, tests, and documentation.
-- Architecture documents were normalized and committed in `f484a55` (`docs: establish EVEREST backend architecture`).
-- The roadmap, session protocols, and reusable handoff skills were added as documentation-only work after that commit. They are not committed at the time of this handoff.
+- M00 project foundation, M01 database foundation, M02A Telegram OIDC, and M02B phone/password registration and login are complete.
+- M02B adds pending-student registration, normalized E.164 phones, salted asynchronous `scrypt` hashing, active-only login, shared session issuance, safe audit events, and focused integration coverage.
+- No migration or dependency was needed; the existing schema and Node.js crypto runtime satisfy the increment.
 
 ## Current repository state
 
-- Verified branch: `docs/project-roadmap`.
-- Last verified commit before this documentation work: `f484a55`.
-- Runtime: Node.js 22, Express 5, native ESM, PostgreSQL through `pg`, and `node-pg-migrate`.
-- Implemented HTTP surface: health/readiness and five Telegram authentication/linking routes.
-- Most product-domain tables exist, but their services and APIs are not implemented.
-- Inspect `git status`, the complete diff, and recent commits again because the repository is authoritative and this handoff can become stale.
+- Working branch for the completed increment: `feat/m02b-phone-password-auth`.
+- Verified base commit: `ecbaa18` (merged roadmap workflow).
+- M02B implementation and documentation are verified in the branch worktree represented by this handoff; inspect the branch tip, status, and diff because this record can become stale.
+- Implemented HTTP surface now includes health/readiness, phone/password registration/login, and five Telegram authentication/linking routes.
+- Most learning/product domains remain schema-only.
 
 ## Current milestone
 
-M02B — phone and password registration/login — is Planned and ready to begin. Its contract is defined in [ROADMAP.md](../../ROADMAP.md) and the M02B section of [the architecture](../architecture.md).
+M02C — account approval — is Planned and ready for design/implementation after the M02B pull request is reviewed and merged.
 
 ## Next concrete task
 
-Implement only `POST /api/v1/auth/register` and `POST /api/v1/auth/login/password`: validate E.164/password/name input, atomically create a pending student identity, hash the password, permit active-only password login, reuse session issuance, write safe audits, and test duplicate/concurrent registration and rollback. First inspect existing repository ownership and session-token patterns; do not duplicate table ownership.
+Define and implement the narrowly scoped administrator guard and account-state API for listing pending users, approving, rejecting, blocking, and unblocking. Lock the target account for transitions, audit the administrator decision atomically, and revoke live sessions when blocking. Keep generalized RBAC in M02F.
 
 ## Required reading order
 
 1. Root `AGENTS.md` and `CLAUDE.md`.
 2. [Roadmap](../../ROADMAP.md).
-3. This handoff.
-4. [Current architecture](../architecture.md), especially authentication and M02B.
+3. This handoff and the [M02B archive](archive/2026-10-25-m02b.md).
+4. [Current architecture](../architecture.md), especially authentication, sessions, authorization, and section 24.
 5. [Progress](../progress.md) and [decisions](../decisions.md).
 6. [Implemented API](../api.md).
-7. Root `documentation.md` and the affected authentication portions of `schema_tables.md`.
-8. `package.json`, lockfile, existing auth routes/controllers/services/repositories, session-token service, tests, and applied migrations.
+7. Root `documentation.md` and affected authentication/role portions of `schema_tables.md`.
+8. Actual auth routes, controllers, services, repositories, tests, and applied migrations.
 
 ## Test status
 
-- Last recorded on 2026-10-25: `npm test` passed migration-source verification, schema-integrity checks, Telegram tests, and server lifecycle checks.
-- Telegram integration uses real PostgreSQL with mocked provider calls; it does not call live Telegram.
-- No application tests were rerun for the roadmap/handoff documentation-only task.
-- Run and report M02B-specific tests plus relevant regression tests during implementation; do not infer success from this handoff.
+- Password/input unit tests: 3 passed.
+- Password-auth PostgreSQL integration: 8 subtests passed (9 reported tests including the parent).
+- Full `npm test`: passed 22 reported auth tests plus migration-source verification, eight schema-integrity cases, and server lifecycle checks.
+- Telegram provider calls remain mocked; password integration used real local PostgreSQL and removed its fixtures.
 
 ## Migration status
 
-- Thirteen migrations are recorded as applied: twelve baseline migrations and one incremental Telegram OIDC-state migration.
-- Repeated `npm run migrate:up` was last recorded as a no-op.
-- M02B's required tables already exist; do not edit applied migrations. Add an incremental migration only if verified implementation requirements demand a schema change.
-- Never run a destructive rollback test against `everest_db`.
+- Thirteen migrations remain applied: twelve immutable baseline migrations and the Telegram OIDC-state migration.
+- M02B changed no migration and added no table or column.
+- Post-M02B `npm run migrate:up` passed as a no-op and catalog verification passed. Repeat the safe up check before M02C; never run destructive rollback tests against `everest_db`.
 
 ## Known blockers
 
-- Disposable migration down/up testing is Blocked: the configured PostgreSQL role lacks `CREATEDB`, and no separately provisioned safe database is currently available.
-- Local live authentication is unavailable until `JWT_ACCESS_SECRET` is configured; do not record its value.
-- SMS provider/limits and later product rules remain unresolved, but they do not block M02B because SMS/OTP are excluded.
+- Disposable migration down/up testing remains Blocked because the configured role lacks `CREATEDB` and no separately provisioned safe database is available.
+- SMS provider/limits and later product rules remain unresolved but do not block M02C.
 
 ## Important constraints
 
 - Preserve route → middleware → controller → service → repository → `pg`.
-- Services own business rules and transaction scope; repositories own all application SQL.
-- Pass the same explicit transaction client to every participating repository method.
-- Keep one `users.id` across phone/password/Telegram; never merge on name or unverified phone.
-- Use safe DTOs/errors and never expose password hashes, secrets, tokens, SQL, or `.env` values.
-- A table existing in PostgreSQL is not evidence that its feature is implemented.
-- Keep applied migrations immutable and preserve existing data.
+- M02C endpoints require an authenticated administrator check; never trust a client-supplied actor or role.
+- Services own state-transition rules and transaction scope; repositories own SQL and row locks.
+- Use one transaction/client for account transition, audit, and session revocation.
+- Preserve applied migrations and existing data. Add an incremental migration only for a verified schema gap.
+- Never expose password hashes, JWTs, database details, secrets, or `.env` values.
 
-## Files expected to change in M02B
+## Files expected to change in M02C
 
-Exact filenames must follow existing ownership and patterns after inspection. Expected areas are:
-
-- `src/routes/auth.js` and the appropriate auth controller(s).
-- Registration, password-login, and shared session-issuance services under `src/services/`.
-- Table-owning authentication repositories under `src/repositories/`, reusing `auth-repository.js` where appropriate.
-- Focused password/phone utilities or middleware only when justified.
-- Unit and PostgreSQL integration tests under `tests/`.
-- `docs/api.md`, `docs/progress.md`, `docs/architecture.md`, `ROADMAP.md`, and this handoff; `docs/decisions.md` only for accepted decisions.
-- A new migration only if a verified schema gap exists; never modify the 13 applied files.
+- Auth/admin route and controller wiring under `src/routes/` and `src/controllers/`.
+- Account-approval and narrowly scoped authorization services under `src/services/`.
+- User/role/session/audit repository methods under `src/repositories/`, reusing existing table ownership.
+- Focused unit and PostgreSQL integration tests.
+- API, decisions when required, architecture, progress, roadmap, and this handoff.
+- A new migration only if inspection proves the existing schema insufficient; never edit applied migrations.
 
 ## Explicit exclusions
 
-SMS, OTP, approval endpoints, refresh rotation, logout/session management, password recovery, RBAC, rate limiting, CSRF implementation, learning-domain APIs, deployment, and unrelated refactors are outside M02B.
+Generalized RBAC, refresh rotation, logout/session-management APIs, password recovery, SMS/OTP, rate limiting, CSRF implementation, learning domains, and unrelated refactors remain outside M02C.
 
 ## Commands before coding
-
-Run these from the repository root, review their output, and confirm the configured database is the intended local development target before database commands:
 
 ```powershell
 git status --short
@@ -102,15 +93,14 @@ Get-Content docs/handoffs/current.md
 Get-Content docs/architecture.md
 Get-Content docs/progress.md
 Get-Content docs/decisions.md
-rg --files src tests
-rg -n "register|password|auth_sessions|user_passwords|user_phones|user_roles" src tests
+rg -n "status|approved_by|blocked_by|user_roles|auth_sessions|audit_events" src tests
 npm test
 npm run migrate:up
 node scripts/verify-database.js
 ```
 
-Do not run `migrate:down` against `everest_db`. Do not print `.env` or credentials.
+Confirm the configured database is the intended local development target. Do not print `.env` or run `migrate:down` against `everest_db`.
 
 ## Archive policy
 
-Replace this file as work advances. Archive a handoff only when a milestone completes, a significant architecture direction changes, or work transfers between Codex and Claude Code—not after every chat.
+Replace this file as work advances. Archive only milestone completion, a significant architecture change, or a Codex/Claude transfer—not every chat.
