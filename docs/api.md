@@ -1,5 +1,7 @@
 # Implemented API
 
+Internal database identifiers are serialized as canonical positive decimal strings. This preserves PostgreSQL `BIGINT` precision across JSON and JWT claims; clients must not assume identifiers are gapless or safely coerce them to JavaScript `Number`.
+
 ## Health
 
 ### `GET /api/v1/health`
@@ -52,7 +54,7 @@ Response `201`:
   "data": {
     "status": "pending",
     "user": {
-      "id": "00000000-0000-0000-0000-000000000000",
+      "id": "1",
       "status": "pending",
       "firstName": "Student",
       "lastName": "Example",
@@ -80,7 +82,7 @@ Successful response `200` requires an active account, creates an auditable serve
   "data": {
     "status": "authenticated",
     "expiresAt": "2026-10-25T12:15:00.000Z",
-    "user": { "id": "00000000-0000-0000-0000-000000000000" }
+    "user": { "id": "1" }
   }
 }
 ```
@@ -117,7 +119,7 @@ For an already-linked identity, response `200` sets the EVEREST session in an `H
   "data": {
     "status": "authenticated",
     "expiresAt": "2026-10-24T12:15:00.000Z",
-    "user": { "id": "00000000-0000-0000-0000-000000000000" },
+    "user": { "id": "1" },
     "messagingConnected": true
   }
 }

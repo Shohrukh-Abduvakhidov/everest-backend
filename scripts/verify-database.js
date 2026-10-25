@@ -14,6 +14,7 @@ const expected = {
   triggers: 11,
   roles: 4,
   migrations: 13,
+  identityColumns: 64,
 };
 
 try {
@@ -38,13 +39,10 @@ try {
         JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = 'public' AND NOT t.tgisinternal) AS triggers,
       (SELECT count(*)::integer FROM roles
-        WHERE (id, code) IN (
-          ('00000000-0000-4000-8000-000000000001'::uuid, 'owner'),
-          ('00000000-0000-4000-8000-000000000002'::uuid, 'admin'),
-          ('00000000-0000-4000-8000-000000000003'::uuid, 'teacher'),
-          ('00000000-0000-4000-8000-000000000004'::uuid, 'student')
-        )) AS roles,
-      (SELECT count(*)::integer FROM pgmigrations) AS migrations
+        WHERE code IN ('owner', 'admin', 'teacher', 'student')) AS roles,
+      (SELECT count(*)::integer FROM pgmigrations) AS migrations,
+      (SELECT count(*)::integer FROM information_schema.columns
+        WHERE table_schema = 'public' AND is_identity = 'YES') AS identity_columns
   `);
 
   const row = result.rows[0];
@@ -57,6 +55,7 @@ try {
     triggers: row.triggers,
     roles: row.roles,
     migrations: row.migrations,
+    identityColumns: row.identity_columns,
   };
 
   const forbidden = await client.query(`
@@ -65,14 +64,82 @@ try {
     WHERE table_schema = 'public'
       AND table_name IN ('group_courses', 'question_versions')
   `);
+  const uuidKeys = await client.query(`
+    SELECT table_name, column_name
+    FROM information_schema.columns AS column_info
+    WHERE table_schema = 'public'
+      AND data_type = 'uuid'
+      AND EXISTS (
+        SELECT 1
+        FROM pg_constraint AS constraint_info
+        JOIN unnest(constraint_info.conkey) AS key(attnum) ON TRUE
+        JOIN pg_class AS relation ON relation.oid = constraint_info.conrelid
+        JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+        JOIN pg_attribute AS attribute
+          ON attribute.attrelid = relation.oid AND attribute.attnum = key.attnum
+        WHERE namespace.nspname = 'public'
+          AND relation.relname = column_info.table_name
+          AND attribute.attname = column_info.column_name
+          AND constraint_info.contype IN ('p', 'f')
+      )
+  `);
+  const invalidEntityIds = await client.query(`
+    SELECT table_name, data_type, is_identity
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name <> 'pgmigrations'
+      AND column_name = 'id'
+      AND (data_type <> 'bigint' OR is_identity <> 'YES')
+    ORDER BY table_name
+  `);
+  const invalidForeignKeys = await client.query(`
+    SELECT DISTINCT relation.relname AS table_name, attribute.attname AS column_name,
+      format_type(attribute.atttypid, attribute.atttypmod) AS data_type
+    FROM pg_constraint AS constraint_info
+    JOIN pg_class AS relation ON relation.oid = constraint_info.conrelid
+    JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+    JOIN unnest(constraint_info.conkey) AS key(attnum) ON TRUE
+    JOIN pg_attribute AS attribute
+      ON attribute.attrelid = relation.oid AND attribute.attnum = key.attnum
+    WHERE namespace.nspname = 'public'
+      AND constraint_info.contype = 'f'
+      AND format_type(attribute.atttypid, attribute.atttypmod) <> 'bigint'
+    ORDER BY relation.relname, attribute.attname
+  `);
+  const remainingUuidColumns = await client.query(`
+    SELECT table_name, column_name
+    FROM information_schema.columns
+    WHERE table_schema = 'public' AND data_type = 'uuid'
+    ORDER BY table_name, column_name
+  `);
+
+  await client.query('BEGIN');
+  const generated = await client.query(
+    "INSERT INTO users (status) VALUES ('pending') RETURNING id, pg_typeof(id)::text AS type"
+  );
+  await client.query('ROLLBACK');
+  const generatedIdentity = generated.rows[0];
   const valid = Object.entries(expected).every(([key, value]) => actual[key] === value)
-    && forbidden.rowCount === 0;
+    && forbidden.rowCount === 0
+    && uuidKeys.rowCount === 0
+    && invalidEntityIds.rowCount === 0
+    && invalidForeignKeys.rowCount === 0
+    && remainingUuidColumns.rowCount === 1
+    && remainingUuidColumns.rows[0].table_name === 'sms_deliveries'
+    && remainingUuidColumns.rows[0].column_name === 'idempotency_key'
+    && generatedIdentity.type === 'bigint'
+    && /^[1-9][0-9]*$/.test(generatedIdentity.id);
 
   console.log(JSON.stringify({
     database: env.database.database,
     expected,
     actual,
     forbiddenTables: forbidden.rows.map((rowValue) => rowValue.table_name),
+    uuidPrimaryOrForeignKeys: uuidKeys.rows,
+    invalidEntityIds: invalidEntityIds.rows,
+    invalidForeignKeys: invalidForeignKeys.rows,
+    remainingUuidColumns: remainingUuidColumns.rows,
+    generatedIdentity,
     valid,
   }, null, 2));
 

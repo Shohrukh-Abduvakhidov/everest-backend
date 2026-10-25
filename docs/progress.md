@@ -4,7 +4,7 @@ Updated: 2026-10-25.
 
 ## Current increment
 
-Milestone 2B: phone/password registration and active-account login. Implementation and verification are complete; M02C account approval is next.
+Milestone M01R: numeric identifier foundation. Implementation, local rebuild, full verification, and disposable rollback testing are complete; M02C account approval is next.
 
 ## Implemented
 
@@ -26,6 +26,10 @@ Milestone 2B: phone/password registration and active-account login. Implementati
 - Added `POST /api/v1/auth/login/password` with generic invalid credentials, constant-work unknown-phone verification, active-account enforcement under a row lock, shared session issuance, HttpOnly cookie transport, `last_login_at`, and an atomic audit event.
 - Added a shared session-issuance service used by Telegram and password login without changing the existing session/token contract.
 - Added password/input unit tests and real-PostgreSQL integration coverage for validation, role injection, normalization, hashing, duplicate and concurrent phones, rollback, pending/blocked/rejected denial, generic credentials, session creation, auditing, and response secrecy.
+- Completed the approved pre-production M01R baseline rewrite: 64 entity `id` columns are PostgreSQL identity `BIGINT`s; all internal foreign, one-to-one, composite, function, and audit references use `BIGINT`.
+- Updated authentication repositories to omit entity IDs on inserts and consume `RETURNING id`; services no longer generate UUID entity IDs.
+- Added canonical positive decimal-string validation for PostgreSQL `BIGINT` JWT/API identifiers without JavaScript `Number` conversion.
+- Retained UUID only for `sms_deliveries.idempotency_key`; retained cryptographic randomness for OAuth state/nonce/PKCE/encryption, password salts, hashes, external-provider identifiers, and disposable database naming.
 
 Implemented foundation files include `src/app.js`, `src/server.js`, `src/configs/{env,db,migrate,error-handler}.js`, the health route/controller/service/repository chain, `src/repositories/transaction-repository.js`, shared utilities, and the verification scripts under `scripts/`.
 
@@ -61,6 +65,8 @@ The Milestone 1 run applied the 12 baseline migrations. Milestone 2A applied the
 - 13 migration history rows
 - no `group_courses` or `question_versions`
 
+For M01R, the same local target was rechecked and contained zero application rows except four role seeds. A custom-format backup was written to `C:\Temp\everest-m01r-backups\everest_db-before-m01r-20261025-162519.dump`. After temporary `CREATEDB` access was confirmed, only `everest_db` was dropped/recreated and the rewritten 13-migration numeric baseline was applied. A second up was a no-op. The verified catalog additionally contains 64 identity columns, no non-`BIGINT` entity `id` or foreign-key columns, and one UUID column (`sms_deliveries.idempotency_key`).
+
 ## Checks actually run
 
 - Node syntax checks for all source files: passed.
@@ -80,11 +86,16 @@ The Milestone 1 run applied the 12 baseline migrations. Milestone 2A applied the
 - M02B focused PostgreSQL integration tests: 8 subtests passed (9 reported tests including the parent).
 - Post-M02B `npm test`: passed all 22 reported auth tests plus migration-source, schema-integrity, and server lifecycle checks.
 - Post-M02B `npm run migrate:up`: passed as a no-op; `verify-database.js` confirmed the expected 82-table, 13-migration catalog.
+- M01R first `npm run migrate:up`: all 13 rewritten migrations applied to the rebuilt local development database.
+- M01R second `npm run migrate:up`: passed as a no-op.
+- M01R `npm test`: passed migration-source verification, eight schema-integrity rejection cases, 24 authentication tests, and server lifecycle checks.
+- M01R `npm run test:migrations`: passed on a separately created disposable database with states 13/82/7 after up, unchanged after the second up, 12/81/7 after rolling back the OIDC migration, and 13/82/7 after reapply; the disposable database was dropped.
+- M01R `verify-database.js`: passed 82 tables, 650 columns, 157 FKs, 293 indexes, seven functions, 11 triggers, four role seeds, 13 migrations, 64 identity columns, generated `BIGINT` ID proof, no invalid entity/FK types, and the one justified UUID idempotency column.
 - `npm run migrate:down` with `DB_NAME=everest_db`: rejected before migration execution with exit code 1, as required by the safety guard.
 
-## Blocker and unrun check
+## Migration safety result
 
-The disposable database lifecycle test attempted to create `everest_migration_test_<random>` through the configured PostgreSQL role. PostgreSQL returned `42501` (`permission denied to create database`). No migration or rollback ran against the disposable target, and no rollback ran against `everest_db`. To complete the down/up test, grant the local role `CREATEDB` temporarily or create a separate empty disposable database whose name clearly contains `test`, `tmp`, `temp`, or `disposable`, then run the migration cycle with that database in `DB_NAME`.
+The previous `CREATEDB` blocker is resolved for M01R. The rollback lifecycle passed against a generated `everest_migration_test_<random>` database and that database was dropped. No rollback ran against `everest_db`. Temporary database-creation privilege should be removed when no longer needed.
 
 The applied initial migration filenames use a hyphen after their numeric prefix. node-pg-migrate applies them in stable lexical order but emits non-fatal timestamp-prefix warnings because newly generated names use an underscore separator. The applied files and migration history remain unchanged; the new migration follows the underscore convention.
 

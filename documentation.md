@@ -379,7 +379,7 @@ An illustrative roles migration, not a command to recreate an existing table:
 ```js
 exports.up = (pgm) => {
   pgm.createTable('roles', {
-    id: { type: 'uuid', primaryKey: true },
+    id: { type: 'bigint', primaryKey: true, generated: 'BY DEFAULT AS IDENTITY' },
     code: { type: 'varchar(24)', notNull: true, unique: true },
   });
   pgm.sql(`
@@ -400,7 +400,7 @@ Rules:
 - Treat full SQL as a reference for a clean database. Convert the required portions into ordered migrations while preserving fields, constraints, indexes, composite FKs, functions and triggers.
 - Do not run the complete baseline after the old auth SQL in the same database.
 - Use pgm.sql or the migration API for PostgreSQL functions/triggers. Diagram-parser limitations are not grounds to remove database protections; use DBML for the diagram.
-- Keep UUID keys and snake_case names; do not silently replace UUID with SERIAL.
+- Keep internal entity identifiers as PostgreSQL-generated `BIGINT` identities and their references as `BIGINT`; preserve snake_case names and never renumber rows after deletion.
 - Preserve the reference role IDs when seeding the four roles; do not bootstrap privileged users from untrusted input.
 - Test clean up, safe rollback of the increment and reapplication in a disposable database with the intended test URL.
 - If deployment omits dev dependencies, provide node-pg-migrate in a migration stage or runtime dependencies where needed.
@@ -470,7 +470,7 @@ Use consistent status codes: 400 input error, 401 no valid session, 403 forbidde
 
 Use one global error handler. Match async error forwarding to the installed Express version; do not add an extra compatibility package automatically. Map expected constraint conflicts to stable domain errors without leaking SQL, constraint internals, stack traces or raw provider secrets.
 
-Validate UUIDs, E.164 phones, string lengths, allowed body properties, numeric ranges, enums, pagination and file contents/MIME. Follow the repository's existing validator; for a new project choose one small consistent approach instead of mixing several libraries.
+Validate internal IDs as canonical positive `BIGINT` decimal strings, E.164 phones, string lengths, allowed body properties, numeric ranges, enums, pagination and file contents/MIME. Never coerce database IDs through JavaScript `Number`. Follow the repository's existing validator; for a new project choose one small consistent approach instead of mixing several libraries.
 
 Authentication middleware calls the relevant service. It must not issue its own session SQL. Providers and jobs likewise call services instead of bypassing the required persistence boundary.
 
@@ -516,11 +516,11 @@ Use the existing subjects/sections/topics/translations and question_banks/questi
 
 Correctness is authored only in question_answer_keys. Do not add is_correct to options. content.blocks preserves text, emphasis, verse lines, formulas, chemistry, tables and images. The Tajik language code is tg. Translations are optional.
 
-Validate type-specific answer_data and ownership of referenced option/matching UUIDs before verification. AI-proposed answers are not verified keys. Unknown answers remain unknown and imported book questions remain draft. SQL publication triggers do not replace full input/JSON validation.
+Validate type-specific answer_data and ownership of referenced option/matching IDs before verification. AI-proposed answers are not verified keys. Unknown answers remain unknown and imported book questions remain draft. SQL publication triggers do not replace full input/JSON validation.
 
 Published questions, keys, options and tests are immutable; changes use copies. grading_snapshot is private historical grading evidence, not a second editable answer source or a student response field.
 
-When book import work begins, create its package-format documentation under the approved future `docs/imports/` location. That document does not currently exist. The future import service must validate manifest/schema/hashes/files/references, perform dry-run and produce reports. Repositories own staging, resolving external IDs, persistence and count queries. sourceNamespace/external asset IDs resolve through asset_aliases to UUIDs. Preserve unknown matching rules and do not replace null with false.
+When book import work begins, create its package-format documentation under the approved future `docs/imports/` location. That document does not currently exist. The future import service must validate manifest/schema/hashes/files/references, perform dry-run and produce reports. Repositories own staging, resolving external IDs, persistence and count queries. sourceNamespace/external asset IDs resolve through asset_aliases to internal numeric IDs. Preserve unknown matching rules and do not replace null with false.
 
 Resolve questions by bank_id plus external_id. Validate references before insertion; do not silently lose rows through INNER JOIN. Avoid unconditional ON CONFLICT updates to published, used or manually corrected records. Report input/insert/update/skip/error totals. ZIP processing must reject traversal and decompression abuse; never execute embedded SQL/scripts.
 
@@ -780,7 +780,7 @@ Keep error-handler.js in configs if preserving the supplied layout. Do not move 
 
 ## Database and migration workflow
 
-Read root `schema_tables.md` and the applied migrations. The baseline describes 81 tables but is not by itself proof that an API/server is implemented. Write incremental JavaScript node-pg-migrate migrations in src/migrations. Use UUID keys, TIMESTAMPTZ, NUMERIC/integer money units, parameterized queries, FK/UNIQUE/CHECK and appropriate indexes.
+Read root `schema_tables.md` and the applied migrations. The baseline describes 81 tables but is not by itself proof that an API/server is implemented. Write incremental JavaScript node-pg-migrate migrations in src/migrations. Use generated `BIGINT` entity keys, `BIGINT` references, TIMESTAMPTZ, NUMERIC/integer money units, parameterized queries, FK/UNIQUE/CHECK and appropriate indexes. UUID is reserved for reviewed opaque values such as idempotency keys.
 
 For a new DB, apply only migrations needed by the current increment. For an existing DB, inspect applied migrations/catalog and reconcile changes; never run the full baseline on top of existing auth tables. Preserve composite FKs tying module/course/enrollment and test/assignment/question/attempt.
 
