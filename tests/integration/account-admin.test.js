@@ -39,6 +39,11 @@ async function issueToken(client, userId) {
     'INSERT INTO auth_sessions (user_id, expires_at) VALUES ($1, $2) RETURNING id',
     [userId, expiresAt]
   );
+  await client.query(
+    `INSERT INTO auth_refresh_tokens (session_id, token_hash, expires_at)
+     VALUES ($1, $2, $3)`,
+    [session.rows[0].id, `account-admin-test-${session.rows[0].id}`, expiresAt]
+  );
   return createAccessToken({ userId, sessionId: session.rows[0].id, expiresAt }, secret);
 }
 
@@ -52,6 +57,7 @@ async function api(port, path, { method = 'GET', token } = {}) {
 async function cleanup(client) {
   if (!fixtureIds.length) return;
   await client.query('DELETE FROM audit_events WHERE subject_user_id = ANY($1::bigint[]) OR actor_user_id = ANY($1::bigint[])', [fixtureIds]);
+  await client.query('DELETE FROM auth_refresh_tokens WHERE session_id IN (SELECT id FROM auth_sessions WHERE user_id = ANY($1::bigint[]))', [fixtureIds]);
   await client.query('DELETE FROM auth_sessions WHERE user_id = ANY($1::bigint[])', [fixtureIds]);
   await client.query('DELETE FROM user_roles WHERE user_id = ANY($1::bigint[]) OR assigned_by = ANY($1::bigint[])', [fixtureIds]);
   await client.query('DELETE FROM user_phones WHERE user_id = ANY($1::bigint[])', [fixtureIds]);
@@ -181,6 +187,13 @@ test('account approval administration integration', async (t) => {
       assert.equal(unblocked.response.status, 200);
       const sessions = await client.query('SELECT count(*)::int AS count FROM auth_sessions WHERE user_id = $1 AND revoked_at IS NULL', [studentId]);
       assert.equal(sessions.rows[0].count, 0);
+      const refreshTokens = await client.query(
+        `SELECT count(*) FILTER (WHERE token.revoked_at IS NULL)::int AS live
+         FROM auth_refresh_tokens AS token JOIN auth_sessions AS session ON session.id = token.session_id
+         WHERE session.user_id = $1`,
+        [studentId]
+      );
+      assert.equal(refreshTokens.rows[0].live, 0);
       const audits = await client.query(
         `SELECT event_code FROM audit_events WHERE subject_user_id = ANY($1::bigint[])
          AND event_code LIKE 'admin.account.%'`,

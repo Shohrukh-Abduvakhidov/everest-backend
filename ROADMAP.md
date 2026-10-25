@@ -1,7 +1,7 @@
 ---
 project: EVEREST Backend
 roadmap_version: 1
-current_milestone: M02D
+current_milestone: M02E
 current_status: planned
 updated_at: 2026-10-25
 architecture: docs/architecture.md
@@ -87,11 +87,11 @@ This roadmap orders implementation; it does not replace the [current architectur
 
 ## M02D — Session lifecycle
 
-- **Status:** Planned — next milestone.
+- **Status:** Done.
 - **Goal:** Complete secure multi-device session management.
 - **Dependencies:** M02B; token/cookie decisions recorded before implementation.
 - **Deliverables:** Refresh tokens and rotation, reuse detection, logout, logout-all, session listing/revocation, device metadata, and last-used tracking.
-- **Verification:** Rotation races, replay/reuse response, revocation, expiry, logout idempotency, device ownership, safe serialization, and integration tests.
+- **Verification:** Unit and real-PostgreSQL integration tests passed rotation races, replay-family revocation, expiry, logout idempotency, ownership, safe serialization, blocking regression, and transaction rollback. The full regression suite passed.
 - **Documentation updates:** API, security decisions, architecture, progress, roadmap, and current handoff.
 - **Exclusions:** RBAC and password recovery.
 

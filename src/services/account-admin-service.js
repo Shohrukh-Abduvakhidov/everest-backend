@@ -69,6 +69,7 @@ function createAccountAdminService({ repository = accountAdminRepository, auth =
       if (current.status !== rule.from) throw new AppError(409, 'INVALID_ACCOUNT_TRANSITION', 'Account state transition is not allowed');
       const updated = await repository.updateAccountState({ userId, action, actorUserId }, client);
       const revokedSessions = action === 'block' ? await repository.revokeLiveSessions(userId, 'account_blocked', client) : 0;
+      if (action === 'block') await repository.revokeUserRefreshTokens(userId, client);
       await auth.appendAuditEvent({
         actorUserId, subjectUserId: userId, code: rule.event, entityType: 'user', entityId: userId,
         metadata: { fromStatus: rule.from, toStatus: rule.to, revokedSessions },

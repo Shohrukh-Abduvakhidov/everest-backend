@@ -1,6 +1,7 @@
 import env from '../configs/env.js';
 import * as authRepository from '../repositories/auth-repository.js';
 import { withTransaction } from '../repositories/transaction-repository.js';
+import * as sessionRepository from '../repositories/session-repository.js';
 import AppError from '../utils/app-error.js';
 import {
   createPkcePair,
@@ -147,6 +148,7 @@ function createTelegramAuthService({
       });
       return {
         status: 'authenticated', accessToken: session.accessToken, expiresAt: session.expiresAt,
+        refreshToken: session.refreshToken, refreshExpiresAt: session.refreshExpiresAt,
         user: { id: identity.user_id }, messagingConnected,
       };
     });
@@ -184,6 +186,7 @@ function createTelegramAuthService({
     if (!session || session.status !== 'active') {
       throw new AppError(401, 'SESSION_INVALID', 'Session is invalid or expired');
     }
+    await sessionRepository.touchSessionLastUsed(session.id);
     return { userId: session.user_id, sessionId: session.id };
   }
 

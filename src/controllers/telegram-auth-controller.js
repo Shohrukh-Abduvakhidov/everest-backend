@@ -1,5 +1,6 @@
 import env from '../configs/env.js';
 import { telegramAuthService } from '../services/telegram-auth-service.js';
+import { setAuthCookies } from '../utils/auth-cookies.js';
 
 function createTelegramAuthController(service = telegramAuthService) {
   async function start(_request, response) {
@@ -15,15 +16,9 @@ function createTelegramAuthController(service = telegramAuthService) {
       requestContext: { ipAddress: request.ip, userAgent: request.get('user-agent') },
     });
     if (result.accessToken) {
-      response.cookie('everest_access', result.accessToken, {
-        httpOnly: true,
-        secure: env.nodeEnv === 'production',
-        sameSite: 'lax',
-        expires: result.expiresAt,
-        path: '/',
-      });
+      setAuthCookies(response, result, env);
     }
-    const { accessToken: _accessToken, ...safeResult } = result;
+    const { accessToken: _accessToken, refreshToken: _refreshToken, ...safeResult } = result;
     response.json({ data: safeResult });
   }
 

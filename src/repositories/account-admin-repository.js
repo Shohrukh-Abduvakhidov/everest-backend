@@ -81,6 +81,16 @@ async function revokeLiveSessions(userId, reason, client) {
   return result.rowCount;
 }
 
+async function revokeUserRefreshTokens(userId, client) {
+  await client.query(
+    `UPDATE auth_refresh_tokens AS token SET revoked_at = COALESCE(token.revoked_at, CURRENT_TIMESTAMP)
+     FROM auth_sessions AS session
+     WHERE token.session_id = session.id AND session.user_id = $1
+       AND token.revoked_at IS NULL`,
+    [normalizeInternalId(userId)]
+  );
+}
+
 async function lockOwnerBootstrap(client) {
   await client.query("SELECT pg_advisory_xact_lock(hashtextextended('everest.owner-bootstrap', 0))");
 }
@@ -124,4 +134,5 @@ export {
   activateBootstrapOwner, assignOwnerRole, findOwnerAssignment, findUserByPhoneForUpdate,
   findUserForUpdate, hasAdministratorRole, listPendingUsers, lockOwnerBootstrap,
   revokeLiveSessions, updateAccountState,
+  revokeUserRefreshTokens,
 };

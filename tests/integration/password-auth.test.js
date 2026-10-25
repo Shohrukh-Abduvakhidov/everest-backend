@@ -30,6 +30,10 @@ async function request(port, path, body) {
 async function removeFixtures(client) {
   if (fixtureUserIds.length === 0) return;
   await client.query('DELETE FROM audit_events WHERE subject_user_id = ANY($1::bigint[])', [fixtureUserIds]);
+  await client.query(
+    'DELETE FROM auth_refresh_tokens WHERE session_id IN (SELECT id FROM auth_sessions WHERE user_id = ANY($1::bigint[]))',
+    [fixtureUserIds]
+  );
   await client.query('DELETE FROM auth_sessions WHERE user_id = ANY($1::bigint[])', [fixtureUserIds]);
   await client.query('DELETE FROM user_roles WHERE user_id = ANY($1::bigint[])', [fixtureUserIds]);
   await client.query('DELETE FROM user_passwords WHERE user_id = ANY($1::bigint[])', [fixtureUserIds]);
@@ -214,7 +218,9 @@ test('password registration and login integration', async (t) => {
       assert.equal(loggedIn.body.data.user.id, userId);
       assert.match(loggedIn.body.data.user.id, /^[1-9][0-9]*$/);
       assert.equal('accessToken' in loggedIn.body.data, false);
+      assert.equal('refreshToken' in loggedIn.body.data, false);
       assert.match(loggedIn.response.headers.get('set-cookie'), /^everest_access=.*HttpOnly.*SameSite=Lax/i);
+      assert.match(loggedIn.response.headers.get('set-cookie'), /everest_refresh=.*HttpOnly.*SameSite=Lax/i);
 
       const stored = await client.query(
         `SELECT account.last_login_at, session.user_agent, audit.event_code

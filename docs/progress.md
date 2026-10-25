@@ -4,7 +4,17 @@ Updated: 2026-10-25.
 
 ## Current increment
 
-Milestone M02C: account approval administration. Implementation, tests, and documentation are complete on `feat/m02c-account-approval`; M02D session lifecycle is next.
+Milestone M02D: secure multi-device session lifecycle. Implementation and verification are complete on `feat/m02d-session-lifecycle`; M02E password recovery is next and requires provider/limit decisions before SMS work.
+
+## 2026-10-25 — M02D session lifecycle
+
+- Added shared refresh-token issuance to password and Telegram login, opaque hash-only storage, atomic single-use rotation, and session-family reuse detection.
+- Added refresh, current logout, logout-all, session list, and owned-session revocation routes with matching HttpOnly cookie handling.
+- Added coarse device summaries, bounded User-Agent storage reuse, throttled access activity updates, and refresh-time `last_used_at` updates.
+- Extended M02C blocking so associated refresh rows are explicitly revoked with sessions.
+- No migration was required; the existing refresh/session schema supports the session-as-family strategy.
+- Added focused unit and real-PostgreSQL integration coverage for issuance, expiry/revocation, rotation, replay races, rollback, ownership, logout, metadata safety, and blocking regression.
+- Repeated up migrations were no-ops; the full test suite, catalog verification, exact migration-source verification, syntax, architecture-boundary, secret/ignore, and documentation checks passed. No migration or schema change was needed.
 
 ## 2026-10-25 — M02C account approval
 

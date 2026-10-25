@@ -200,7 +200,9 @@ test('Telegram start/callback/link/replay/validation/unlink integration', async 
       assert.equal(loginCallback.body.data.user.id, first.userId);
       assert.match(loginCallback.body.data.user.id, /^[1-9][0-9]*$/);
       assert.match(loginCallback.response.headers.get('set-cookie'), /^everest_access=/);
+      assert.match(loginCallback.response.headers.get('set-cookie'), /everest_refresh=/);
       assert.equal(JSON.stringify(loginCallback.body).includes('accessToken'), false);
+      assert.equal(JSON.stringify(loginCallback.body).includes('refreshToken'), false);
 
       await client.query("UPDATE users SET status = 'blocked', blocked_at = CURRENT_TIMESTAMP WHERE id = $1", [first.userId]);
       const blockedLoginStart = await request(port, '/api/v1/auth/telegram/start');
@@ -254,6 +256,10 @@ test('Telegram start/callback/link/replay/validation/unlink integration', async 
       await client.query('DELETE FROM telegram_connections WHERE user_id = ANY($1::bigint[])', [fixtureUserIds]);
       await client.query('DELETE FROM auth_identities WHERE user_id = ANY($1::bigint[])', [fixtureUserIds]);
       await client.query('DELETE FROM telegram_oidc_states WHERE state_hash = ANY($1::text[])', [fixtureStateHashes]);
+      await client.query(
+        'DELETE FROM auth_refresh_tokens WHERE session_id IN (SELECT id FROM auth_sessions WHERE user_id = ANY($1::bigint[]))',
+        [fixtureUserIds]
+      );
       await client.query('DELETE FROM auth_sessions WHERE user_id = ANY($1::bigint[])', [fixtureUserIds]);
       await client.query('DELETE FROM user_passwords WHERE user_id = ANY($1::bigint[])', [fixtureUserIds]);
       await client.query('DELETE FROM users WHERE id = ANY($1::bigint[])', [fixtureUserIds]);

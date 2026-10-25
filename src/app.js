@@ -7,13 +7,16 @@ import { createRoutes } from './routes/index.js';
 import { passwordAuthService } from './services/password-auth-service.js';
 import { telegramAuthService } from './services/telegram-auth-service.js';
 
-function createApp(service = telegramAuthService, passwordService = passwordAuthService, adminService) {
+function createApp(
+  service = telegramAuthService, passwordService = passwordAuthService,
+  adminService, lifecycleService
+) {
   const app = express();
 
   app.disable('x-powered-by');
   app.use(cors({ origin: env.corsOrigins, credentials: true }));
   app.use(express.json({ limit: '1mb' }));
-  app.use('/api/v1', createRoutes(service, passwordService, adminService));
+  app.use('/api/v1', createRoutes(service, passwordService, adminService, lifecycleService));
   app.use(notFoundHandler);
   app.use(errorHandler);
   return app;
