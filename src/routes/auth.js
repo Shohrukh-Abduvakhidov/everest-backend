@@ -1,15 +1,20 @@
 import express from 'express';
 
+import { createPasswordAuthController } from '../controllers/password-auth-controller.js';
 import { createTelegramAuthController } from '../controllers/telegram-auth-controller.js';
 import { createAuthMiddleware } from '../middleware/auth-middleware.js';
+import { passwordAuthService } from '../services/password-auth-service.js';
 import { telegramAuthService } from '../services/telegram-auth-service.js';
 import asyncHandler from '../utils/async-handler.js';
 
-function createAuthRouter(service = telegramAuthService) {
+function createAuthRouter(service = telegramAuthService, passwordService = passwordAuthService) {
   const router = express.Router();
   const controller = createTelegramAuthController(service);
+  const passwordController = createPasswordAuthController(passwordService);
   const authenticate = createAuthMiddleware(service);
 
+  router.post('/register', asyncHandler(passwordController.register));
+  router.post('/login/password', asyncHandler(passwordController.login));
   router.get('/telegram/start', asyncHandler(controller.start));
   router.get('/telegram/callback', asyncHandler(controller.callback));
   router.post('/telegram/link', authenticate, asyncHandler(controller.link));

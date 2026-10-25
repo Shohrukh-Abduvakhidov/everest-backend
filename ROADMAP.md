@@ -1,7 +1,7 @@
 ---
 project: EVEREST Backend
 roadmap_version: 1
-current_milestone: M02B
+current_milestone: M02C
 current_status: planned
 updated_at: 2026-10-25
 architecture: docs/architecture.md
@@ -53,7 +53,7 @@ This roadmap orders implementation; it does not replace the [current architectur
 
 ## M02B — Phone and password registration/login
 
-- **Status:** Planned — next milestone.
+- **Status:** Done.
 - **Goal:** Add safe pending-student registration and active-account password login while reusing the existing session boundary.
 - **Dependencies:** M00–M02A; existing `users`, profile, phone, password, role, session, and audit tables.
 - **Deliverables:**
@@ -61,13 +61,13 @@ This roadmap orders implementation; it does not replace the [current architectur
   - E.164 normalization/validation and password validation/hashing.
   - One transaction creating user, profile, phone, password, default student role, pending status, and audit evidence.
   - Active-only password login, existing `auth_sessions`/access-token reuse, duplicate and concurrent-phone protection, and safe non-enumerating errors.
-- **Verification:** Unit and PostgreSQL integration coverage for validation, hashes, success, rollback, duplicate/concurrent registration, account statuses, bad credentials, session issuance, audit, and response/log secrecy.
-- **Documentation updates:** Update roadmap, current handoff, progress, API, architecture, and decisions only where implementation or an accepted choice changes them.
+- **Verification:** Password/input unit tests and real-PostgreSQL integration tests passed for validation, hashes, success, rollback, duplicate/concurrent registration, account statuses, bad credentials, session issuance, audit, and response secrecy. The full regression suite passed.
+- **Documentation updates:** API, decisions, architecture, progress, roadmap, and current handoff record the implemented behavior.
 - **Exclusions:** SMS, OTP, approval endpoints, refresh rotation, logout, recovery, RBAC, rate limiting, and unrelated domains.
 
 ## M02C — Account approval
 
-- **Status:** Planned.
+- **Status:** Planned — next milestone.
 - **Goal:** Give authorized administrators a controlled account-state workflow.
 - **Dependencies:** M02B plus a minimal authenticated administrator-role guard scoped to these endpoints; generalized authorization remains M02F.
 - **Deliverables:** Pending-user list; approve, reject, block, and unblock transitions; administrator audit; atomic session revocation when blocking.

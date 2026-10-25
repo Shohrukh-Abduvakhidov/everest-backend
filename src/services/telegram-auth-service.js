@@ -13,7 +13,8 @@ import {
 } from '../utils/telegram-crypto.js';
 import { TelegramBotProvider } from './auth/telegram-bot-provider.js';
 import { expectedIssuer, TelegramOidcProvider } from './auth/telegram-oidc-provider.js';
-import { createAccessToken, verifyAccessToken } from './auth/session-token-service.js';
+import { createSessionService } from './auth/session-service.js';
+import { verifyAccessToken } from './auth/session-token-service.js';
 
 function requireConfiguration(config) {
   const values = [config.telegram.clientId, config.telegram.clientSecret,
@@ -50,6 +51,7 @@ function createTelegramAuthService({
   oidcProvider = new TelegramOidcProvider(config.telegram),
   botProvider = new TelegramBotProvider(config.telegram),
   now = () => new Date(),
+  sessions = createSessionService({ config, repository, now }),
 } = {}) {
   async function beginTelegramAuthorization({ intent, userId = null }) {
     requireConfiguration(config);
@@ -145,20 +147,11 @@ function createTelegramAuthService({
       const messagingConnected = await saveConnectionIfGranted({
         userId: identity.user_id, claims, tokenSet, client,
       });
-      const expiresAt = new Date(now().getTime() + config.authSessionTtlSeconds * 1000);
-      const sessionId = randomUUID();
-      await repository.createSession({
-        id: sessionId,
-        userId: identity.user_id,
-        expiresAt,
-        userAgent: requestContext.userAgent?.slice(0, 1000) || null,
-        ipAddress: requestContext.ipAddress || null,
-      }, client);
-      const accessToken = await createAccessToken({
-        userId: identity.user_id, sessionId, expiresAt,
-      }, config.jwtAccessSecret);
+      const session = await sessions.issueSession({
+        userId: identity.user_id, requestContext, client,
+      });
       return {
-        status: 'authenticated', accessToken, expiresAt,
+        status: 'authenticated', accessToken: session.accessToken, expiresAt: session.expiresAt,
         user: { id: identity.user_id }, messagingConnected,
       };
     });

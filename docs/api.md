@@ -28,6 +28,65 @@ Unexpected errors use the stable response shape below and do not expose SQL, cre
 {"error":{"code":"INTERNAL_ERROR","message":"Internal server error","details":[]}}
 ```
 
+## Phone and password authentication
+
+### `POST /api/v1/auth/register`
+
+Creates a pending student account. The request accepts only:
+
+```json
+{
+  "phone": "+992900000000",
+  "password": "a secure password 9",
+  "firstName": "Student",
+  "lastName": "Example"
+}
+```
+
+Phone input may contain spaces, hyphens, and parentheses but must normalize to an E.164 number with 8–15 digits. Passwords must contain 12–128 Unicode characters, at least one letter, and at least one number. Names are trimmed and must contain 1–100 characters. Unknown fields are rejected; a client cannot select its role or account status.
+
+Response `201`:
+
+```json
+{
+  "data": {
+    "status": "pending",
+    "user": {
+      "id": "00000000-0000-0000-0000-000000000000",
+      "status": "pending",
+      "firstName": "Student",
+      "lastName": "Example",
+      "phone": "+992900000000"
+    }
+  }
+}
+```
+
+The user, profile, unverified phone, `scrypt` password hash, student role, and audit event are created in one transaction. Registration does not verify the phone and does not issue a session. Duplicate phones return `409 PHONE_ALREADY_REGISTERED`; concurrent registration is protected by the database uniqueness constraint. Validation failures return `400 VALIDATION_ERROR`.
+
+### `POST /api/v1/auth/login/password`
+
+```json
+{
+  "phone": "+992900000000",
+  "password": "a secure password 9"
+}
+```
+
+Successful response `200` requires an active account, creates an auditable server-side session, updates `last_login_at`, and sets the access JWT in the same `HttpOnly`, `SameSite=Lax` `everest_access` cookie used by Telegram login. The token is omitted from JSON:
+
+```json
+{
+  "data": {
+    "status": "authenticated",
+    "expiresAt": "2026-10-25T12:15:00.000Z",
+    "user": { "id": "00000000-0000-0000-0000-000000000000" }
+  }
+}
+```
+
+An unknown phone or incorrect password returns the same `401 INVALID_CREDENTIALS` response and performs a password-hash verification in either case. Pending, blocked, and rejected accounts return the same `403 ACCOUNT_NOT_ACTIVE` response after valid credentials. Password hashes and access tokens never appear in JSON.
+
 ## Telegram authentication
 
 Telegram authentication uses OpenID Connect Authorization Code Flow with PKCE. The server obtains provider endpoints from Telegram discovery metadata. Clients must not submit Telegram profile fields as proof of identity.
