@@ -1,5 +1,13 @@
-import pool from '../configs/db.js';
-import { normalizeInternalId } from '../utils/internal-id.js';
+import pool from '../configs/db.js'
+import { normalizeInternalId } from '../utils/internal-id.js'
+
+const accountStateAssignments = {
+  approve: `status = 'active', approved_by = $2, approved_at = CURRENT_TIMESTAMP,
+    blocked_by = NULL, blocked_at = NULL`,
+  reject: `status = 'rejected'`,
+  block: `status = 'blocked', blocked_by = $2, blocked_at = CURRENT_TIMESTAMP`,
+  unblock: `status = 'active', blocked_by = NULL, blocked_at = NULL`,
+}
 
 async function hasAdministratorRole(userId, db = pool) {
   const result = await db.query(
@@ -9,8 +17,8 @@ async function hasAdministratorRole(userId, db = pool) {
        WHERE membership.user_id = $1 AND role.code IN ('owner', 'admin')
      ) AS allowed`,
     [normalizeInternalId(userId)]
-  );
-  return result.rows[0].allowed;
+  )
+  return result.rows[0].allowed
 }
 
 async function listPendingUsers({ limit, offset }, db = pool) {
@@ -30,8 +38,8 @@ async function listPendingUsers({ limit, offset }, db = pool) {
      ORDER BY account.created_at, account.id
      LIMIT $1 OFFSET $2`,
     [limit + 1, offset]
-  );
-  return result.rows;
+  )
+  return result.rows
 }
 
 async function findUserForUpdate(userId, client) {
@@ -50,26 +58,24 @@ async function findUserForUpdate(userId, client) {
      WHERE account.id = $1
      FOR UPDATE OF account`,
     [normalizeInternalId(userId)]
-  );
-  return result.rows[0] || null;
+  )
+  return result.rows[0] || null
 }
 
 async function updateAccountState({ userId, action, actorUserId }, client) {
-  const assignments = {
-    approve: "status = 'active', approved_by = $2, approved_at = CURRENT_TIMESTAMP, blocked_by = NULL, blocked_at = NULL",
-    reject: "status = 'rejected'",
-    block: "status = 'blocked', blocked_by = $2, blocked_at = CURRENT_TIMESTAMP",
-    unblock: "status = 'active', blocked_by = NULL, blocked_at = NULL",
-  };
+  const assignment = accountStateAssignments[action]
+  const values = ['approve', 'block'].includes(action)
+    ? [normalizeInternalId(userId), normalizeInternalId(actorUserId)]
+    : [normalizeInternalId(userId)]
+
   const result = await client.query(
-    `UPDATE users SET ${assignments[action]}, updated_at = CURRENT_TIMESTAMP
+    `UPDATE users SET ${assignment}, updated_at = CURRENT_TIMESTAMP
      WHERE id = $1
      RETURNING id, status, approved_by, approved_at, blocked_by, blocked_at, updated_at`,
-    ['approve', 'block'].includes(action)
-      ? [normalizeInternalId(userId), normalizeInternalId(actorUserId)]
-      : [normalizeInternalId(userId)]
-  );
-  return result.rows[0];
+    values
+  )
+
+  return result.rows[0]
 }
 
 async function revokeLiveSessions(userId, reason, client) {
@@ -77,8 +83,8 @@ async function revokeLiveSessions(userId, reason, client) {
     `UPDATE auth_sessions SET revoked_at = CURRENT_TIMESTAMP, revoke_reason = $2
      WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP`,
     [normalizeInternalId(userId), reason]
-  );
-  return result.rowCount;
+  )
+  return result.rowCount
 }
 
 async function revokeUserRefreshTokens(userId, client) {
@@ -88,11 +94,13 @@ async function revokeUserRefreshTokens(userId, client) {
      WHERE token.session_id = session.id AND session.user_id = $1
        AND token.revoked_at IS NULL`,
     [normalizeInternalId(userId)]
-  );
+  )
 }
 
 async function lockOwnerBootstrap(client) {
-  await client.query("SELECT pg_advisory_xact_lock(hashtextextended('everest.owner-bootstrap', 0))");
+  await client.query(
+    `SELECT pg_advisory_xact_lock(hashtextextended('everest.owner-bootstrap', 0))`
+  )
 }
 
 async function findOwnerAssignment(client) {
@@ -100,8 +108,8 @@ async function findOwnerAssignment(client) {
     `SELECT membership.user_id FROM user_roles AS membership
      JOIN roles AS role ON role.id = membership.role_id
      WHERE role.code = 'owner' LIMIT 1`
-  );
-  return result.rows[0] || null;
+  )
+  return result.rows[0] || null
 }
 
 async function findUserByPhoneForUpdate(phoneE164, client) {
@@ -110,8 +118,8 @@ async function findUserByPhoneForUpdate(phoneE164, client) {
      JOIN users AS account ON account.id = phone.user_id
      WHERE phone.phone_e164 = $1 FOR UPDATE OF account`,
     [phoneE164]
-  );
-  return result.rows[0] || null;
+  )
+  return result.rows[0] || null
 }
 
 async function activateBootstrapOwner(userId, client) {
@@ -119,7 +127,7 @@ async function activateBootstrapOwner(userId, client) {
     `UPDATE users SET status = 'active', blocked_by = NULL, blocked_at = NULL,
        updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
     [normalizeInternalId(userId)]
-  );
+  )
 }
 
 async function assignOwnerRole(userId, client) {
@@ -127,12 +135,19 @@ async function assignOwnerRole(userId, client) {
     `INSERT INTO user_roles (user_id, role_id)
      SELECT $1, id FROM roles WHERE code = 'owner'`,
     [normalizeInternalId(userId)]
-  );
+  )
 }
 
 export {
-  activateBootstrapOwner, assignOwnerRole, findOwnerAssignment, findUserByPhoneForUpdate,
-  findUserForUpdate, hasAdministratorRole, listPendingUsers, lockOwnerBootstrap,
-  revokeLiveSessions, updateAccountState,
+  activateBootstrapOwner,
+  assignOwnerRole,
+  findOwnerAssignment,
+  findUserByPhoneForUpdate,
+  findUserForUpdate,
+  hasAdministratorRole,
+  listPendingUsers,
+  lockOwnerBootstrap,
   revokeUserRefreshTokens,
-};
+  revokeLiveSessions,
+  updateAccountState,
+}
