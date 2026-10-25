@@ -29,13 +29,13 @@ async function request(port, path, body) {
 
 async function removeFixtures(client) {
   if (fixtureUserIds.length === 0) return;
-  await client.query('DELETE FROM audit_events WHERE subject_user_id = ANY($1::uuid[])', [fixtureUserIds]);
-  await client.query('DELETE FROM auth_sessions WHERE user_id = ANY($1::uuid[])', [fixtureUserIds]);
-  await client.query('DELETE FROM user_roles WHERE user_id = ANY($1::uuid[])', [fixtureUserIds]);
-  await client.query('DELETE FROM user_passwords WHERE user_id = ANY($1::uuid[])', [fixtureUserIds]);
-  await client.query('DELETE FROM user_phones WHERE user_id = ANY($1::uuid[])', [fixtureUserIds]);
-  await client.query('DELETE FROM user_profiles WHERE user_id = ANY($1::uuid[])', [fixtureUserIds]);
-  await client.query('DELETE FROM users WHERE id = ANY($1::uuid[])', [fixtureUserIds]);
+  await client.query('DELETE FROM audit_events WHERE subject_user_id = ANY($1::bigint[])', [fixtureUserIds]);
+  await client.query('DELETE FROM auth_sessions WHERE user_id = ANY($1::bigint[])', [fixtureUserIds]);
+  await client.query('DELETE FROM user_roles WHERE user_id = ANY($1::bigint[])', [fixtureUserIds]);
+  await client.query('DELETE FROM user_passwords WHERE user_id = ANY($1::bigint[])', [fixtureUserIds]);
+  await client.query('DELETE FROM user_phones WHERE user_id = ANY($1::bigint[])', [fixtureUserIds]);
+  await client.query('DELETE FROM user_profiles WHERE user_id = ANY($1::bigint[])', [fixtureUserIds]);
+  await client.query('DELETE FROM users WHERE id = ANY($1::bigint[])', [fixtureUserIds]);
 }
 
 test('password registration and login integration', async (t) => {
@@ -108,6 +108,7 @@ test('password registration and login integration', async (t) => {
       assert.equal(JSON.stringify(registered.body).includes(password), false);
       assert.equal(JSON.stringify(registered.body).includes('scrypt$'), false);
       userId = registered.body.data.user.id;
+      assert.match(userId, /^[1-9][0-9]*$/);
       fixtureUserIds.push(userId);
 
       const stored = await client.query(
@@ -211,6 +212,7 @@ test('password registration and login integration', async (t) => {
       assert.equal(loggedIn.response.status, 200);
       assert.equal(loggedIn.body.data.status, 'authenticated');
       assert.equal(loggedIn.body.data.user.id, userId);
+      assert.match(loggedIn.body.data.user.id, /^[1-9][0-9]*$/);
       assert.equal('accessToken' in loggedIn.body.data, false);
       assert.match(loggedIn.response.headers.get('set-cookie'), /^everest_access=.*HttpOnly.*SameSite=Lax/i);
 

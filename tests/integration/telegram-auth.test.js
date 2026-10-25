@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 
 import pg from 'pg';
@@ -73,16 +72,18 @@ class MockBotProvider {
 }
 
 async function createUser(client) {
-  const userId = randomUUID();
-  fixtureUserIds.push(userId);
-  await client.query('INSERT INTO users (id, status) VALUES ($1, $2)', [userId, 'active']);
-  await client.query('INSERT INTO user_passwords (user_id, password_hash) VALUES ($1, $2)', [userId, 'test-hash']);
-  const sessionId = randomUUID();
-  const expiresAt = new Date(Date.now() + 900000);
-  await client.query(
-    'INSERT INTO auth_sessions (id, user_id, expires_at) VALUES ($1, $2, $3)',
-    [sessionId, userId, expiresAt]
+  const user = await client.query(
+    "INSERT INTO users (status) VALUES ('active') RETURNING id"
   );
+  const userId = user.rows[0].id;
+  fixtureUserIds.push(userId);
+  await client.query('INSERT INTO user_passwords (user_id, password_hash) VALUES ($1, $2)', [userId, 'test-hash']);
+  const expiresAt = new Date(Date.now() + 900000);
+  const session = await client.query(
+    'INSERT INTO auth_sessions (user_id, expires_at) VALUES ($1, $2) RETURNING id',
+    [userId, expiresAt]
+  );
+  const sessionId = session.rows[0].id;
   const token = await createAccessToken({ userId, sessionId, expiresAt }, testConfig.jwtAccessSecret);
   return { userId, token };
 }
@@ -196,6 +197,8 @@ test('Telegram start/callback/link/replay/validation/unlink integration', async 
         `/api/v1/auth/telegram/callback?code=shared-subject&state=${encodeURIComponent(stateFrom(loginStart.body))}`
       );
       assert.equal(loginCallback.body.data.status, 'authenticated');
+      assert.equal(loginCallback.body.data.user.id, first.userId);
+      assert.match(loginCallback.body.data.user.id, /^[1-9][0-9]*$/);
       assert.match(loginCallback.response.headers.get('set-cookie'), /^everest_access=/);
       assert.equal(JSON.stringify(loginCallback.body).includes('accessToken'), false);
 
@@ -237,13 +240,13 @@ test('Telegram start/callback/link/replay/validation/unlink integration', async 
   } finally {
     await new Promise((resolve) => server.close(resolve));
     if (fixtureUserIds.length) {
-      await client.query('DELETE FROM audit_events WHERE actor_user_id = ANY($1::uuid[])', [fixtureUserIds]);
-      await client.query('DELETE FROM telegram_connections WHERE user_id = ANY($1::uuid[])', [fixtureUserIds]);
-      await client.query('DELETE FROM auth_identities WHERE user_id = ANY($1::uuid[])', [fixtureUserIds]);
+      await client.query('DELETE FROM audit_events WHERE actor_user_id = ANY($1::bigint[])', [fixtureUserIds]);
+      await client.query('DELETE FROM telegram_connections WHERE user_id = ANY($1::bigint[])', [fixtureUserIds]);
+      await client.query('DELETE FROM auth_identities WHERE user_id = ANY($1::bigint[])', [fixtureUserIds]);
       await client.query('DELETE FROM telegram_oidc_states WHERE state_hash = ANY($1::text[])', [fixtureStateHashes]);
-      await client.query('DELETE FROM auth_sessions WHERE user_id = ANY($1::uuid[])', [fixtureUserIds]);
-      await client.query('DELETE FROM user_passwords WHERE user_id = ANY($1::uuid[])', [fixtureUserIds]);
-      await client.query('DELETE FROM users WHERE id = ANY($1::uuid[])', [fixtureUserIds]);
+      await client.query('DELETE FROM auth_sessions WHERE user_id = ANY($1::bigint[])', [fixtureUserIds]);
+      await client.query('DELETE FROM user_passwords WHERE user_id = ANY($1::bigint[])', [fixtureUserIds]);
+      await client.query('DELETE FROM users WHERE id = ANY($1::bigint[])', [fixtureUserIds]);
     } else {
       await client.query('DELETE FROM telegram_oidc_states WHERE state_hash = ANY($1::text[])', [fixtureStateHashes]);
     }

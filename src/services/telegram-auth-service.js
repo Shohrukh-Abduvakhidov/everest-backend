@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto';
-
 import env from '../configs/env.js';
 import * as authRepository from '../repositories/auth-repository.js';
 import { withTransaction } from '../repositories/transaction-repository.js';
@@ -63,7 +61,6 @@ function createTelegramAuthService({
     const { verifier, challenge } = createPkcePair();
     const expiresAt = new Date(now().getTime() + config.telegramOidcStateTtlSeconds * 1000);
     await repository.createTelegramOidcState({
-      id: randomUUID(),
       stateHash: sha256Hex(state),
       nonceHash: sha256Hex(nonce),
       codeVerifierCiphertext: encryptStateSecret(verifier, config.telegram.clientSecret),
@@ -79,7 +76,7 @@ function createTelegramAuthService({
     const chatId = verifiedChatId(claims);
     if (!botAccessGranted(tokenSet) || !chatId) return false;
     await repository.upsertTelegramConnection({
-      id: randomUUID(), userId, botId: config.telegram.clientId, chatId,
+      userId, botId: config.telegram.clientId, chatId,
     }, client);
     return true;
   }
@@ -101,7 +98,6 @@ function createTelegramAuthService({
         }
 
         const identity = linkedIdentity || currentIdentity || await repository.createTelegramIdentity({
-          id: randomUUID(),
           userId: stateRow.initiating_user_id,
           issuer: expectedIssuer,
           subject: claims.sub,
@@ -112,7 +108,6 @@ function createTelegramAuthService({
           userId: stateRow.initiating_user_id, claims, tokenSet, client,
         });
         await repository.appendAuditEvent({
-          id: randomUUID(),
           actorUserId: stateRow.initiating_user_id,
           subjectUserId: stateRow.initiating_user_id,
           code: 'auth.telegram.linked',
@@ -203,7 +198,7 @@ function createTelegramAuthService({
       await repository.disconnectTelegramConnection(userId, config.telegram.clientId, client);
       await repository.deleteTelegramIdentity(identity.id, client);
       await repository.appendAuditEvent({
-        id: randomUUID(), actorUserId: userId, subjectUserId: userId,
+        actorUserId: userId, subjectUserId: userId,
         code: 'auth.telegram.unlinked', entityType: 'auth_identity',
         entityId: identity.id, metadata: {},
       }, client);

@@ -26,10 +26,24 @@ try {
     host: env.database.host,
     port: env.database.port,
     database: result.database_name,
+    user: env.database.user,
     serverVersion: result.server_version,
     applicationTables: result.application_tables,
     hasMigrationHistory: result.has_migration_history,
   };
+
+  const tables = await client.query(`
+    SELECT tablename
+    FROM pg_tables
+    WHERE schemaname = 'public'
+    ORDER BY tablename
+  `);
+  output.tableRowCounts = {};
+  for (const { tablename } of tables.rows) {
+    const quotedTable = `"${tablename.replaceAll('"', '""')}"`;
+    const count = await client.query(`SELECT count(*)::text AS count FROM ${quotedTable}`);
+    output.tableRowCounts[tablename] = count.rows[0].count;
+  }
 
   if (result.has_migration_history) {
     const migrations = await client.query('SELECT name FROM pgmigrations ORDER BY id');

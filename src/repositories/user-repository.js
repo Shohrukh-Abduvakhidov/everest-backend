@@ -1,45 +1,51 @@
 import pool from '../configs/db.js';
+import { normalizeInternalId } from '../utils/internal-id.js';
 
-async function createPendingUser(userId, client) {
+async function createPendingUser(client) {
   const result = await client.query(
-    `INSERT INTO users (id, status)
-     VALUES ($1, 'pending')
-     RETURNING id, status, created_at`,
-    [userId]
+    `INSERT INTO users (status)
+     VALUES ('pending')
+     RETURNING id, status, created_at`
   );
   return result.rows[0];
 }
 
 async function createProfile(profile, client) {
+  const userId = normalizeInternalId(profile.userId);
   await client.query(
     `INSERT INTO user_profiles (user_id, first_name, last_name)
      VALUES ($1, $2, $3)`,
-    [profile.userId, profile.firstName, profile.lastName]
+    [userId, profile.firstName, profile.lastName]
   );
 }
 
 async function createPhone(phone, client) {
-  await client.query(
-    `INSERT INTO user_phones (id, user_id, phone_e164, is_primary)
-     VALUES ($1, $2, $3, FALSE)`,
-    [phone.id, phone.userId, phone.phoneE164]
+  const userId = normalizeInternalId(phone.userId);
+  const result = await client.query(
+    `INSERT INTO user_phones (user_id, phone_e164, is_primary)
+     VALUES ($1, $2, FALSE)
+     RETURNING id`,
+    [userId, phone.phoneE164]
   );
+  return result.rows[0];
 }
 
 async function createPassword(userId, passwordHash, client) {
+  const normalizedUserId = normalizeInternalId(userId);
   await client.query(
     `INSERT INTO user_passwords (user_id, password_hash)
      VALUES ($1, $2)`,
-    [userId, passwordHash]
+    [normalizedUserId, passwordHash]
   );
 }
 
 async function assignRole(userId, roleCode, client) {
+  const normalizedUserId = normalizeInternalId(userId);
   const result = await client.query(
     `INSERT INTO user_roles (user_id, role_id)
      SELECT $1, id FROM roles WHERE code = $2
      RETURNING role_id`,
-    [userId, roleCode]
+    [normalizedUserId, roleCode]
   );
   if (result.rowCount !== 1) throw new Error('Required role is not configured');
 }
@@ -70,11 +76,12 @@ async function findPasswordAccountForUpdate(phoneE164, client) {
 }
 
 async function touchLastLogin(userId, client) {
+  const normalizedUserId = normalizeInternalId(userId);
   await client.query(
     `UPDATE users
      SET last_login_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
      WHERE id = $1`,
-    [userId]
+    [normalizedUserId]
   );
 }
 

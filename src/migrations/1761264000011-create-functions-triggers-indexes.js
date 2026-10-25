@@ -21,7 +21,7 @@ CREATE INDEX idempotency_expiry_idx ON idempotency_keys(expires_at);
 
 -- Эффективный доступ. Вызывать с user_id из серверной сессии, а не из тела запроса.
 -- Проверка сессии и полномочий администратора/преподавателя выполняется отдельно.
-CREATE FUNCTION can_access_module(p_user UUID, p_module UUID, p_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)
+CREATE FUNCTION can_access_module(p_user BIGINT, p_module BIGINT, p_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)
 RETURNS BOOLEAN LANGUAGE SQL STABLE AS $$
  SELECT EXISTS (
   SELECT 1 FROM users u
@@ -37,7 +37,7 @@ RETURNS BOOLEAN LANGUAGE SQL STABLE AS $$
 $$;
 
 -- Сериализация правок дочерних элементов с публикацией вопроса.
-CREATE FUNCTION assert_question_draft(p_question UUID) RETURNS VOID LANGUAGE plpgsql AS $$
+CREATE FUNCTION assert_question_draft(p_question BIGINT) RETURNS VOID LANGUAGE plpgsql AS $$
 DECLARE v_status TEXT;
 BEGIN
  SELECT status INTO v_status FROM questions WHERE id = p_question FOR UPDATE;
@@ -152,14 +152,14 @@ FOR EACH ROW EXECUTE FUNCTION forbid_ledger_rewrite();
 -- Служебная запись аудита может быть привязана к любому объекту платформы.
 -- entity_id — намеренно полиморфный идентификатор, не FK.
 ALTER TABLE audit_events ADD COLUMN entity_type TEXT;
-ALTER TABLE audit_events ADD COLUMN entity_id UUID;
+ALTER TABLE audit_events ADD COLUMN entity_id BIGINT;
 
--- Первоначальный справочник ролей; UUID фиксированы только для seed.
-INSERT INTO roles (id,code) VALUES
- ('00000000-0000-4000-8000-000000000001','owner'),
- ('00000000-0000-4000-8000-000000000002','admin'),
- ('00000000-0000-4000-8000-000000000003','teacher'),
- ('00000000-0000-4000-8000-000000000004','student');
+-- Первоначальный справочник ролей; identity-значения назначает PostgreSQL.
+INSERT INTO roles (code) VALUES
+ ('owner'),
+ ('admin'),
+ ('teacher'),
+ ('student');
 
 -- Правила авторизации из первого инкремента:
 -- ОБЯЗАТЕЛЬНЫЕ ПРАВИЛА BACKEND (не реализованы одним этим DDL).
@@ -480,7 +480,7 @@ DROP INDEX questions_filter_idx;
 DROP INDEX course_enrollments_user_idx;
 DROP INDEX group_announcements_feed_idx;
 DROP INDEX group_members_active_idx;
-DELETE FROM roles WHERE id IN ('00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000003', '00000000-0000-4000-8000-000000000004');
+DELETE FROM roles WHERE code IN ('owner', 'admin', 'teacher', 'student');
 ALTER TABLE audit_events DROP COLUMN entity_id;
 ALTER TABLE audit_events DROP COLUMN entity_type;
 DROP TRIGGER score_revisions_append_only ON attempt_score_revisions;
@@ -499,7 +499,7 @@ DROP FUNCTION guard_test();
 DROP FUNCTION guard_test_question();
 DROP FUNCTION guard_question();
 DROP FUNCTION guard_question_child();
-DROP FUNCTION assert_question_draft(UUID);
-DROP FUNCTION can_access_module(UUID, UUID, TIMESTAMPTZ);
+DROP FUNCTION assert_question_draft(BIGINT);
+DROP FUNCTION can_access_module(BIGINT, BIGINT, TIMESTAMPTZ);
   `);
 };

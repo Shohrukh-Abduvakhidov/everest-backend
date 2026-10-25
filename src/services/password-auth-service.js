@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto';
-
 import env from '../configs/env.js';
 import * as authRepository from '../repositories/auth-repository.js';
 import { withTransaction } from '../repositories/transaction-repository.js';
@@ -27,17 +25,15 @@ function createPasswordAuthService({
     const firstName = validateName(body.firstName, 'firstName');
     const lastName = validateName(body.lastName, 'lastName');
     const passwordHash = await passwordHasher.hash(password);
-    const userId = randomUUID();
-
     try {
       return await transaction(async (client) => {
-        const user = await users.createPendingUser(userId, client);
+        const user = await users.createPendingUser(client);
+        const userId = user.id;
         await users.createProfile({ userId, firstName, lastName }, client);
-        await users.createPhone({ id: randomUUID(), userId, phoneE164 }, client);
+        await users.createPhone({ userId, phoneE164 }, client);
         await users.createPassword(userId, passwordHash, client);
         await users.assignRole(userId, 'student', client);
         await auth.appendAuditEvent({
-          id: randomUUID(),
           actorUserId: null,
           subjectUserId: userId,
           code: 'auth.password.registered',
@@ -91,7 +87,6 @@ function createPasswordAuthService({
       });
       await users.touchLastLogin(locked.user_id, client);
       await auth.appendAuditEvent({
-        id: randomUUID(),
         actorUserId: locked.user_id,
         subjectUserId: locked.user_id,
         code: 'auth.password.login_succeeded',
