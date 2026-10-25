@@ -1,0 +1,306 @@
+---
+project: EVEREST Backend
+roadmap_version: 1
+current_milestone: M02B
+current_status: planned
+updated_at: 2026-10-25
+architecture: docs/architecture.md
+---
+
+# EVEREST Backend Roadmap
+
+This roadmap orders implementation; it does not replace the [current architecture](docs/architecture.md), [engineering specification](documentation.md), or [schema contract](schema_tables.md). Implemented API contracts, accepted decisions, and verified execution history live in [API](docs/api.md), [decisions](docs/decisions.md), and [progress](docs/progress.md).
+
+## Status rules
+
+- Allowed statuses are **Done**, **In progress**, **Planned**, and **Blocked**.
+- A milestone is Done only when implementation, relevant migrations, tests, and documentation are complete.
+- Existing database tables do not mean the corresponding feature is implemented.
+- Only one implementation milestone should normally be In progress.
+- A Blocked item must name its concrete blocker.
+- The actual repository state overrides stale roadmap text.
+- Correct any discovered roadmap/implementation mismatch before beginning new work.
+
+## M00 — Project foundation
+
+- **Status:** Done
+- **Goal:** Establish the executable backend foundation.
+- **Dependencies:** None.
+- **Deliverables:** Node.js/Express, native ESM, PostgreSQL `pg` Pool, validated configuration, separate app/server entry points, health/readiness routes, graceful shutdown, global errors, and test scripts.
+- **Verification:** Source/import, health/readiness, server lifecycle, and graceful-shutdown checks passed.
+- **Documentation updates:** Architecture, API, decisions, and progress reflect the foundation.
+- **Exclusions:** Product-domain APIs.
+
+## M01 — Database foundation
+
+- **Status:** Done
+- **Goal:** Establish the complete constrained schema and persistence boundary.
+- **Dependencies:** M00.
+- **Deliverables:** Twelve baseline migrations plus the Telegram OIDC-state migration; 13 applied migrations; constraints, indexes, functions, triggers; repository and transaction boundaries; baseline source-integrity protection.
+- **Verification:** Baseline digest, catalog, integrity, transaction, and repeated up-migration checks passed. The disposable down/up cycle is separately **Blocked** because the configured role lacks `CREATEDB`; no rollback may run against `everest_db`.
+- **Documentation updates:** Schema contract, architecture, decisions, and progress record the applied catalog and blocker.
+- **Exclusions:** Runtime APIs merely implied by tables.
+
+## M02A — Telegram OIDC authentication
+
+- **Status:** Done
+- **Goal:** Provide secure Telegram login, linking, and messaging connection management.
+- **Dependencies:** M00–M01.
+- **Deliverables:** Authorization Code Flow, PKCE, protected one-use state/nonce, JWKS and ID-token validation, login, authenticated link/unlink, Telegram messaging connection/test message, and EVEREST session creation.
+- **Verification:** Provider/crypto unit tests and real-PostgreSQL integration tests passed with mocked Telegram providers.
+- **Documentation updates:** Implemented routes and security boundaries are in API, decisions, architecture, and progress.
+- **Exclusions:** Password login, refresh/logout, approval, and general RBAC.
+
+## M02B — Phone and password registration/login
+
+- **Status:** Planned — next milestone.
+- **Goal:** Add safe pending-student registration and active-account password login while reusing the existing session boundary.
+- **Dependencies:** M00–M02A; existing `users`, profile, phone, password, role, session, and audit tables.
+- **Deliverables:**
+  - `POST /api/v1/auth/register` and `POST /api/v1/auth/login/password`.
+  - E.164 normalization/validation and password validation/hashing.
+  - One transaction creating user, profile, phone, password, default student role, pending status, and audit evidence.
+  - Active-only password login, existing `auth_sessions`/access-token reuse, duplicate and concurrent-phone protection, and safe non-enumerating errors.
+- **Verification:** Unit and PostgreSQL integration coverage for validation, hashes, success, rollback, duplicate/concurrent registration, account statuses, bad credentials, session issuance, audit, and response/log secrecy.
+- **Documentation updates:** Update roadmap, current handoff, progress, API, architecture, and decisions only where implementation or an accepted choice changes them.
+- **Exclusions:** SMS, OTP, approval endpoints, refresh rotation, logout, recovery, RBAC, rate limiting, and unrelated domains.
+
+## M02C — Account approval
+
+- **Status:** Planned.
+- **Goal:** Give authorized administrators a controlled account-state workflow.
+- **Dependencies:** M02B plus a minimal authenticated administrator-role guard scoped to these endpoints; generalized authorization remains M02F.
+- **Deliverables:** Pending-user list; approve, reject, block, and unblock transitions; administrator audit; atomic session revocation when blocking.
+- **Verification:** Permission denial, legal/illegal transitions, concurrent decisions, audit atomicity, session revocation, safe DTO, and integration tests.
+- **Documentation updates:** API, decisions, architecture, progress, roadmap, and current handoff.
+- **Exclusions:** Course access, bulk import, invitations unless separately approved, and implicit approval through authentication.
+
+## M02D — Session lifecycle
+
+- **Status:** Planned.
+- **Goal:** Complete secure multi-device session management.
+- **Dependencies:** M02B; token/cookie decisions recorded before implementation.
+- **Deliverables:** Refresh tokens and rotation, reuse detection, logout, logout-all, session listing/revocation, device metadata, and last-used tracking.
+- **Verification:** Rotation races, replay/reuse response, revocation, expiry, logout idempotency, device ownership, safe serialization, and integration tests.
+- **Documentation updates:** API, security decisions, architecture, progress, roadmap, and current handoff.
+- **Exclusions:** RBAC and password recovery.
+
+## M02E — Password recovery
+
+- **Status:** Planned.
+- **Goal:** Recover password ownership without leaking account existence.
+- **Dependencies:** M02B–M02D; user-approved SMS provider and limits for SMS recovery.
+- **Deliverables:** Linked-Telegram recovery, SMS adapter after selection, OTP lifecycle, cooldown/attempt limits, reset, and old-session revocation.
+- **Verification:** Ownership, expiry, single use, throttling, concurrency, provider doubles, reset, and revocation tests.
+- **Documentation updates:** API, decisions, architecture, progress, roadmap, and handoff.
+- **Exclusions:** Selecting or calling an SMS provider without approval.
+
+## M02F — Authorization and auth protection
+
+- **Status:** Planned.
+- **Goal:** Enforce authenticated action and resource scope consistently.
+- **Dependencies:** M02B–M02D and approved permission semantics.
+- **Deliverables:** RBAC, action permissions, resource authorization, brute-force controls, rate limits, CSRF decision/implementation, and authentication security review.
+- **Verification:** Role/action/resource denials, session/account-state checks, throttling, CSRF behavior, and security regression tests.
+- **Documentation updates:** API, decisions, architecture, progress, roadmap, and handoff.
+- **Exclusions:** Domain permissions whose product rules remain unresolved.
+
+## M03 — User profiles and onboarding
+
+- **Status:** Planned
+- **Goal:** Support safe self-profile and onboarding workflows.
+- **Dependencies:** M02B and M02F.
+- **Deliverables:** Read/update own profile, avatar, language/timezone, onboarding completion, and safe public fields.
+- **Verification:** Validation, ownership, asset authorization, and field-redaction tests.
+- **Documentation updates:** API, architecture, progress, roadmap, handoff.
+- **Exclusions:** Administrator account-state operations.
+
+## M04 — Groups
+
+- **Status:** Planned
+- **Goal:** Organize people, teachers, permissions, and announcements without granting learning access.
+- **Dependencies:** M02F, M03, M07 for attached assets.
+- **Deliverables:** Group list/detail, members, teachers, group roles/permissions, announcements/assets, and planned progress summaries. Groups never grant course access.
+- **Verification:** Membership/teacher authorization, announcement scope, asset access, and no implicit course-grant tests.
+- **Documentation updates:** API, decisions, architecture, progress, roadmap.
+- **Exclusions:** Ranking implementation until its formula is approved; `group_courses`.
+
+## M05 — Course management
+
+- **Status:** Planned
+- **Goal:** Manage the authored course catalog and lifecycle.
+- **Dependencies:** M02F, M03, M07–M08 as content dependencies mature.
+- **Deliverables:** Course CRUD, draft/published lifecycle, teachers/permissions, modules/order, preview, and course copying.
+- **Verification:** Permission, lifecycle, ordering, copy atomicity, and publication tests.
+- **Documentation updates:** API, decisions, architecture, progress, roadmap.
+- **Exclusions:** Enrollment or module access grants.
+
+## M06 — Course and module access
+
+- **Status:** Planned
+- **Goal:** Enforce individually granted course and protected-module access.
+- **Dependencies:** M02F and M05.
+- **Deliverables:** `course_enrollments`, validity windows, revoke/extend, separate `module_access_grants`, locked metadata, protected-content checks, and progress preservation after expiry.
+- **Verification:** Grant/date/revocation matrix, locked metadata, cross-course denial, and preserved-progress tests.
+- **Documentation updates:** API, decisions, architecture, progress, roadmap.
+- **Exclusions:** No `group_courses`; group membership grants nothing; course and module grants remain separate.
+
+## M07 — Lessons and protected assets
+
+- **Status:** Planned
+- **Goal:** Deliver lessons and assets through access-aware contracts.
+- **Dependencies:** M05–M06.
+- **Deliverables:** Text/video lessons, resources, protected delivery, storage metadata, position/completion, notes, favorites, and offline permission contracts.
+- **Verification:** Access expiry, range/metadata behavior, ownership, progress, and protected-asset tests.
+- **Documentation updates:** API, architecture, decisions, progress, roadmap.
+- **Exclusions:** Storage/provider selection without approval.
+
+## M08 — Taxonomy and question bank
+
+- **Status:** Planned
+- **Goal:** Manage reviewed, publishable assessment content.
+- **Dependencies:** M02F, M07 asset contracts.
+- **Deliverables:** Subjects, sections, topics/translations, banks, questions/options/matching, answer keys, topics/assets/sources, review, and publication.
+- **Verification:** Correctness, subject consistency, review/publication guards, immutability, and safe-response tests.
+- **Documentation updates:** API, decisions, architecture, progress, roadmap.
+- **Exclusions:** `question_answer_keys` is the sole correctness source; no option `is_correct`; unreviewed imports stay draft, unknown answers stay unknown, and published content is immutable.
+
+## M09 — Indexed book import
+
+- **Status:** Planned
+- **Goal:** Import reviewable indexed question content safely and repeatably.
+- **Dependencies:** M07–M08 and approved input formats.
+- **Deliverables:** Tajik, mathematics, and biology importers; batch validation; assets/pages; duplicate detection; errors; review; dry run; idempotency; no automatic publication.
+- **Verification:** Representative fixtures, malformed input, duplicate/retry, rollback, asset/page, and draft-only tests.
+- **Documentation updates:** Import contracts, decisions, architecture, progress, roadmap.
+- **Exclusions:** Publishing or guessing unknown answers during import.
+
+## M10 — Test constructor and assignments
+
+- **Status:** Planned
+- **Goal:** Author, publish, and assign tests with explicit policies.
+- **Dependencies:** M04–M06 and M08.
+- **Deliverables:** Test creation, manual/parameter selection, publication, course/user/group audiences, timing, and attempt policies.
+- **Verification:** Construction, audience exclusivity, permission, publication immutability, and assignment tests.
+- **Documentation updates:** API, decisions, architecture, progress, roadmap.
+- **Exclusions:** Unapproved NCT scope, scoring, timing, or reveal rules.
+
+## M11 — Attempts, autosave and grading
+
+- **Status:** Planned
+- **Goal:** Run durable, timed, safely graded attempts.
+- **Dependencies:** M06, M08, M10, M19 for expiry work.
+- **Deliverables:** Start, immutable snapshots, revision autosave, server timer, submit/expiry, grading, score revisions, idempotency, reveal policy, and student-safe serialization.
+- **Verification:** Ownership, timer, concurrent revision, finalization, expiry, grading, idempotency, and private-key/snapshot redaction tests.
+- **Documentation updates:** API, decisions, architecture, progress, roadmap.
+- **Exclusions:** Unapproved partial scoring or reveal policy.
+
+## M12 — Learning progress and analytics
+
+- **Status:** Planned
+- **Goal:** Produce access-controlled learning insights.
+- **Dependencies:** M07 and M11.
+- **Deliverables:** Lesson/course progress, subject readiness, test history, strong/weak topics, profile analytics, homepage summaries, and required first-attempt statistics.
+- **Verification:** Aggregation correctness, scope/privacy, edge-case, and performance tests.
+- **Documentation updates:** API, metric decisions, architecture, progress, roadmap.
+- **Exclusions:** Group ranking formula.
+
+## M13 — Group ranking
+
+- **Status:** Planned
+- **Goal:** Rank group performance using an approved transparent formula.
+- **Dependencies:** M04, M12, and user approval of formula.
+- **Deliverables:** Ranking inputs/period, tie handling, privacy, recalculation, and teacher/admin visibility.
+- **Verification:** Formula fixtures, ties, period boundaries, visibility, and recalculation tests.
+- **Documentation updates:** Decision, API, architecture, progress, roadmap.
+- **Exclusions:** Formula remains unresolved until user approval.
+
+## M14 — Notifications
+
+- **Status:** Planned
+- **Goal:** Deliver reliable user-controlled notifications.
+- **Dependencies:** M02F, M03, M19.
+- **Deliverables:** In-app inbox, preferences, Telegram, Web Push, campaigns, attempts/retries, invalid-destination handling, and delivery jobs.
+- **Verification:** Preference, channel, retry/idempotency, blocked destination, authorization, and worker tests.
+- **Documentation updates:** API, provider decisions, architecture, progress, roadmap.
+- **Exclusions:** Treating Telegram permission as Web Push permission.
+
+## M15 — AI assistant
+
+- **Status:** Planned
+- **Goal:** Provide budgeted, access-aware assistance.
+- **Dependencies:** M06, M08, M11–M12, M16, M19.
+- **Deliverables:** General/course assistants, history, access-aware context, error explanations, recommendations, policies/limits, budget reservations, settlement/reconciliation, and safe provider adapter.
+- **Verification:** Access leakage, budget concurrency, reservation outcomes, reconciliation, policy, and provider-double tests.
+- **Documentation updates:** API, provider/model decisions, architecture, progress, roadmap.
+- **Exclusions:** Selecting or integrating a paid provider without user approval.
+
+## M16 — Bonuses and achievements
+
+- **Status:** Planned
+- **Goal:** Maintain auditable rewards and redemptions.
+- **Dependencies:** M02F, M11–M12; M15 for AI credits.
+- **Deliverables:** Accounts, append-only transactions, earning rules, achievements, offers, AI credits, idempotency, and audited manual adjustments.
+- **Verification:** Concurrency, append-only, balance, duplicate-event, redemption, and audit tests.
+- **Documentation updates:** API, decisions, architecture, progress, roadmap.
+- **Exclusions:** Credits bypassing the provider cash budget.
+
+## M17 — Administration API
+
+- **Status:** Planned
+- **Goal:** Expose authorized operational controls across implemented domains.
+- **Dependencies:** M02C, M02F, and relevant domain milestones.
+- **Deliverables:** User/grant/teacher administration, publication/review/assignment, AI policies, campaigns, and platform settings.
+- **Verification:** Role/action/resource scope, audit, validation, and cross-domain integration tests.
+- **Documentation updates:** API, decisions, architecture, progress, roadmap.
+- **Exclusions:** Controls for domains not yet implemented.
+
+## M18 — Reports
+
+- **Status:** Planned
+- **Goal:** Export authorized learning and operational reports.
+- **Dependencies:** M12–M13 and relevant administered domains.
+- **Deliverables:** Student progress, test results, course/group analytics, Excel/PDF, safe filters, and authorization.
+- **Verification:** Data accuracy, filter/scope, privacy, format, and large-export tests.
+- **Documentation updates:** API, report definitions, architecture, progress, roadmap.
+- **Exclusions:** Unapproved metrics or unrestricted exports.
+
+## M19 — Worker and background jobs
+
+- **Status:** Planned
+- **Goal:** Process durable asynchronous work safely across PM2 processes.
+- **Dependencies:** M01; introduced when the first domain needs it.
+- **Deliverables:** PostgreSQL queue, leases, retries, idempotency, attempt expiry, notification delivery, analytics refresh, and multi-process safety.
+- **Verification:** Lease competition, crash recovery, retry/dead-letter, idempotency, and PM2-concurrency tests.
+- **Documentation updates:** Operations, decisions, architecture, progress, roadmap.
+- **Exclusions:** Workers launched implicitly by importing the app.
+
+## M20 — Security and reliability hardening
+
+- **Status:** Planned; disposable rollback sub-check is **Blocked** until a safely named disposable database can be created or supplied.
+- **Goal:** Audit and harden the completed system before deployment.
+- **Dependencies:** Implemented feature milestones and a safe rollback-test database.
+- **Deliverables:** Authentication/authorization/concurrency/transaction reviews, secret handling, dependency audit, request limits, secure headers, logging, backup restore, and disposable migration rollback test.
+- **Verification:** Security regression suite, dependency checks, load/failure checks, restore rehearsal, and disposable down/up cycle.
+- **Documentation updates:** Security/operations decisions, architecture, progress, roadmap.
+- **Exclusions:** Any rollback test against `everest_db`.
+
+## M21 — Deployment
+
+- **Status:** Planned
+- **Goal:** Operate EVEREST safely in production.
+- **Dependencies:** M20 and approved infrastructure/provider choices.
+- **Deliverables:** VPS, PostgreSQL, PM2, Nginx/TLS, secret management, storage, daily backups, monitoring, log rotation, deployment and rollback runbooks.
+- **Verification:** Staging deploy, TLS/health, restart, backup/restore, monitoring, and rollback rehearsal.
+- **Documentation updates:** Deployment/operations runbooks, decisions, architecture, progress, roadmap.
+- **Exclusions:** Deployment from a documentation-only task.
+
+## M22 — Release validation
+
+- **Status:** Planned
+- **Goal:** Prove end-to-end readiness for a limited production release.
+- **Dependencies:** All release-scoped milestones and M21.
+- **Deliverables:** API integration, frontend/backend contracts, role acceptance, access/locked-module, attempts, notifications, restore rehearsal, pilot, and readiness checklist.
+- **Verification:** Recorded acceptance results and resolved release-blocking defects.
+- **Documentation updates:** API, architecture, progress, roadmap, handoff, and release checklist.
+- **Exclusions:** General availability before pilot acceptance.

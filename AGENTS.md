@@ -1,6 +1,6 @@
 # EVEREST Backend — Shared Instructions for Codex and Claude Code
 
-Version: 1.1. Updated: 24 October 2026.
+Version: 1.2. Updated: 25 October 2026.
 
 Read documentation.md, docs/progress.md when present, package.json, lockfile and relevant migrations before editing. Follow the everest-backend skill in the current agent's project discovery folder. If missing, use the portable files in documentation.md.
 
@@ -56,3 +56,35 @@ Read documentation.md, docs/progress.md when present, package.json, lockfile and
 - Update documentation.md, docs/api.md, docs/decisions.md and docs/progress.md with implemented behavior, tested commands/results, unfinished work and the next concrete task.
 - Validate inputs and use explicit safe DTOs/stable errors. Test relevant database constraints, access denials, rollback, concurrency and idempotency in a disposable database.
 - Distinguish test doubles, syntax checks and live integrations. Report unrun checks accurately and never claim a backend was implemented during documentation-only work.
+
+## Session startup protocol
+
+Every coding session must:
+
+1. Inspect `git status`.
+2. Inspect the current branch.
+3. Inspect the last five commits.
+4. Read `ROADMAP.md`.
+5. Read `docs/handoffs/current.md`.
+6. Read `docs/architecture.md`.
+7. Read `docs/progress.md` and `docs/decisions.md`.
+8. Inspect the actual code for the current milestone.
+9. Compare documentation with the implementation and correct mismatches first.
+10. Work only on the selected milestone.
+
+## Session completion protocol
+
+Every coding session must:
+
+1. Run relevant tests.
+2. Run `migrate:up` if migrations changed.
+3. Inspect `git diff` and `git status`.
+4. Update `ROADMAP.md` only from verified evidence.
+5. Update `docs/progress.md`.
+6. Update `docs/decisions.md` when a decision was made.
+7. Update `docs/api.md` when an API changed.
+8. Update `docs/architecture.md` when architecture changed.
+9. Replace `docs/handoffs/current.md` with the current verified handoff.
+10. Report blockers honestly.
+11. Never expose secrets.
+12. Never claim untested work passed.
