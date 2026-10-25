@@ -2,6 +2,27 @@
 
 Internal database identifiers are serialized as canonical positive decimal strings. This preserves PostgreSQL `BIGINT` precision across JSON and JWT claims; clients must not assume identifiers are gapless or safely coerce them to JavaScript `Number`.
 
+## Account administration
+
+All account-administration routes require an authenticated, live session for an active user whose current database roles include `owner` or `admin`. Unauthenticated requests return `401 AUTHENTICATION_REQUIRED`; other roles return `403 ADMIN_ROLE_REQUIRED`.
+
+### `GET /api/v1/admin/users/pending`
+
+Lists pending accounts ordered by `created_at`, then `id`. Query parameters are `limit` (default 20, range 1–100) and `offset` (default 0). The response contains only the decimal-string ID, account status, profile names, one deterministic phone, creation time, and onboarding state.
+
+```json
+{"data":{"users":[{"id":"123","status":"pending","firstName":"Student","lastName":"Example","phone":"+992900000000","createdAt":"2026-10-25T12:00:00.000Z","onboardingCompletedAt":null}],"pagination":{"limit":20,"offset":0,"hasMore":false}}}
+```
+
+### Account-state transitions
+
+- `POST /api/v1/admin/users/:userId/approve`: `pending` → `active`.
+- `POST /api/v1/admin/users/:userId/reject`: `pending` → `rejected`.
+- `POST /api/v1/admin/users/:userId/block`: `active` → `blocked`; atomically revokes every live session with reason `account_blocked`.
+- `POST /api/v1/admin/users/:userId/unblock`: `blocked` → `active`; previously revoked sessions remain revoked.
+
+Each transition locks the target account, changes it once, and appends its administrator audit event in the same transaction. Invalid transitions return `409 INVALID_ACCOUNT_TRANSITION`; missing accounts return `404 USER_NOT_FOUND`. Administrators cannot reject or block themselves (`SELF_REJECTION_FORBIDDEN` and `SELF_BLOCK_FORBIDDEN`). Route IDs must be canonical positive PostgreSQL `BIGINT` decimal strings; malformed, zero, leading-zero, or overflowing values return `400 INVALID_USER_ID`.
+
 ## Health
 
 ### `GET /api/v1/health`
