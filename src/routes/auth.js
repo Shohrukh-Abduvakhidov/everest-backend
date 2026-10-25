@@ -2,19 +2,31 @@ import express from 'express';
 
 import { createPasswordAuthController } from '../controllers/password-auth-controller.js';
 import { createTelegramAuthController } from '../controllers/telegram-auth-controller.js';
+import { createSessionController } from '../controllers/session-controller.js';
 import { createAuthMiddleware } from '../middleware/auth-middleware.js';
 import { passwordAuthService } from '../services/password-auth-service.js';
 import { telegramAuthService } from '../services/telegram-auth-service.js';
+import { sessionLifecycleService } from '../services/session-lifecycle-service.js';
 import asyncHandler from '../utils/async-handler.js';
 
-function createAuthRouter(service = telegramAuthService, passwordService = passwordAuthService) {
+function createAuthRouter(
+  service = telegramAuthService,
+  passwordService = passwordAuthService,
+  lifecycleService = sessionLifecycleService
+) {
   const router = express.Router();
   const controller = createTelegramAuthController(service);
   const passwordController = createPasswordAuthController(passwordService);
+  const sessionController = createSessionController(lifecycleService);
   const authenticate = createAuthMiddleware(service);
 
   router.post('/register', asyncHandler(passwordController.register));
   router.post('/login/password', asyncHandler(passwordController.login));
+  router.post('/refresh', asyncHandler(sessionController.refresh));
+  router.post('/logout', asyncHandler(sessionController.logout));
+  router.post('/logout-all', authenticate, asyncHandler(sessionController.logoutAll));
+  router.get('/sessions', authenticate, asyncHandler(sessionController.list));
+  router.delete('/sessions/:sessionId', authenticate, asyncHandler(sessionController.revoke));
   router.get('/telegram/start', asyncHandler(controller.start));
   router.get('/telegram/callback', asyncHandler(controller.callback));
   router.post('/telegram/link', authenticate, asyncHandler(controller.link));

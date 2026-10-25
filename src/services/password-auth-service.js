@@ -98,6 +98,8 @@ function createPasswordAuthService({
         status: 'authenticated',
         accessToken: session.accessToken,
         expiresAt: session.expiresAt,
+        refreshToken: session.refreshToken,
+        refreshExpiresAt: session.refreshExpiresAt,
         user: { id: locked.user_id },
       };
     });

@@ -62,6 +62,7 @@ const env = Object.freeze({
   dbIdleTimeoutMs: readInteger('DB_IDLE_TIMEOUT_MS', 30000),
   jwtAccessSecret: readString('JWT_ACCESS_SECRET'),
   authSessionTtlSeconds: readInteger('AUTH_SESSION_TTL_SECONDS', 900),
+  authRefreshTtlSeconds: readInteger('AUTH_REFRESH_TTL_SECONDS', 2592000),
   telegramOidcStateTtlSeconds: readInteger('TELEGRAM_OIDC_STATE_TTL_SECONDS', 600),
   telegram: Object.freeze({
     discoveryUrl: 'https://oauth.telegram.org/.well-known/openid-configuration',

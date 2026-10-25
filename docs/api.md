@@ -2,6 +2,36 @@
 
 Internal database identifiers are serialized as canonical positive decimal strings. This preserves PostgreSQL `BIGINT` precision across JSON and JWT claims; clients must not assume identifiers are gapless or safely coerce them to JavaScript `Number`.
 
+## Session lifecycle
+
+Password and Telegram login set two HttpOnly cookies: short-lived `everest_access` at path `/` and opaque `everest_refresh` at path `/api/v1/auth`. Tokens are never returned in JSON. In production both cookies are `Secure`; all environments use `SameSite=Lax` and explicit expiry.
+
+### `POST /api/v1/auth/refresh`
+
+Reads only the refresh cookie, atomically consumes the current token, and sets replacement access and refresh cookies. A refresh token is single-use. Missing, malformed, expired, revoked, inactive-account, or dead-session tokens return `401`; detected reuse returns `401 REFRESH_TOKEN_REUSE_DETECTED`, revokes the whole session family, and clears cookies.
+
+```json
+{"data":{"status":"refreshed","expiresAt":"2026-10-25T12:15:00.000Z","refreshExpiresAt":"2026-11-24T12:00:00.000Z","user":{"id":"123"}}}
+```
+
+### `POST /api/v1/auth/logout`
+
+Revokes the current session and all its refresh tokens when identified by a valid access token or refresh cookie, clears both cookies, and returns `{"data":{"status":"logged_out"}}`. It is safe to repeat and can discard a session with an expired access token when the refresh cookie remains identifiable.
+
+### `POST /api/v1/auth/logout-all`
+
+Requires live authentication. Revokes all sessions and refresh tokens owned by the current user, including the current session, without affecting other users. Both cookies are cleared.
+
+### `GET /api/v1/auth/sessions`
+
+Requires live authentication. Returns only the actor's sessions ordered newest first. Safe fields are `id`, `createdAt`, `lastUsedAt`, `expiresAt`, `revokedAt`, `current`, and a coarse `device` object containing `browser`, `operatingSystem`, and `deviceType`. Raw User-Agent, IP address, tokens, and hashes are excluded.
+
+### `DELETE /api/v1/auth/sessions/:sessionId`
+
+Requires live authentication and a canonical positive decimal-string session ID. Revokes only an owned session and its refresh tokens. Missing and foreign sessions share `404 SESSION_NOT_FOUND`. Repeating an owned revocation is successful. Revoking the current session also clears both cookies. Invalid IDs return `400 INVALID_SESSION_ID`.
+
+Browser clients must send credentials for cookie-authenticated calls. `SameSite=Lax` narrows cross-site cookie submission, but this milestone does not claim complete CSRF protection; explicit origin/token hardening remains M02F.
+
 ## Account administration
 
 All account-administration routes require an authenticated, live session for an active user whose current database roles include `owner` or `admin`. Unauthenticated requests return `401 AUTHENTICATION_REQUIRED`; other roles return `403 ADMIN_ROLE_REQUIRED`.
@@ -96,7 +126,7 @@ The user, profile, unverified phone, `scrypt` password hash, student role, and a
 }
 ```
 
-Successful response `200` requires an active account, creates an auditable server-side session, updates `last_login_at`, and sets the access JWT in the same `HttpOnly`, `SameSite=Lax` `everest_access` cookie used by Telegram login. The token is omitted from JSON:
+Successful response `200` requires an active account, creates an auditable server-side session, updates `last_login_at`, and sets access and refresh HttpOnly cookies shared with Telegram login. Tokens are omitted from JSON:
 
 ```json
 {

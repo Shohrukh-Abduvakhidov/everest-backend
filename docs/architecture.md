@@ -22,7 +22,7 @@ The current backend is a small layered modular monolith. The foundation, full da
 | Security/token library | `jose` 6.2.13 |
 | Configuration | `dotenv` 17.4.2 and validated readers in `src/configs/env.js` |
 | Tests | Node's built-in test runner plus PostgreSQL integration/verification scripts |
-| Current milestone | M02C account approval implemented; M02D session lifecycle planned next |
+| Current milestone | M02D secure session lifecycle implemented; M02E password recovery planned next |
 
 ## 2. Repository tree
 
@@ -85,6 +85,8 @@ Routes under `/api/v1` are:
 - `GET /ready`: repository-owned `SELECT 1` readiness check.
 - `POST /auth/register`: transactional pending-student phone/password registration.
 - `POST /auth/login/password`: active-account password login and session issuance.
+- `POST /auth/refresh`, `/auth/logout`, and `/auth/logout-all`: refresh rotation and revocation.
+- `GET /auth/sessions` and `DELETE /auth/sessions/:sessionId`: owned multi-device session management.
 - `/auth/*`: Telegram routes described below.
 - `GET /admin/users/pending`: owner/admin pending-account listing.
 - `POST /admin/users/:userId/{approve,reject,block,unblock}`: locked and audited account-state transitions.
@@ -191,7 +193,8 @@ All values are server-side unless explicitly marked public metadata. Empty value
 | `CORS_ORIGINS` | Comma-separated origins | Optional, default localhost frontend; `app.js` | Safe configuration metadata |
 | `SHUTDOWN_TIMEOUT_MS` | Positive integer milliseconds | Optional, default 10000; `server.js` | No need to expose |
 | `JWT_ACCESS_SECRET` | At least 32 characters | Required for implemented authentication; session-token service | **No** |
-| `AUTH_SESSION_TTL_SECONDS` | Positive integer seconds | Optional, default 900; Telegram auth service | No need to expose |
+| `AUTH_SESSION_TTL_SECONDS` | Positive integer seconds | Optional, default 900; access-token lifetime | No need to expose |
+| `AUTH_REFRESH_TTL_SECONDS` | Positive integer seconds | Optional, default 2592000; refresh/session lifetime | No need to expose |
 | `OTP_HMAC_SECRET` | Future OTP HMAC key | Listed but unused | **No** |
 | `SMS_API_KEY` | Future SMS provider credential | Listed but unused | **No** |
 | `TELEGRAM_CLIENT_ID` | Telegram OIDC client identifier | Required by Telegram auth | Public protocol identifier |
@@ -230,7 +233,7 @@ erDiagram
 - `user_passwords` stores one self-describing salted `scrypt` hash per password user. Registration and password verification are implemented.
 - `auth_identities` stores verified external login identity. Only Telegram `(provider, issuer, provider_subject)` is permitted and implemented.
 - `auth_sessions` stores server-side session state. Creation is shared by Telegram/password login and live-session validation is implemented.
-- `auth_refresh_tokens` models hashed refresh history. No refresh service exists.
+- `auth_refresh_tokens` retains hash-only single-use refresh history. The parent session is the token family; reuse revokes the session and all family tokens.
 - `auth_challenges` and `sms_deliveries` model OTP and delivery state. No service/provider exists.
 - `telegram_oidc_states` stores short-lived login/link protocol state and is implemented.
 - `telegram_connections` is bot messaging permission/destination, separate from login identity; link/test/disconnect behavior is implemented.
@@ -322,15 +325,15 @@ Secrets, authorization codes, provider tokens, raw state/nonce, and verifiers ar
 | Bearer transport | Implemented | Auth middleware accepts `Authorization: Bearer` |
 | Session lookup | Implemented | Session ID/user match, not revoked, unexpired |
 | Active account check | Implemented | Joined `users.status === active` |
-| Revoked session rejection | Implemented read path | `revoked_at IS NULL`; no revoke endpoint |
-| Refresh-token rotation | Planned | Table only |
-| Logout/session revocation | Planned | No route/service/repository mutation |
-| Session listing | Planned | No API |
-| Device management | Planned | User agent/IP stored on Telegram and password login only |
+| Revoked session rejection | Implemented | `revoked_at IS NULL`; access and refresh checks |
+| Refresh-token rotation | Implemented | Hash-only single-use rotation with reuse detection |
+| Logout/session revocation | Implemented | Current, all, and owned-session revocation APIs |
+| Session listing | Implemented | Owned deterministic safe list |
+| Device management | Implemented subset | Coarse browser/OS/type; no raw IP response |
 
-Password and Telegram login share `src/services/auth/session-service.js`, so both create the same `auth_sessions` row and access-token form. Password login also updates `users.last_login_at`; broader last-used/device lifecycle remains M02D.
+Password and Telegram login share `src/services/auth/session-service.js`, so both create the same session, access JWT, and refresh-token family. Password login also updates `users.last_login_at`.
 
-The current access-token TTL defaults to 15 minutes and matches the database session expiry. `last_used_at` is not updated by authentication.
+The access-token TTL defaults to 15 minutes. The refresh token and database session default to 30 days. Successful refresh updates `last_used_at`; access authentication updates it at most once per 60 seconds.
 
 ## 11. Authorization architecture
 
@@ -449,7 +452,6 @@ Known security gaps:
 - Local `JWT_ACCESS_SECRET` is missing; live authentication is unavailable until configured.
 - No rate limiting, brute-force protection, OTP controls, or SMS provider exists.
 - No explicit CSRF token/origin middleware; cookie protection currently relies on SameSite and configured CORS. CORS is not itself a CSRF defense.
-- No refresh rotation, logout, or session-management API.
 - No RBAC/action/resource authorization middleware.
 - No Helmet/content-security header package; only `x-powered-by` is disabled.
 - No production deployment, secret manager, TLS termination, webhook handler/signature check, or operational monitoring is implemented.
@@ -481,7 +483,7 @@ Actual response envelopes:
 | Telegram OIDC | Done | Login/link/unlink/session/test-message routes and tests |
 | Phone/password authentication | Done | Pending registration, salted `scrypt`, active-only login, shared session, audit, tests |
 | Account approval | Done | Pending list, locked transitions, audit, session revocation, initial-owner bootstrap |
-| Session refresh/rotation | Planned | Refresh table only |
+| Session refresh/rotation | Done | Hash-only rotation, replay revocation, logout/all, owned listing/revocation |
 | Password recovery | Planned | Challenge/SMS tables only |
 | Roles and permissions | Planned | Seeded schema, no enforcement |
 | Profiles | Partial | Registration creates the initial private profile; profile APIs remain planned |
@@ -498,7 +500,7 @@ Actual response envelopes:
 
 ## 23. Known gaps, risks, and documentation consistency
 
-Confirmed implementation gaps are the unselected SMS provider, absent approval APIs, absent refresh/logout flows, absent RBAC/resource checks, schema-only product domains, and no deployment/worker infrastructure.
+Confirmed implementation gaps are the unselected SMS provider, absent password recovery, absent generalized RBAC/resource checks, schema-only product domains, and no deployment/worker infrastructure.
 
 Documentation was normalized on 25 October 2026:
 
@@ -552,7 +554,7 @@ Implemented routes list pending accounts and perform approve/reject/block/unbloc
 
 ### M02D — Session lifecycle
 
-Planned separately: refresh-token creation/rotation and reuse detection, logout, logout all devices, session listing/revocation, device metadata, and last-used tracking.
+Implemented with shared password/Telegram issuance, an opaque single-use refresh cookie, session-family replay detection, current/all logout, owned listing and revocation, coarse device metadata, and throttled activity tracking. General CSRF hardening remains M02F.
 
 ### M02E — Password recovery
 

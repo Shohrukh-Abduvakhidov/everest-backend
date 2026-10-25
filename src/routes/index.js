@@ -7,12 +7,15 @@ import asyncHandler from '../utils/async-handler.js';
 import { createAdminRouter } from './admin.js';
 import { createAuthRouter } from './auth.js';
 
-function createRoutes(service = telegramAuthService, passwordService = passwordAuthService, adminService) {
+function createRoutes(
+  service = telegramAuthService, passwordService = passwordAuthService,
+  adminService, lifecycleService
+) {
   const router = express.Router();
 
   router.get('/health', healthController.getLiveness);
   router.get('/ready', asyncHandler(healthController.getReadiness));
-  router.use('/auth', createAuthRouter(service, passwordService));
+  router.use('/auth', createAuthRouter(service, passwordService, lifecycleService));
   router.use('/admin', createAdminRouter(service, adminService));
   return router;
 }

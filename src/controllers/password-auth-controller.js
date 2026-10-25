@@ -1,15 +1,6 @@
 import env from '../configs/env.js';
 import { passwordAuthService } from '../services/password-auth-service.js';
-
-function setAccessCookie(response, result) {
-  response.cookie('everest_access', result.accessToken, {
-    httpOnly: true,
-    secure: env.nodeEnv === 'production',
-    sameSite: 'lax',
-    expires: result.expiresAt,
-    path: '/',
-  });
-}
+import { setAuthCookies } from '../utils/auth-cookies.js';
 
 function createPasswordAuthController(service = passwordAuthService) {
   async function register(request, response) {
@@ -22,8 +13,8 @@ function createPasswordAuthController(service = passwordAuthService) {
       ipAddress: request.ip,
       userAgent: request.get('user-agent'),
     });
-    setAccessCookie(response, result);
-    const { accessToken: _accessToken, ...safeResult } = result;
+    setAuthCookies(response, result, env);
+    const { accessToken: _accessToken, refreshToken: _refreshToken, ...safeResult } = result;
     response.json({ data: safeResult });
   }
 
