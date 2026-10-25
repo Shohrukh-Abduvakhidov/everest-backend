@@ -1,7 +1,7 @@
 # EVEREST Backend — Architecture and Instructions for Codex and Claude Code
 
-Version: 1.1. Updated: 24 October 2026.
-Save this file as `documentation.md` in the backend repository root.
+Version: 1.1. Updated: 25 October 2026.
+Canonical repository path: root `documentation.md`.
 
 ## Contents
 
@@ -44,7 +44,7 @@ Apply sources in this order:
 1. The user's latest explicit EVEREST decisions.
 2. Root AGENTS.md and this documentation for required project conventions.
 3. Actual repository code, package.json, lockfile, migrations and database catalog for implementation state and syntax.
-4. docs/db/everest_full_v0_2.sql as the proposed complete database reference.
+4. Root `schema_tables.md` and applied migrations as the complete database reference.
 5. Official documentation matching the installed library versions.
 
 If current code uses the old service-SQL pattern, treat that as existing implementation state, not permission to disregard the new repository requirement. Convert the affected feature incrementally and avoid unrelated rewrites. If requirements and the reference schema conflict, state the discrepancy and implement an explicit migration; never silently change either source.
@@ -56,9 +56,9 @@ Keep these documents distinct:
 - documentation.md: detailed backend specification and workflow;
 - AGENTS.md: concise shared rules for both coding agents;
 - CLAUDE.md: a small adapter importing AGENTS.md;
-- docs/db/everest_full_v0_2.sql: complete database reference;
-- docs/db/everest_full_v0_2.dbml: diagram source;
-- docs/imports/tajik-indexing.md: the separate Gemini book-indexing specification;
+- schema_tables.md: current complete baseline schema contract;
+- future DBML/schema exports: planned artifacts created only when requested;
+- future book-import documentation: planned separately when import work begins;
 - docs/decisions.md: dated decisions and replaced assumptions;
 - docs/api.md: implemented API contracts, with proposed endpoints clearly labeled;
 - docs/progress.md: practical implementation and handoff state.
@@ -106,11 +106,9 @@ everest-backend/
   .claude/skills/everest-backend/
     SKILL.md
     references/project-rules.md
-  .github/workflows/deploy.yml
+  .github/workflows/deploy.yml  # planned with deployment
   docs/
-    db/everest_full_v0_2.sql
-    db/everest_full_v0_2.dbml
-    imports/tajik-indexing.md
+    architecture.md
     decisions.md
     api.md
     progress.md
@@ -182,15 +180,9 @@ everest-backend/
     migrations/
       <timestamp>_create-auth-tables.js
       <timestamp>_create-course-access-tables.js
-    jobs/
-      index.js
-      worker.js
-      attempts-expiration-job.js
-      notifications-job.js
-    prompts/
-      ai-assistant-prompt.md
-    uploads/
-      images/
+    jobs/                 # approved location; create with worker implementation
+    prompts/              # approved location; create with prompt implementation
+    uploads/              # approved location; create with upload implementation
     utils/
       async-handler.js
       app-error.js
@@ -200,7 +192,7 @@ everest-backend/
     unit/
 ```
 
-Preserve configs/error-handler.js from the supplied structure unless actual project code has an established different location. The new mandatory change is src/repositories/, not a wholesale reorganization.
+This is a target tree, not a claim that every path exists. Git does not preserve empty directories; `src/jobs`, `src/prompts`, and `src/uploads` are approved locations that will be created only with their corresponding features. Their current absence is not an architecture violation. Preserve configs/error-handler.js from the supplied structure unless actual project code has an established different location. The mandatory repositories layer is not a reason for wholesale reorganization.
 
 For new EVEREST features, notification/statistics repositories belong under src/repositories/, not under services/.../repositories/. When migrating existing implementation, update imports for the affected module and avoid parallel competing persistence layers.
 
@@ -488,7 +480,7 @@ Tables: users, user_profiles, user_phones, user_passwords, auth_identities, role
 
 One users.id combines sign-in identities and learning history. A Telegram-only intermediate account may lack a password or phone. Whether a verified phone is required before activation is unresolved. Telegram username is not the student's confirmed learning profile name.
 
-Phone/password registration uses a normalized phone, SMS ownership verification, a password hash and pending approval. An authorized administrator activates the account. Phone verification and administrative approval are separate facts. Do not accept elevated roles from registration input.
+M02B phone/password registration uses a normalized E.164 phone, a password hash, first/last name, a pending user, and the student role. It does not depend on SMS or OTP. Password login is allowed only after the separate approval milestone has made the account active. Do not accept elevated roles from registration input.
 
 Verify Telegram using the selected official server-side protocol and stable provider subject, with issuer/audience/expiry and applicable state/nonce/PKCE checks. Linking requires an authenticated owner and fresh verification for the sensitive action. Never merge accounts by name, username or an unverified phone. Do not remove the last usable sign-in method.
 
@@ -500,7 +492,7 @@ Reset flow: request a linked verified phone, issue a bounded one-time challenge,
 
 Rate-limit by phone/IP/global budget and apply resend cooldowns. No configured SMS provider means a clearly unavailable integration, not simulated production success. Test providers are allowed only in explicitly isolated test configuration.
 
-Proposed route groups: registration code/complete, login, refresh, logout, current user, sessions/revoke, password reset request/complete, Telegram start/callback/link/unlink and separate administrative approval/blocking endpoints. They are not implemented simply because this document lists them.
+Authentication is split into separate increments: M02B registration/password login; M02C approval/blocking; M02D refresh/logout/session management; M02E Telegram/SMS recovery and password reset; M02F RBAC and protection hardening. A later route is not implemented simply because this document lists it.
 
 ## 12. Groups, courses and individual access
 
@@ -528,7 +520,7 @@ Validate type-specific answer_data and ownership of referenced option/matching U
 
 Published questions, keys, options and tests are immutable; changes use copies. grading_snapshot is private historical grading evidence, not a second editable answer source or a student response field.
 
-Follow docs/imports/tajik-indexing.md for package structure. The import service validates manifest/schema/hashes/files/references, performs dry-run and produces reports. Repositories own staging, resolving external IDs, persistence and count queries. sourceNamespace/external asset IDs resolve through asset_aliases to UUIDs. Preserve unknown matching rules and do not replace null with false.
+When book import work begins, create its package-format documentation under the approved future `docs/imports/` location. That document does not currently exist. The future import service must validate manifest/schema/hashes/files/references, perform dry-run and produce reports. Repositories own staging, resolving external IDs, persistence and count queries. sourceNamespace/external asset IDs resolve through asset_aliases to UUIDs. Preserve unknown matching rules and do not replace null with false.
 
 Resolve questions by bank_id plus external_id. Validate references before insertion; do not silently lose rows through INNER JOIN. Avoid unconditional ON CONFLICT updates to published, used or manually corrected records. Report input/insert/update/skip/error totals. ZIP processing must reject traversal and decompression abuse; never execute embedded SQL/scripts.
 
@@ -556,7 +548,7 @@ Bonus and AI journals are append-only. Lock the relevant account/reservation bef
 
 Notifications use in-app, Push and Telegram. Telegram identity for sign-in differs from a bot connection permitted to receive messages. Validate that notification recipients own the targeted subscription/connection. External delivery is not exactly-once merely because a local UNIQUE exists.
 
-jobs/index.js registers processors; jobs/worker.js starts a worker explicitly. node-cron can schedule work but does not ensure a single execution across PM2 workers. Queue repositories own SKIP LOCKED/lease/retry SQL, while job handlers call application services. Do not start a duplicate scheduler as an app.js import side effect.
+When background processing is implemented, `jobs/index.js` will register processors and `jobs/worker.js` will start a worker explicitly. Neither file exists today. A future node-cron scheduler will not by itself ensure single execution across PM2 workers. Queue repositories own SKIP LOCKED/lease/retry SQL, while job handlers call application services. Do not start a scheduler as an app.js import side effect.
 
 Stats/export services use their repositories and the same teacher/resource restrictions as ordinary API reads. An Excel export must not bypass access control.
 
@@ -590,12 +582,17 @@ Report actual commands and results, checks not run and reasons. Syntax checks ar
 Implement small complete increments:
 
 1. Documents, conventions, minimal Express/pg foundation, environment/error handling, health/readiness repositories and migration configuration.
-2. Users, roles, profile, phone/password, SMS registration/reset, approval, sessions, Telegram and audit as integration choices are resolved.
-3. Assets, courses, modules, lessons, individual grants and protected file issuance.
-4. Groups, members, teachers and announcements.
-5. Question bank, keys and safe dry-run import.
-6. Test assignment, attempts, server timer, autosave, grading and results.
-7. Worker/notifications, AI budget, bonuses/achievements, analytics/export and offline improvements.
+2. M02A Telegram OIDC authentication and linking.
+3. M02B phone/password registration and login, without SMS/OTP or approval endpoints.
+4. M02C account approval and blocking.
+5. M02D refresh/logout/session lifecycle.
+6. M02E password recovery through Telegram and later SMS/OTP after provider selection.
+7. M02F RBAC, resource authorization, rate limiting, brute-force protection, CSRF strategy and hardening.
+8. Assets, courses, modules, lessons, individual grants and protected file issuance.
+9. Groups, members, teachers and announcements.
+10. Question bank, keys and safe dry-run import.
+11. Test assignment, attempts, server timer, autosave, grading and results.
+12. Worker/notifications, AI budget, bonuses/achievements, analytics/export and offline improvements.
 
 For each feature, create its required route/controller/service/repository files together. Do not generate all 81 tables/endpoints at once.
 
@@ -777,17 +774,17 @@ Keep error-handler.js in configs if preserving the supplied layout. Do not move 
 - In the v0.2 reference, course_enrollments is unique on (user_id,course_id), module_access_grants on (user_id,module_id), and course_modules has UNIQUE(id,course_id). Grants also require id, granted_by and dates/optional revocation fields. Do not substitute a different ON CONFLICT target or omit required columns when writing executable inserts. Read the actual table definition; if only a minimal illustrative schema is supplied, keep pseudocode separate from migration-ready code.
 - Questions use content.blocks, options, matching items and question_answer_keys. No question_versions and no options.is_correct. Published content changes through a copy.
 - Prior documentation reports 972 Tajik-book questions with no verified keys; do not claim independent PDF verification or publish them automatically.
-- The book indexing instruction and the backend documentation are different documents. Keep indexing under docs/imports/ and backend documentation at the project root.
+- A future book-indexing instruction and backend documentation are different documents. Use the planned `docs/imports/` location only when that work begins.
 - Exclude EduCRM, integrated video calls and automatic payment integrations unless explicitly requested later.
 - Groups’ ranking, NCT attempt scope, SMS vendor, Telegram-only mandatory phone, expiry defaults, partial scoring and AI package interactions remain configurable/open. An earlier proposal is not user confirmation.
 
 ## Database and migration workflow
 
-Read docs/db/everest_full_v0_2.sql if supplied. It is a proposed complete baseline of 81 tables, not proof that a DB/server/API is deployed. Write incremental JavaScript node-pg-migrate migrations in src/migrations. Use UUID keys, TIMESTAMPTZ, NUMERIC/integer money units, parameterized queries, FK/UNIQUE/CHECK and appropriate indexes.
+Read root `schema_tables.md` and the applied migrations. The baseline describes 81 tables but is not by itself proof that an API/server is implemented. Write incremental JavaScript node-pg-migrate migrations in src/migrations. Use UUID keys, TIMESTAMPTZ, NUMERIC/integer money units, parameterized queries, FK/UNIQUE/CHECK and appropriate indexes.
 
 For a new DB, apply only migrations needed by the current increment. For an existing DB, inspect applied migrations/catalog and reconcile changes; never run the full baseline on top of existing auth tables. Preserve composite FKs tying module/course/enrollment and test/assignment/question/attempt.
 
-Use pgm.sql for functions/triggers or constraints where the chosen migration API is inconvenient. Full PostgreSQL functions may not import into diagram tools. Use DBML or a separately generated schema-only file for diagrams; do not delete DB protections to make a diagram importer happy.
+Use pgm.sql for functions/triggers or constraints where the chosen migration API is inconvenient. A DBML or schema-only diagram export may be generated later when requested; no such file currently exists. Do not delete DB protections to satisfy a diagram importer.
 
 Test migration up, rollback where safe, and reapplication in disposable DBs. Do not pretend destructive down migrations preserve learning history. Run deploy migrations once with the migration tool’s locking mechanism, not from every PM2 worker.
 

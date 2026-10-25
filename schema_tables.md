@@ -2,7 +2,7 @@
 
 Version: 0.2.1 documentation, based on the v0.2 database baseline. Date: 2026-10-24.
 Language: English. Audience: Codex, Claude Code and backend developers.
-Recommended repository location: `docs/db/schema_tables.md`.
+Authoritative repository location: root `schema_tables.md`.
 
 Reading strategy for an agent: read sections 1–5 first, then the affected module in section 6. For complete migration authoring also read section 7 in full, including its late ALTERs, indexes and guards. Do not treat a partial table excerpt as the complete schema. Sections 8–10 define handoff requirements and the implementation prompt.
 
@@ -10,7 +10,7 @@ Reading strategy for an agent: read sections 1–5 first, then the affected modu
 
 This is a self-contained specification for the **existing designed schema**, not a claim that tables are deployed in a live database. It describes 81 application tables. It includes exact column definitions, constraints, foreign keys, indexes and the complete baseline SQL so an agent can create JavaScript migrations without reconstructing DDL from presentation slides.
 
-Sources: the supplied `everest_full_v0_2.sql`, its PostgreSQL catalog metadata and `everest_architecture_v0_2.md`. The latest user instruction makes `src/repositories/` mandatory for all application SQL and transaction infrastructure. The presentation is explanatory; it does not override this schema.
+Historical source inputs (not files currently present in this repository): `everest_full_v0_2.sql`, its PostgreSQL catalog metadata and `everest_architecture_v0_2.md`. The latest user instruction makes `src/repositories/` mandatory for all application SQL and transaction infrastructure. The presentation is explanatory; it does not override this schema.
 
 Authority order:
 
@@ -4380,7 +4380,7 @@ Consult the installed tool version before copying configuration or CLI options. 
 
 ## 10. Suggested implementation prompt
 
-> Read AGENTS.md, CLAUDE.md, documentation.md and docs/db/schema_tables.md. Inspect the current repository, installed pg/node-pg-migrate versions, applied migrations and actual database catalog. Create JavaScript node-pg-migrate migrations for the complete 81-table EVEREST v0.2 target in schema_tables.md, preserving its exact columns, constraints, 156 foreign keys, indexes, functions, triggers and four role seed rows. If objects already exist, create incremental reconciliation migrations; do not rerun the full baseline, delete data, or modify applied migrations. Keep the existing layer-based project structure and mandatory src/repositories layer. Validate up and the declared rollback policy in a disposable PostgreSQL database, compare the resulting catalog, run the specified integrity checks, and record actual commands/results plus remaining product decisions in docs/progress.md. Do not implement unrelated endpoints or external provider calls as part of this task.
+> Read AGENTS.md, CLAUDE.md, documentation.md and root schema_tables.md. Inspect the current repository, installed pg/node-pg-migrate versions, applied migrations and actual database catalog. Create JavaScript node-pg-migrate migrations for the complete 81-table EVEREST v0.2 target in schema_tables.md, preserving its exact columns, constraints, 156 foreign keys, indexes, functions, triggers and four role seed rows. If objects already exist, create incremental reconciliation migrations; do not rerun the full baseline, delete data, or modify applied migrations. Keep the existing layer-based project structure and mandatory src/repositories layer. Validate up and the declared rollback policy in a disposable PostgreSQL database, compare the resulting catalog, run the specified integrity checks, and record actual commands/results plus remaining product decisions in docs/progress.md. Do not implement unrelated endpoints or external provider calls as part of this task.
 
 ## 11. Verification of this document
 

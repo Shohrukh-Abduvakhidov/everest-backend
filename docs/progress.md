@@ -1,6 +1,6 @@
 # EVEREST backend progress
 
-Updated: 2026-10-24.
+Updated: 2026-10-25.
 
 ## Current increment
 
@@ -80,7 +80,7 @@ The disposable database lifecycle test attempted to create `everest_migration_te
 
 The applied initial migration filenames use a hyphen after their numeric prefix. node-pg-migrate applies them in stable lexical order but emits non-fatal timestamp-prefix warnings because newly generated names use an underscore separator. The applied files and migration history remain unchanged; the new migration follows the underscore convention.
 
-The directory is not currently a Git repository, so git status/diff and a commit identifier were unavailable.
+The project is initialized as a Git repository. The primary branch is `main`, Git commits are the implementation history, and each milestone should use a dedicated feature branch. Working-tree state must be verified at each handoff rather than hard-coded here.
 
 ## Unresolved product decisions
 
@@ -88,4 +88,4 @@ SMS provider and limits, whether Telegram-authenticated accounts must later veri
 
 ## Next concrete milestone
 
-Continue authentication with user/profile/phone/password creation, SMS challenge state transitions behind a provider adapter, approval, refresh-token rotation, password reset, authorization policy checks, and concurrency/idempotency coverage.
+M02B: implement phone/password registration and login only. Normalize E.164 phones; atomically create a pending student account, profile, phone record, and password hash; permit password login only for active accounts; reuse session issuance; audit safely; and cover duplicate/concurrent registration. SMS/OTP, approval endpoints, refresh/logout/session management, password recovery, RBAC, rate limiting, and CSRF belong to later milestones.
