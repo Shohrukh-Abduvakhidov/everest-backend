@@ -1,7 +1,7 @@
 ---
 project: EVEREST Backend
 roadmap_version: 1
-current_milestone: M02C
+current_milestone: M02D
 current_status: planned
 updated_at: 2026-10-25
 architecture: docs/architecture.md
@@ -77,7 +77,7 @@ This roadmap orders implementation; it does not replace the [current architectur
 
 ## M02C — Account approval
 
-- **Status:** Planned — next milestone.
+- **Status:** Done.
 - **Goal:** Give authorized administrators a controlled account-state workflow.
 - **Dependencies:** M02B plus a minimal authenticated administrator-role guard scoped to these endpoints; generalized authorization remains M02F.
 - **Deliverables:** Pending-user list; approve, reject, block, and unblock transitions; administrator audit; atomic session revocation when blocking.
@@ -87,7 +87,7 @@ This roadmap orders implementation; it does not replace the [current architectur
 
 ## M02D — Session lifecycle
 
-- **Status:** Planned.
+- **Status:** Planned — next milestone.
 - **Goal:** Complete secure multi-device session management.
 - **Dependencies:** M02B; token/cookie decisions recorded before implementation.
 - **Deliverables:** Refresh tokens and rotation, reuse detection, logout, logout-all, session listing/revocation, device metadata, and last-used tracking.

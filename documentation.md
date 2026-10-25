@@ -794,6 +794,8 @@ Importing app.js constructs the Express app only. server.js starts HTTP and grac
 
 Use route → controller → service → repository → pg. Application queries, health checks, row/advisory locks and database writes belong in src/repositories/. Services decide transaction scope without query() or SQL strings. repositories/transaction-repository.js handles BEGIN/COMMIT/ROLLBACK and connection lifecycle. Entity repositories accept the same client; only the transaction helper releases it. Schema SQL in migrations is the explicit exception.
 
+Implemented account administration uses an authenticated active session and a current `owner` or `admin` database role. Approval, rejection, blocking, and unblocking are locked, audited state transitions; blocking revokes live sessions atomically. Initial owner assignment is a one-time local CLI operation protected by a PostgreSQL advisory lock, never a public endpoint or automatic startup action.
+
 For new EVEREST code, place notification/statistics repositories under src/repositories/notifications/ and src/repositories/stats/. Do not maintain a second convention nested under services. Adapt existing code by requested increment, without unrelated wholesale moves.
 
 Keep AGENTS.md as shared instructions. Root CLAUDE.md imports @AGENTS.md. Use documented per-agent skill discovery folders and synchronize any copies. Both agents read docs/progress.md, actual git status/diff and migrations before resuming; record tested commands, incomplete work and unresolved choices.

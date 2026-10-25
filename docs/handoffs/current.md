@@ -1,9 +1,9 @@
 ---
 project: EVEREST Backend
-current_milestone: M02C
+current_milestone: M02D
 status: ready
-branch: refactor/m01r-numeric-identifiers
-base_commit: ca7a3ba
+branch: feat/m02c-account-approval
+base_commit: 66d1099
 updated_at: 2026-10-25
 ---
 
@@ -11,39 +11,34 @@ updated_at: 2026-10-25
 
 ## Completed work
 
-- M00, M01, M02A, M02B, and the blocking M01R numeric identifier foundation are complete in this branch.
-- M01R replaced internal UUID entity identifiers with PostgreSQL-generated identity `BIGINT`s across all 13 pre-production migrations and current authentication code.
-- Repositories generate IDs through PostgreSQL and `RETURNING`; API/JWT identifiers are validated decimal strings that preserve `BIGINT` precision.
-- The only database UUID is the intentionally opaque `sms_deliveries.idempotency_key`.
-
-## Safety and database result
-
-- Before rebuilding, `localhost:5432/everest_db` had no application data beyond four role seeds. A custom-format backup exists at `C:\Temp\everest-m01r-backups\everest_db-before-m01r-20261025-162519.dump`.
-- Only the verified local `everest_db` was dropped/recreated. All 13 migrations applied and the second up was a no-op.
-- The disposable rollback cycle used a separate generated test database, passed up/no-op/down-one/up, and dropped it. No rollback ran against `everest_db`.
-- Catalog: 82 application tables, 650 columns, 157 FKs, 293 indexes, seven functions, 11 triggers, four role seeds, 13 migrations, and 64 identity columns.
+- M00, M01, M01R, M02A, M02B, and M02C are complete.
+- M02C added owner/admin-only pending-account listing and approve, reject, block, and unblock APIs.
+- State changes lock the target and atomically write audits; block revokes all live sessions, and unblock does not restore them.
+- The local `bootstrap:owner` command safely assigns the first owner under an advisory transaction lock.
+- Exact migration-source verification now normalizes only CRLF/CR to LF, with `.gitattributes` enforcing LF. Published migration content is unchanged.
 
 ## Verification
 
-- `npm test`: passed eight schema-integrity cases, 24 authentication tests, migration-source verification, and server lifecycle checks.
-- Password registration/login and Telegram link/login integrations passed against real PostgreSQL with numeric identifiers; Telegram providers remained mocked.
-- `node scripts/verify-database.js`: passed all catalog, identifier-type, generated-ID, seed, and forbidden-table checks.
-- JavaScript syntax, source digest, SQL-boundary search, UUID/random-generation classification, and `git diff --check` passed in the final audit.
+- Both final `npm run migrate:up` executions were no-ops.
+- `npm test` passed migration-source integrity, eight schema-integrity cases, 34 authentication tests, and server lifecycle checks.
+- `node scripts/verify-database.js` passed: 82 tables, 650 columns, 157 foreign keys, 293 indexes, 13 migrations, and 64 identity columns.
+- The only UUID column remains the opaque `sms_deliveries.idempotency_key`.
+- The disposable migration-cycle script could not create its separate database because `everest_app` lacks `CREATEDB`; no rollback ran against `everest_db`.
 
 ## Current milestone
 
-M02C — account approval — is Planned and ready after the M01R pull request is reviewed and merged.
+M02D — session lifecycle — is Planned and ready after the M02C pull request is reviewed and merged.
 
 ## Next concrete task
 
-Implement the narrowly scoped administrator guard and account-state API for listing pending users, approving, rejecting, blocking, and unblocking. Lock transitions, audit the administrator decision atomically, and revoke live sessions when blocking. Keep generalized authorization in M02F.
+Define and implement refresh-token creation and rotation, reuse detection, logout, logout-all, session listing/revocation, device-safe metadata, and last-used tracking. Confirm cookie and token lifecycle decisions before implementation.
 
 ## Constraints
 
-- Numeric IDs are decimal strings at JavaScript/API/JWT boundaries; never coerce them through `Number`, assume gaplessness, or renumber them.
-- Keep opaque security/provider values distinct from internal IDs.
-- Preserve route → middleware → controller → service → repository → `pg`.
-- Do not edit the published numeric migration baseline; future schema changes require incremental migrations.
+- Numeric IDs remain canonical positive decimal strings at JavaScript/API/JWT boundaries.
+- Preserve route → middleware → controller → service → repository → PostgreSQL.
+- Keep generalized RBAC in M02F; do not broaden the M02C role guard implicitly.
+- Do not edit the 13 published migrations.
 - Never run destructive rollback tests against `everest_db`.
 
 ## Safe startup commands
@@ -54,10 +49,7 @@ git branch --show-current
 git log -5 --oneline
 Get-Content ROADMAP.md
 Get-Content docs/handoffs/current.md
-Get-Content docs/architecture.md
-Get-Content docs/progress.md
-Get-Content docs/decisions.md
-npm test
 npm run migrate:up
+npm test
 node scripts/verify-database.js
 ```

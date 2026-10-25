@@ -202,6 +202,16 @@ test('Telegram start/callback/link/replay/validation/unlink integration', async 
       assert.match(loginCallback.response.headers.get('set-cookie'), /^everest_access=/);
       assert.equal(JSON.stringify(loginCallback.body).includes('accessToken'), false);
 
+      await client.query("UPDATE users SET status = 'blocked', blocked_at = CURRENT_TIMESTAMP WHERE id = $1", [first.userId]);
+      const blockedLoginStart = await request(port, '/api/v1/auth/telegram/start');
+      const blockedLogin = await request(
+        port,
+        `/api/v1/auth/telegram/callback?code=shared-subject&state=${encodeURIComponent(stateFrom(blockedLoginStart.body))}`
+      );
+      assert.equal(blockedLogin.response.status, 403);
+      assert.equal(blockedLogin.body.error.code, 'ACCOUNT_NOT_ACTIVE');
+      await client.query("UPDATE users SET status = 'active', blocked_at = NULL WHERE id = $1", [first.userId]);
+
       const message = await request(port, '/api/v1/auth/telegram/test-message', {
         method: 'POST', headers: { authorization: `Bearer ${first.token}` },
       });

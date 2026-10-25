@@ -14,6 +14,7 @@
     "migrate:up": "node src/configs/migrate.js up",
     "migrate:down": "node src/configs/migrate.js down",
     "migrate:create": "node-pg-migrate create -m src/migrations -j js",
+    "bootstrap:owner": "node scripts/bootstrap-owner.js",
     "test:sources": "node scripts/verify-migration-sources.js",
     "test:integrity": "node scripts/test-schema-integrity.js",
     "test:server": "node scripts/test-server.js",

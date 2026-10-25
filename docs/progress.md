@@ -4,7 +4,16 @@ Updated: 2026-10-25.
 
 ## Current increment
 
-Milestone M01R: numeric identifier foundation. Implementation, local rebuild, full verification, and disposable rollback testing are complete; M02C account approval is next.
+Milestone M02C: account approval administration. Implementation, tests, and documentation are complete on `feat/m02c-account-approval`; M02D session lifecycle is next.
+
+## 2026-10-25 — M02C account approval
+
+- Added authenticated owner/admin account administration for pending-user listing and approve, reject, block, and unblock transitions.
+- State decisions lock the target row and share one transaction with audit writes; blocking also revokes every live session, while unblocking leaves revoked sessions invalid.
+- Added canonical decimal-string route-ID validation, deterministic bounded pagination, safe DTOs, self-block/reject protection, and stable authorization/transition errors.
+- Added a local, advisory-lock-protected initial-owner bootstrap command with no public route.
+- Added unit and real-PostgreSQL integration coverage for roles, pagination, invalid IDs, concurrency, transitions, rollback, audits, session revocation, bootstrap concurrency, and password/Telegram account-state enforcement.
+- Fixed Windows portability of exact migration-source verification by normalizing only line endings and adding an LF `.gitattributes` policy; published migrations were unchanged.
 
 ## Implemented
 

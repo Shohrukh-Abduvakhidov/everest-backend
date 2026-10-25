@@ -22,7 +22,7 @@ The current backend is a small layered modular monolith. The foundation, full da
 | Security/token library | `jose` 6.2.13 |
 | Configuration | `dotenv` 17.4.2 and validated readers in `src/configs/env.js` |
 | Tests | Node's built-in test runner plus PostgreSQL integration/verification scripts |
-| Current milestone | M02C account approval planned next; M01R numeric identifier foundation complete |
+| Current milestone | M02C account approval implemented; M02D session lifecycle planned next |
 
 ## 2. Repository tree
 
@@ -86,6 +86,8 @@ Routes under `/api/v1` are:
 - `POST /auth/register`: transactional pending-student phone/password registration.
 - `POST /auth/login/password`: active-account password login and session issuance.
 - `/auth/*`: Telegram routes described below.
+- `GET /admin/users/pending`: owner/admin pending-account listing.
+- `POST /admin/users/:userId/{approve,reject,block,unblock}`: locked and audited account-state transitions.
 
 ## 4. Layered architecture
 
@@ -113,7 +115,7 @@ flowchart LR
 
 `withTransaction()` acquires one client, issues `BEGIN`, invokes the service callback, commits or rolls back, and releases in `finally`. Telegram link/login/unlink services pass that same client to every transaction-only repository method. No runtime application SQL or `.query()` call was found outside repositories; tests and operational scripts are intentional exceptions. No CommonJS usage was found.
 
-Validation is currently lightweight and service-owned: password-auth request shape, E.164/name/password rules, Telegram intent, callback state/code, configuration, verified claims, account state, session state, identity conflicts, and unlink safety are checked in services/providers. There is no general request-schema validator. Authorization currently stops at authenticated active-user resolution; RBAC/action/resource authorization is planned.
+Validation is currently lightweight and service-owned: password-auth request shape, E.164/name/password rules, Telegram intent, callback state/code, configuration, verified claims, account state, session state, identity conflicts, unlink safety, pagination, and canonical account IDs are checked in services/providers. There is no general request-schema validator. M02C adds a narrow database-backed owner/admin guard only for account-state endpoints; generalized RBAC/action/resource authorization remains planned.
 
 Errors propagate through `asyncHandler` or explicit middleware `try/catch` to the global error handler.
 
@@ -222,7 +224,7 @@ erDiagram
     users ||--o{ audit_events : acts_or_subject
 ```
 
-- `users` is the platform identity and account lifecycle (`pending`, `active`, `blocked`, `rejected`). Telegram and password login check `active`; approval APIs do not exist.
+- `users` is the platform identity and account lifecycle (`pending`, `active`, `blocked`, `rejected`). Telegram and password login check `active`; M02C implements administrator approval, rejection, blocking, and unblocking.
 - `user_profiles` stores names, language, timezone, and optional avatar relation. Registration creates the initial name record; profile APIs remain planned.
 - `user_phones` represents E.164 ownership and verification. M02B creates an unverified phone for registration and resolves password login by its normalized value; verification APIs remain planned.
 - `user_passwords` stores one self-describing salted `scrypt` hash per password user. Registration and password verification are implemented.
@@ -232,7 +234,7 @@ erDiagram
 - `auth_challenges` and `sms_deliveries` model OTP and delivery state. No service/provider exists.
 - `telegram_oidc_states` stores short-lived login/link protocol state and is implemented.
 - `telegram_connections` is bot messaging permission/destination, separate from login identity; link/test/disconnect behavior is implemented.
-- `roles` contains seeded `owner`, `admin`, `teacher`, `student`; `user_roles` links users. No RBAC middleware exists.
+- `roles` contains seeded `owner`, `admin`, `teacher`, `student`; `user_roles` links users. A narrow owner/admin middleware protects M02C routes; general RBAC remains planned.
 - `audit_events` is generic audit storage. Telegram link/unlink and password registration/successful login write events; broader auditing is planned.
 
 ## 9. Telegram OIDC architecture
@@ -478,7 +480,7 @@ Actual response envelopes:
 | Numeric identifiers (M01R) | Done | 64 identity columns; internal IDs/FKs are `BIGINT`; decimal-string API/JWT contract |
 | Telegram OIDC | Done | Login/link/unlink/session/test-message routes and tests |
 | Phone/password authentication | Done | Pending registration, salted `scrypt`, active-only login, shared session, audit, tests |
-| Account approval | Planned | User status columns only |
+| Account approval | Done | Pending list, locked transitions, audit, session revocation, initial-owner bootstrap |
 | Session refresh/rotation | Planned | Refresh table only |
 | Password recovery | Planned | Challenge/SMS tables only |
 | Roles and permissions | Planned | Seeded schema, no enforcement |
@@ -546,7 +548,7 @@ Explicit M02B exclusions: SMS, OTP, password recovery, Telegram recovery, admini
 
 ### M02C — Account approval
 
-This is the next implementation milestone: list pending accounts, approve/reject, block/unblock, audit administrator decisions, and revoke sessions when an active account is blocked. It requires a narrowly scoped authenticated administrator guard; general RBAC remains M02F.
+Implemented routes list pending accounts and perform approve/reject/block/unblock transitions. Authentication runs first, then a database-backed owner/admin guard. Services lock targets, validate the exact source state, mutate and audit in one transaction; block also revokes every live session and unblock never restores it. A local CLI bootstraps the first owner under an advisory transaction lock and refuses once any owner exists. General RBAC remains M02F.
 
 ### M02D — Session lifecycle
 
