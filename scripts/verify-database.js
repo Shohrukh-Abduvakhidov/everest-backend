@@ -7,13 +7,13 @@ const client = new Client(env.database);
 
 const expected = {
   tables: 82,
-  columns: 650,
+  columns: 654,
   foreignKeys: 157,
-  indexes: 293,
+  indexes: 296,
   functions: 7,
   triggers: 11,
   roles: 4,
-  migrations: 13,
+  migrations: 14,
   identityColumns: 64,
 };
 

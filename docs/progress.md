@@ -4,7 +4,17 @@ Updated: 2026-10-25.
 
 ## Current increment
 
-Milestone M02D: secure multi-device session lifecycle. Implementation and verification are complete on `feat/m02d-session-lifecycle`; M02E password recovery is next and requires provider/limit decisions before SMS work.
+Milestone M02E: secure password recovery. Implementation and verification are complete on `feat/m02e-password-recovery`; M02F authorization and authentication protection is next. Production SMS remains unavailable pending provider approval.
+
+## 2026-10-25 — M02E password recovery
+
+- Added generic recovery request, single-use code verification, and password-reset routes without account, status, linkage, throttle, or delivery enumeration.
+- Added HMAC-protected expiring codes, hashed opaque challenge/reset identifiers, attempt and resend/hour limits, row-lock concurrency, and active-challenge invalidation.
+- Added linked-Telegram delivery through the existing bot abstraction and a production-disabled provider-neutral SMS boundary with test doubles only.
+- Password reset atomically replaces the password, consumes authorization, revokes all sessions/refresh tokens, and audits while preserving account status, roles, and Telegram identity.
+- Added one incremental migration because the baseline challenge table allowed only SMS and lacked separate reset-authorization state; the 13 published migrations remain unchanged.
+- Final verification passed two no-op up migrations, 55 authentication tests, eight schema-integrity cases, server lifecycle, exact baseline-source verification, and the 82-table/654-column/296-index/14-migration catalog.
+- The disposable migration cycle was attempted but could not create its isolated database because `everest_app` lacks `CREATEDB` (`42501`); no rollback ran against `everest_db`.
 
 ## 2026-10-25 — M02D session lifecycle
 
@@ -122,7 +132,7 @@ The project is initialized as a Git repository. The primary branch is `main`, Gi
 
 ## Unresolved product decisions
 
-SMS provider and limits, whether Telegram-authenticated accounts must later verify a phone, NCT attempt scope, partial scoring and reveal timing, ranking formula, access expiry defaults, and AI credit-package interactions remain open.
+Production SMS provider selection, whether Telegram-authenticated accounts must later verify a phone, NCT attempt scope, partial scoring and reveal timing, ranking formula, access expiry defaults, and AI credit-package interactions remain open.
 
 ## Next concrete milestone
 

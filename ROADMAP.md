@@ -1,7 +1,7 @@
 ---
 project: EVEREST Backend
 roadmap_version: 1
-current_milestone: M02E
+current_milestone: M02F
 current_status: planned
 updated_at: 2026-10-25
 architecture: docs/architecture.md
@@ -97,11 +97,11 @@ This roadmap orders implementation; it does not replace the [current architectur
 
 ## M02E — Password recovery
 
-- **Status:** Planned.
+- **Status:** Done.
 - **Goal:** Recover password ownership without leaking account existence.
 - **Dependencies:** M02B–M02D; user-approved SMS provider and limits for SMS recovery.
-- **Deliverables:** Linked-Telegram recovery, SMS adapter after selection, OTP lifecycle, cooldown/attempt limits, reset, and old-session revocation.
-- **Verification:** Ownership, expiry, single use, throttling, concurrency, provider doubles, reset, and revocation tests.
+- **Deliverables:** Linked-Telegram recovery, a provider-neutral production-disabled SMS boundary, OTP lifecycle, cooldown/attempt limits, reset, and old-session revocation. Selecting and calling a production SMS provider remains explicitly excluded pending approval.
+- **Verification:** Real-PostgreSQL and unit coverage passed non-enumeration, ownership, expiry, single use, throttling, concurrency, provider doubles, reset, rollback, state preservation, and session/refresh revocation. The full regression suite passed.
 - **Documentation updates:** API, decisions, architecture, progress, roadmap, and handoff.
 - **Exclusions:** Selecting or calling an SMS provider without approval.
 

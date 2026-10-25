@@ -6,7 +6,7 @@ class TelegramBotProvider {
     this.fetch = fetchImplementation;
   }
 
-  async sendTestMessage(chatId) {
+  async sendMessage(chatId, text) {
     let response;
     try {
       response = await this.fetch(
@@ -14,7 +14,7 @@ class TelegramBotProvider {
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ chat_id: chatId, text: 'EVEREST Telegram connection test' }),
+          body: JSON.stringify({ chat_id: chatId, text }),
         }
       );
     } catch {
@@ -28,6 +28,14 @@ class TelegramBotProvider {
       error.telegramAccessUnavailable = blocked;
       throw error;
     }
+  }
+
+  async sendRecoveryCode(chatId, code) {
+    return this.sendMessage(chatId, `EVEREST password recovery code: ${code}`)
+  }
+
+  async sendTestMessage(chatId) {
+    return this.sendMessage(chatId, 'EVEREST Telegram connection test')
   }
 }
 

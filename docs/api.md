@@ -2,6 +2,28 @@
 
 Internal database identifiers are serialized as canonical positive decimal strings. This preserves PostgreSQL `BIGINT` precision across JSON and JWT claims; clients must not assume identifiers are gapless or safely coerce them to JavaScript `Number`.
 
+## Password recovery
+
+### `POST /api/v1/auth/password-recovery/request`
+
+Accepts `phone` and `channel` (`telegram` or `sms`). Valid phone input is normalized with the registration E.164 rules. Every syntactically valid request returns `202` with the same shape and a random opaque `challengeId`, regardless of account existence, status, linkage, cooldown, limit, provider availability, or delivery outcome:
+
+```json
+{"data":{"status":"accepted","challengeId":"opaque-request-identifier"}}
+```
+
+Eligible active, pending, or blocked password accounts may receive a Telegram code only when a verified Telegram identity and active bot connection both exist. Rejected accounts are ineligible. Pending/blocked status is never changed by recovery. SMS uses the same internal service boundary but production delivery is disabled until an approved provider is configured. A new eligible request invalidates earlier active recovery challenges. The default limits are a 10-minute code, five attempts, a 60-second resend cooldown, and five created requests per account/channel/hour.
+
+### `POST /api/v1/auth/password-recovery/verify`
+
+Accepts `challengeId` and a six-digit `code`. A valid one-use code returns a 10-minute opaque `resetAuthorization`; invalid, expired, consumed, invalidated, or attempt-exhausted challenges use `401 INVALID_RECOVERY_CHALLENGE`. Concurrent verification permits one success.
+
+### `POST /api/v1/auth/password-recovery/reset`
+
+Accepts `resetAuthorization` and `newPassword`. The existing password policy applies. A successful reset atomically consumes the authorization, replaces the password, revokes every session and refresh token, and writes an audit event. It returns `{"data":{"status":"password_reset"}}`; the client must log in again. Invalid, expired, or consumed authorization uses `401 INVALID_RESET_AUTHORIZATION`, and concurrent reset permits one success. Roles, Telegram identity, and account status remain unchanged.
+
+Codes, code hashes, reset hashes, passwords, and provider details are never returned. The opaque reset authorization is returned only by successful verification and is never stored in plaintext.
+
 ## Session lifecycle
 
 Password and Telegram login set two HttpOnly cookies: short-lived `everest_access` at path `/` and opaque `everest_refresh` at path `/api/v1/auth`. Tokens are never returned in JSON. In production both cookies are `Secure`; all environments use `SameSite=Lax` and explicit expiry.
