@@ -9,13 +9,15 @@ import { createAuthRouter } from './auth.js';
 
 function createRoutes(
   service = telegramAuthService, passwordService = passwordAuthService,
-  adminService, lifecycleService
+  adminService, lifecycleService, recoveryService
 ) {
   const router = express.Router();
 
   router.get('/health', healthController.getLiveness);
   router.get('/ready', asyncHandler(healthController.getReadiness));
-  router.use('/auth', createAuthRouter(service, passwordService, lifecycleService));
+  router.use('/auth', createAuthRouter(
+    service, passwordService, lifecycleService, recoveryService
+  ));
   router.use('/admin', createAdminRouter(service, adminService));
   return router;
 }

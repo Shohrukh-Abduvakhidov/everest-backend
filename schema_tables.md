@@ -1,6 +1,6 @@
 # EVEREST — Database Table Specification and Migration Contract
 
-Version: 0.3.0 documentation, based on the M01R numeric-identifier baseline. Date: 2026-10-25.
+Version: 0.3.1 documentation, based on the M01R numeric-identifier baseline plus applied incremental migrations. Date: 2026-10-25.
 Language: English. Audience: Codex, Claude Code and backend developers.
 Authoritative repository location: root `schema_tables.md`.
 
@@ -158,7 +158,7 @@ Proposed typed answer-key contracts, to validate before setting verified:
 
 Student answer_data is a separately validated learner payload; do not copy a verified key into a student response. policy_snapshot and grading_snapshot capture the rules used for that attempt and are not editable authoring sources. Decimal values must preserve exactness.
 
-Open decisions: mandatory phone for Telegram-only activation; required surname/approval permissions; SMS provider/OTP TTL and resend limits; grant lifetime and reopening UX; NCT attempt scope and reveal timing; partial credit/numeric tolerance; ranking formula; shared vs personal AI quotas; bonus package interaction/expiry/refunds; offline lease/progress conflict/completion thresholds. Defaults in SQL are technical baseline choices, not evidence these product questions were approved. Resolve an affected decision before implementing its behavior, without blocking unrelated schema work.
+Open decisions: mandatory phone for Telegram-only activation; required surname/approval permissions; production SMS provider; grant lifetime and reopening UX; NCT attempt scope and reveal timing; partial credit/numeric tolerance; ranking formula; shared vs personal AI quotas; bonus package interaction/expiry/refunds; offline lease/progress conflict/completion thresholds. Defaults in SQL are technical baseline choices, not evidence these product questions were approved. Resolve an affected decision before implementing its behavior, without blocking unrelated schema work.
 
 ## 6. Table dictionary
 
@@ -518,7 +518,7 @@ No incoming foreign keys in this baseline.
 
 #### `auth_challenges`
 
-Single-use SMS challenges for registration, phone verification/change and password reset.
+Single-use SMS or Telegram challenges for registration, phone verification/change and password reset. M02E adds opaque public identifiers and a distinct hash-only reset-authorization lifecycle; the complete SQL later in this document remains the immutable baseline rather than being rewritten.
 
 | Column | PostgreSQL type | Required | Default |
 |---|---|---|---|
@@ -535,28 +535,38 @@ Single-use SMS challenges for registration, phone verification/change and passwo
 | `expires_at` | `timestamptz` | yes | — |
 | `consumed_at` | `timestamptz` | no | — |
 | `invalidated_at` | `timestamptz` | no | — |
+| `public_id_hash` | `text` | no | — |
+| `reset_token_hash` | `text` | no | — |
+| `reset_expires_at` | `timestamptz` | no | — |
+| `reset_consumed_at` | `timestamptz` | no | — |
 
 **Keys and constraints**
 
 - `auth_challenges_pkey`: `PRIMARY KEY (id)`
 - `auth_challenges_user_id_fkey`: `FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT`
 - `challenges_attempts_check`: `CHECK (((max_attempts > 0) AND ((attempts_count >= 0) AND (attempts_count <= max_attempts))))`
-- `challenges_channel_check`: `CHECK (((channel)::text = 'sms'::text))`
+- `challenges_channel_check`: `CHECK (((channel)::text = ANY ((ARRAY['sms'::character varying, 'telegram'::character varying])::text[])))`
 - `challenges_expiry_check`: `CHECK ((expires_at > created_at))`
 - `challenges_owner_check`: `CHECK (((user_phone_id IS NULL) OR (user_id IS NOT NULL)))`
 - `challenges_phone_check`: `CHECK (((target_phone_e164)::text ~ '^\+[1-9][0-9]{1,14}$'::text))`
 - `challenges_phone_owner_fk`: `FOREIGN KEY (user_phone_id, user_id) REFERENCES user_phones(id, user_id) ON DELETE RESTRICT`
 - `challenges_purpose_check`: `CHECK (((purpose)::text = ANY ((ARRAY['register_phone'::character varying, 'verify_phone'::character varying, 'reset_password'::character varying, 'change_phone'::character varying])::text[])))`
 - `challenges_reset_binding_check`: `CHECK ((((purpose)::text <> 'reset_password'::text) OR ((user_id IS NOT NULL) AND (user_phone_id IS NOT NULL))))`
+- `challenges_reset_authorization_check`: the reset hash and expiry appear together only after OTP consumption; reset consumption cannot precede OTP consumption
+- `challenges_public_id_hash_unique`: `UNIQUE (public_id_hash)`
+- `challenges_reset_token_hash_unique`: `UNIQUE (reset_token_hash)`
 - `challenges_secret_check`: `CHECK ((length(secret_hash) > 0))`
 
 **Indexes** (constraint-backed indexes are included; do not create them a second time)
 
 - `CREATE UNIQUE INDEX auth_challenges_pkey ON public.auth_challenges USING btree (id)`
+- `CREATE UNIQUE INDEX challenges_public_id_hash_unique ON public.auth_challenges USING btree (public_id_hash)`
+- `CREATE UNIQUE INDEX challenges_reset_token_hash_unique ON public.auth_challenges USING btree (reset_token_hash)`
 - `CREATE INDEX challenges_expiry_idx ON public.auth_challenges USING btree (expires_at)`
 - `CREATE INDEX challenges_phone_owner_idx ON public.auth_challenges USING btree (user_phone_id, user_id)`
 - `CREATE INDEX challenges_target_created_idx ON public.auth_challenges USING btree (target_phone_e164, purpose, created_at)`
 - `CREATE INDEX challenges_user_idx ON public.auth_challenges USING btree (user_id)`
+- `CREATE INDEX challenges_user_purpose_channel_created_idx ON public.auth_challenges USING btree (user_id, purpose, channel, created_at DESC)`
 
 **Referenced by**
 
