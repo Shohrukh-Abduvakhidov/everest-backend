@@ -1,9 +1,9 @@
 ---
 project: EVEREST Backend
-current_milestone: M03
+current_milestone: M04
 status: planned
-branch: feat/m02f-b-auth-protection
-base_commit: 1dbce804
+branch: feat/m03-user-profiles-onboarding
+base_commit: 24b7eb7d
 updated_at: 2026-10-26
 ---
 
@@ -11,30 +11,30 @@ updated_at: 2026-10-26
 
 ## Completed work
 
-- M00 through M02F-B are Done.
-- M02F-B added persistent authentication throttles, password brute-force lockout, and session-bound CSRF/origin protection.
-- The completion record is archived at `docs/handoffs/2026-10-26-m02f-b-auth-protection.md`.
+- M00 through M03 are Done.
+- M03 added ownership-safe self-profile and onboarding APIs with no schema change.
+- The completion record is archived at `docs/handoffs/2026-10-26-m03-user-profiles-onboarding.md`.
 
 ## Verification
 
-- `npm test` passed 62 authentication tests plus schema integrity and server lifecycle.
-- Catalog verification passed at 85 tables and 16 migrations.
-- The optional disposable rollback was unavailable because `everest_app` lacks `CREATEDB`; `everest_db` was never rolled back.
+- Focused profile integration passed eight tests against PostgreSQL.
+- `npm test` passed 70 tests plus migration-source integrity, eight schema-integrity cases, and server lifecycle.
+- `npm run migrate:up` was a no-op; the catalog remains at 85 tables and 16 migrations.
 
 ## Current milestone
 
-M03 — user profiles and onboarding — is Planned.
+M04 — groups — is Planned.
 
 ## Next concrete task
 
-Confirm the self-profile fields and avatar/onboarding contracts, then implement ownership-safe read/update APIs without broadening administrator workflows.
+Confirm group list/detail, membership, teacher-permission, and announcement contracts before implementing M04. Groups must never grant course access.
 
 ## Constraints
 
 - Preserve route → middleware → controller → service → repository → PostgreSQL.
-- Preserve M02F-A permission checks and M02F-B rate/CSRF protections.
-- Keep internal IDs as canonical decimal strings and never expose private authentication fields.
-- Do not edit the 16 published migrations or select external storage without approval.
+- Preserve M02F-A authorization, M02F-B rate/CSRF protections, and M03 ownership-safe profile behavior.
+- Do not add `group_courses` or infer learning access from group membership.
+- Do not edit the 16 published migrations.
 
 ## Safe startup commands
 

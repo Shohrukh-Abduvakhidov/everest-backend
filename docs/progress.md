@@ -4,7 +4,15 @@ Updated: 2026-10-25.
 
 ## Current increment
 
-Milestone M02F-B: authentication protection hardening. Implementation and verification are complete on `feat/m02f-b-auth-protection`; M03 user profiles and onboarding is next. Production SMS remains unavailable pending provider approval.
+Milestone M03: user profiles and onboarding. Implementation and verification are complete on `feat/m03-user-profiles-onboarding`; M04 groups is next. Production SMS remains unavailable pending provider approval.
+
+## 2026-10-26 — M03 user profiles and onboarding
+
+- Added authenticated own-profile read/update and server-driven onboarding state/update/completion routes.
+- Reused the existing schema without a migration. Editable fields are names, language, and timezone; phone, status, roles, identifiers, and avatar reference remain read-only.
+- Onboarding requires first and last name, locks profile/account state, requires an active account, is idempotent, and audits updates/completion in the same transaction.
+- Focused PostgreSQL integration passed eight tests covering ownership, redaction, validation, CSRF, state calculation, incomplete/successful/repeated completion, inactive accounts, audit, rollback, and decimal-string IDs.
+- `npm test` passed 70 tests plus migration-source integrity, eight schema-integrity cases, and server lifecycle. `npm run migrate:up` was a no-op.
 
 ## 2026-10-26 — M02F-B authentication protection
 
