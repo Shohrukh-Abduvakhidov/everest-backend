@@ -1,5 +1,17 @@
 # Implemented API
 
+## User profile and onboarding
+
+All profile routes require a valid active-account session. Identity comes only from the authenticated session; request bodies cannot select another user.
+
+- `GET /api/v1/profile` returns the authenticated user's decimal-string ID, names, derived display name, phone, read-only avatar asset reference, status, roles, preferred language, timezone, onboarding state, and timestamps.
+- `PATCH /api/v1/profile` partially updates `firstName`, `lastName`, `preferredLanguage`, and `timezone`. Names may be explicitly cleared with `null`; omitted fields remain unchanged. Phone, status, roles, permissions, identifiers, and avatar are read-only.
+- `GET /api/v1/profile/onboarding` returns `state`, `completedSteps`, `missingRequiredFields`, `canComplete`, and `completedAt`.
+- `PATCH /api/v1/profile/onboarding` updates the same supported profile fields without completing onboarding.
+- `POST /api/v1/profile/onboarding/complete` atomically completes onboarding when the active account has both `firstName` and `lastName`. Missing fields return `409 ONBOARDING_INCOMPLETE`; retrying an already completed request returns the existing completed state without another audit event.
+
+Mutation routes use the existing cookie-authentication CSRF/origin protection. Supported API language codes are `ru`, `tj`, and `en`; `tj` maps to the baseline schema's Tajik code `tg`. Time zones must be supported IANA identifiers. No avatar upload, grade/class, educational direction, or learning-goal write is exposed because the current schema/runtime does not safely support those operations.
+
 ## Authentication protection
 
 Sensitive public authentication routes and account-administration mutations use PostgreSQL-backed request counters. Exceeded limits return `429 AUTH_RATE_LIMITED` with a whole-second `Retry-After` header. Password login additionally permits five attempts per normalized phone in a 15-minute window and blocks further attempts for 15 minutes; keys are HMAC-derived and no phone, password, OTP, access token, or refresh token is stored in the counter table. Successful password login clears its account counter. Unknown and known accounts retain the same `401 INVALID_CREDENTIALS` response before rate limiting.

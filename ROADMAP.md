@@ -1,7 +1,7 @@
 ---
 project: EVEREST Backend
 roadmap_version: 1
-current_milestone: M03
+current_milestone: M04
 current_status: planned
 updated_at: 2026-10-26
 architecture: docs/architecture.md
@@ -127,11 +127,11 @@ This roadmap orders implementation; it does not replace the [current architectur
 
 ## M03 — User profiles and onboarding
 
-- **Status:** Planned
+- **Status:** Done
 - **Goal:** Support safe self-profile and onboarding workflows.
 - **Dependencies:** M02B and M02F.
-- **Deliverables:** Read/update own profile, avatar, language/timezone, onboarding completion, and safe public fields.
-- **Verification:** Validation, ownership, asset authorization, and field-redaction tests.
+- **Deliverables:** Authenticated own-profile read/update, read-only avatar reference, language/timezone preferences, and idempotent onboarding completion using the existing schema.
+- **Verification:** Ownership, safe DTO redaction, partial-update validation, CSRF, onboarding state/completion, inactive-account denial, audit, and rollback tests passed.
 - **Documentation updates:** API, architecture, progress, roadmap, handoff.
 - **Exclusions:** Administrator account-state operations.
 

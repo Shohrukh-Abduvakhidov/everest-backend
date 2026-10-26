@@ -22,7 +22,7 @@ The current backend is a small layered modular monolith. The foundation, full da
 | Security/token library | `jose` 6.2.13 |
 | Configuration | `dotenv` 17.4.2 and validated readers in `src/configs/env.js` |
 | Tests | Node's built-in test runner plus PostgreSQL integration/verification scripts |
-| Current milestone | M02F-B complete; M03 profiles and onboarding planned next |
+| Current milestone | M03 complete; M04 groups planned next |
 
 ## 2. Repository tree
 
@@ -234,7 +234,7 @@ erDiagram
 ```
 
 - `users` is the platform identity and account lifecycle (`pending`, `active`, `blocked`, `rejected`). Telegram and password login check `active`; M02C implements administrator approval, rejection, blocking, and unblocking.
-- `user_profiles` stores names, language, timezone, and optional avatar relation. Registration creates the initial name record; profile APIs remain planned.
+- `user_profiles` stores names, language, timezone, and optional avatar relation. Registration creates the initial record; M03 exposes ownership-safe self-profile and onboarding APIs while keeping avatar upload deferred.
 - `user_phones` represents E.164 ownership and verification. M02B creates an unverified phone for registration and resolves password login by its normalized value; verification APIs remain planned.
 - `user_passwords` stores one self-describing salted `scrypt` hash per password user. Registration and password verification are implemented.
 - `auth_identities` stores verified external login identity. Only Telegram `(provider, issuer, provider_subject)` is permitted and implemented.
@@ -354,7 +354,7 @@ The initial permission set exactly preserves account administration: `accounts.p
 | Domain | Principal tables | API / service / repository | Status |
 |---|---|---|---|
 | Authentication | `users`, profiles/phones/passwords, identities, sessions, refresh tokens, challenges, roles | Telegram OIDC plus phone/password registration/login | Partial |
-| Profiles | `user_profiles`, `user_phones`, `assets` | Registration creates the initial private profile/phone; profile APIs absent | Partial |
+| Profiles | `users`, `user_profiles`, `user_phones`, `roles`, `assets` | Five authenticated own-profile/onboarding routes | Done for M03 self-service scope |
 | Groups | `groups`, `group_members`, `group_teachers`, announcements/assets | None | Planned (schema only) |
 | Courses/access | `courses`, teachers, enrollments, modules, module grants | None | Planned (schema + DB access function) |
 | Lessons/progress | `lessons`, resources, progress, notes, favorites, offline downloads | None | Planned (schema only) |
@@ -437,7 +437,7 @@ No AI route, service, repository, prompt, worker, model selection, or provider c
 
 Telegram unit tests cover PKCE, state/nonce hashing, verifier encryption, JWKS signature, issuer, audience, expiry, and nonce. Telegram integration tests mock discovery/token/JWKS behavior and Bot API delivery. Password tests cover registration/login plus recovery non-enumeration, HMAC/hash-only state, limits, expiry, concurrency, rollback, reset, state preservation, and session revocation. PostgreSQL integration is real, external providers are not contacted, and fixtures are removed in `finally`.
 
-Last result, 26 October 2026: `npm test` passed 62 authentication tests plus migration-source verification, eight schema-integrity cases, and server lifecycle. `verify-database.js` confirmed 85 tables, 668 columns, 159 foreign keys, 301 indexes, 16 migrations, and 65 identity columns. Disposable rollback was unavailable because the application role lacks `CREATEDB`; no rollback ran against `everest_db`.
+Last result, 26 October 2026: `npm test` passed 70 tests plus migration-source verification, eight schema-integrity cases, and server lifecycle. `verify-database.js` confirmed 85 tables, 668 columns, 159 foreign keys, 301 indexes, 16 migrations, and 65 identity columns. The latest disposable cycle passed up/no-op/down/up; no rollback ran against `everest_db`.
 
 ## 20. Security architecture
 
@@ -494,7 +494,7 @@ Actual response envelopes:
 | Session refresh/rotation | Done | Hash-only rotation, replay revocation, logout/all, owned listing/revocation |
 | Password recovery | Done | Telegram recovery and provider-neutral SMS boundary implemented; production SMS provider approval remains open |
 | Roles and permissions | Partial | Database-backed action permissions enforce account administration; domain/resource rules remain planned |
-| Profiles | Partial | Registration creates the initial private profile; profile APIs remain planned |
+| Profiles | Done | Authenticated own-profile read/update and onboarding state/completion |
 | Groups | Planned | Schema only |
 | Courses/access | Planned | Schema/DB constraints only |
 | Question bank | Planned | Schema/DB guards only |
