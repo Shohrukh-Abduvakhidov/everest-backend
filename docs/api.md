@@ -1,5 +1,16 @@
 # Implemented API
 
+## Group read APIs
+
+All group routes require a valid active-account session and derive the actor exclusively from that session.
+
+- `GET /api/v1/groups` returns only visible group summaries with `limit`/`offset` pagination, deterministic name/ID ordering, counts, and the actor's member/representative/teacher/administrator relationship.
+- `GET /api/v1/groups/:groupId` returns safe group metadata and counts without embedding an unlimited roster.
+- `GET /api/v1/groups/:groupId/members` returns paginated active members with decimal-string user IDs, names, avatar asset references, member/representative role, membership status, and join time.
+- `GET /api/v1/groups/:groupId/teachers` returns paginated assigned teachers with decimal-string IDs, names, avatar references, assignment time, and group-scoped assignment permissions.
+
+Active members may read their groups; assigned teachers may read their groups; current owner/admin roles may read all groups. Missing and inaccessible group resources both return `404 GROUP_NOT_FOUND`. `limit` defaults to 20 and is bounded at 100; `offset` defaults to zero. Group membership never grants course or module access, and these responses contain no course, progress, or ranking data.
+
 ## User profile and onboarding
 
 All profile routes require a valid active-account session. Identity comes only from the authenticated session; request bodies cannot select another user.

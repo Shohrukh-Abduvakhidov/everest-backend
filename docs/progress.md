@@ -4,7 +4,15 @@ Updated: 2026-10-25.
 
 ## Current increment
 
-Milestone M03: user profiles and onboarding. Implementation and verification are complete on `feat/m03-user-profiles-onboarding`; M04 groups is next. Production SMS remains unavailable pending provider approval.
+Milestone M04-A: group read APIs. Implementation and verification are complete on `feat/m04-a-group-read-apis`; M04-B group administration and announcements is next. Production SMS remains unavailable pending provider approval.
+
+## 2026-10-26 — M04-A group read APIs
+
+- Split M04 into M04-A reads and M04-B administration/announcements with explicit M07/M12/M13 dependencies.
+- Added authenticated visible-group list/detail and paginated active-member/assigned-teacher roster routes.
+- Visibility uses live database roles and relationships; missing and inaccessible resources share one stable response.
+- Safe DTOs preserve decimal-string IDs and omit contact/authentication data, course access, progress, and ranking.
+- Focused PostgreSQL integration passed 11 tests; `npm test` passed 81 tests plus source integrity, eight schema-integrity cases, and server lifecycle. `npm run migrate:up` was a no-op.
 
 ## 2026-10-26 — M03 user profiles and onboarding
 
