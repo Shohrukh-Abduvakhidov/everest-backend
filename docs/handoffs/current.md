@@ -1,9 +1,9 @@
 ---
 project: EVEREST Backend
-current_milestone: M04
+current_milestone: M04-B
 status: planned
-branch: feat/m03-user-profiles-onboarding
-base_commit: 24b7eb7d
+branch: feat/m04-a-group-read-apis
+base_commit: b83decb6
 updated_at: 2026-10-26
 ---
 
@@ -11,30 +11,30 @@ updated_at: 2026-10-26
 
 ## Completed work
 
-- M00 through M03 are Done.
-- M03 added ownership-safe self-profile and onboarding APIs with no schema change.
-- The completion record is archived at `docs/handoffs/2026-10-26-m03-user-profiles-onboarding.md`.
+- M00 through M03 and M04-A are Done.
+- M04-A added relationship-scoped group list/detail and safe paginated rosters without a migration.
+- The completion record is archived at `docs/handoffs/2026-10-26-m04-a-group-read-apis.md`.
 
 ## Verification
 
-- Focused profile integration passed eight tests against PostgreSQL.
-- `npm test` passed 70 tests plus migration-source integrity, eight schema-integrity cases, and server lifecycle.
+- Focused group integration passed 11 tests against PostgreSQL.
+- `npm test` passed 81 tests plus migration-source integrity, eight schema-integrity cases, and server lifecycle.
 - `npm run migrate:up` was a no-op; the catalog remains at 85 tables and 16 migrations.
 
 ## Current milestone
 
-M04 — groups — is Planned.
+M04-B — group administration and announcements — is Planned.
 
 ## Next concrete task
 
-Confirm group list/detail, membership, teacher-permission, and announcement contracts before implementing M04. Groups must never grant course access.
+Confirm group CRUD, membership/teacher assignment, and announcement lifecycle permissions before implementing M04-B.
 
 ## Constraints
 
 - Preserve route → middleware → controller → service → repository → PostgreSQL.
-- Preserve M02F-A authorization, M02F-B rate/CSRF protections, and M03 ownership-safe profile behavior.
-- Do not add `group_courses` or infer learning access from group membership.
-- Do not edit the 16 published migrations.
+- Groups never grant course/module access; never add `group_courses`.
+- Announcement assets depend on M07, progress summaries on M12, and ranking on M13 plus an approved formula.
+- Preserve M04-A non-disclosing reads and do not edit the 16 published migrations.
 
 ## Safe startup commands
 

@@ -22,7 +22,7 @@ The current backend is a small layered modular monolith. The foundation, full da
 | Security/token library | `jose` 6.2.13 |
 | Configuration | `dotenv` 17.4.2 and validated readers in `src/configs/env.js` |
 | Tests | Node's built-in test runner plus PostgreSQL integration/verification scripts |
-| Current milestone | M03 complete; M04 groups planned next |
+| Current milestone | M04-A complete; M04-B group administration planned next |
 
 ## 2. Repository tree
 
@@ -355,7 +355,7 @@ The initial permission set exactly preserves account administration: `accounts.p
 |---|---|---|---|
 | Authentication | `users`, profiles/phones/passwords, identities, sessions, refresh tokens, challenges, roles | Telegram OIDC plus phone/password registration/login | Partial |
 | Profiles | `users`, `user_profiles`, `user_phones`, `roles`, `assets` | Five authenticated own-profile/onboarding routes | Done for M03 self-service scope |
-| Groups | `groups`, `group_members`, `group_teachers`, announcements/assets | None | Planned (schema only) |
+| Groups | `groups`, `group_members`, `group_teachers`, announcements/assets | Four authenticated relationship-scoped read routes | Partial: M04-A reads done |
 | Courses/access | `courses`, teachers, enrollments, modules, module grants | None | Planned (schema + DB access function) |
 | Lessons/progress | `lessons`, resources, progress, notes, favorites, offline downloads | None | Planned (schema only) |
 | Assets/video | `assets`, `asset_aliases`, lesson asset FKs | None | Planned (schema only) |
@@ -397,7 +397,7 @@ The database function `can_access_module` implements the grant predicate, but no
 
 The planned group model is `groups` → `group_members`/`group_teachers`/`group_announcements`; announcements may attach assets. Teachers have explicit booleans for announcements, test assignment, and result visibility. Users may be members or teachers independently.
 
-No group routes, services, repositories, list page API, or detail page API exist. The planned UI/API flow is a group list followed by a group detail view containing participants, teachers, announcements, progress summaries, and ranking. Progress aggregation and ranking formula are undecided and unimplemented. Groups must never become an implicit course-access mechanism.
+M04-A implements group list/detail and paginated member/teacher reads. Active students see current memberships, assigned teachers see their groups, and current owner/admin roles see all groups. Access is evaluated in repository SQL from current database state; missing and inaccessible resources are indistinguishable. Administration and announcements remain M04-B, announcement assets depend on M07, progress summaries on M12, and ranking on M13 plus an approved formula. Groups must never become an implicit course-access mechanism.
 
 ## 15. Question bank architecture
 
@@ -437,7 +437,7 @@ No AI route, service, repository, prompt, worker, model selection, or provider c
 
 Telegram unit tests cover PKCE, state/nonce hashing, verifier encryption, JWKS signature, issuer, audience, expiry, and nonce. Telegram integration tests mock discovery/token/JWKS behavior and Bot API delivery. Password tests cover registration/login plus recovery non-enumeration, HMAC/hash-only state, limits, expiry, concurrency, rollback, reset, state preservation, and session revocation. PostgreSQL integration is real, external providers are not contacted, and fixtures are removed in `finally`.
 
-Last result, 26 October 2026: `npm test` passed 70 tests plus migration-source verification, eight schema-integrity cases, and server lifecycle. `verify-database.js` confirmed 85 tables, 668 columns, 159 foreign keys, 301 indexes, 16 migrations, and 65 identity columns. The latest disposable cycle passed up/no-op/down/up; no rollback ran against `everest_db`.
+Last result, 26 October 2026: `npm test` passed 81 tests plus migration-source verification, eight schema-integrity cases, and server lifecycle. `verify-database.js` confirmed 85 tables, 668 columns, 159 foreign keys, 301 indexes, 16 migrations, and 65 identity columns. The latest disposable cycle passed up/no-op/down/up; no rollback ran against `everest_db`.
 
 ## 20. Security architecture
 
@@ -495,7 +495,7 @@ Actual response envelopes:
 | Password recovery | Done | Telegram recovery and provider-neutral SMS boundary implemented; production SMS provider approval remains open |
 | Roles and permissions | Partial | Database-backed action permissions enforce account administration; domain/resource rules remain planned |
 | Profiles | Done | Authenticated own-profile read/update and onboarding state/completion |
-| Groups | Planned | Schema only |
+| Groups | Partial | M04-A reads done; administration and announcements planned in M04-B |
 | Courses/access | Planned | Schema/DB constraints only |
 | Question bank | Planned | Schema/DB guards only |
 | Test engine | Planned | Schema/DB constraints only |

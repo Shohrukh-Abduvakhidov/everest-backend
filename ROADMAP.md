@@ -1,7 +1,7 @@
 ---
 project: EVEREST Backend
 roadmap_version: 1
-current_milestone: M04
+current_milestone: M04-B
 current_status: planned
 updated_at: 2026-10-26
 architecture: docs/architecture.md
@@ -135,15 +135,25 @@ This roadmap orders implementation; it does not replace the [current architectur
 - **Documentation updates:** API, architecture, progress, roadmap, handoff.
 - **Exclusions:** Administrator account-state operations.
 
-## M04 — Groups
+## M04-A — Group read APIs
+
+- **Status:** Done
+- **Goal:** Provide ownership-safe group list, detail, member, and teacher reads.
+- **Dependencies:** M02F and M03.
+- **Deliverables:** Authenticated visible-group list/detail plus paginated safe member and teacher rosters. Groups never grant course access.
+- **Verification:** Membership/teacher/admin visibility, non-disclosing denial, pagination, safe DTO, decimal-ID, empty-group, and no-course-grant tests passed.
+- **Documentation updates:** API, decisions, architecture, progress, roadmap.
+- **Exclusions:** Administration, announcements, assets, progress, ranking, course access, and `group_courses`.
+
+## M04-B — Group administration and announcements
 
 - **Status:** Planned
-- **Goal:** Organize people, teachers, permissions, and announcements without granting learning access.
-- **Dependencies:** M02F, M03, M07 for attached assets.
-- **Deliverables:** Group list/detail, members, teachers, group roles/permissions, announcements/assets, and planned progress summaries. Groups never grant course access.
-- **Verification:** Membership/teacher authorization, announcement scope, asset access, and no implicit course-grant tests.
-- **Documentation updates:** API, decisions, architecture, progress, roadmap.
-- **Exclusions:** Ranking implementation until its formula is approved; `group_courses`.
+- **Goal:** Manage groups, memberships, teacher assignments, and announcements without granting learning access.
+- **Dependencies:** M04-A; announcement assets depend on M07.
+- **Deliverables:** Group administration, member/teacher assignment, teacher permissions, and announcement lifecycle.
+- **Verification:** Administrative permissions, atomic membership changes, announcement scope, and no implicit course-grant tests.
+- **Documentation updates:** API, decisions, architecture, progress, roadmap, handoff.
+- **Exclusions:** Announcement assets before M07; progress summaries before M12; ranking before M13 and an approved formula; `group_courses`.
 
 ## M05 — Course management
 

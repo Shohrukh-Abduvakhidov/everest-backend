@@ -12,4 +12,5 @@ import './integration/account-admin.test.js';
 import './integration/session-lifecycle.test.js';
 import './integration/password-recovery.test.js';
 import './integration/profile.test.js';
+import './integration/groups.test.js';
 import './integration/telegram-auth.test.js';
