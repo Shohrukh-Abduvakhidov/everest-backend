@@ -1,5 +1,11 @@
 import env from '../configs/env.js'
-import { sessionLifecycleService } from '../services/session-lifecycle-service.js'
+import {
+   listSessionsService,
+   logoutAllService,
+   logoutService,
+   refreshSessionService,
+   revokeOwnedSessionService,
+} from '../services/session-lifecycle-service.js'
 import {
    clearAuthCookies,
    readAccessToken,
@@ -12,84 +18,83 @@ function safeResult(result) {
    return safe
 }
 
-function createSessionController(service = sessionLifecycleService) {
-   async function refreshSessionController(req, res, next) {
-      try {
-         const result = await service.refresh(readRefreshToken(req))
-         setAuthCookies(res, result, env)
-         res.json({ data: safeResult(result) })
-      } catch (error) {
-         clearAuthCookies(res, env)
-         next(error)
-      }
-   }
+async function refreshSessionController(req, res, next) {
+   try {
+      const result = await refreshSessionService(
+         readRefreshToken(req),
+         req.app.locals.serviceDependencies.sessionLifecycle,
+      )
 
-   async function logoutController(req, res, next) {
-      try {
-         const result = await service.logout({
-            accessToken: readAccessToken(req),
-            refreshToken: readRefreshToken(req),
-         })
-         clearAuthCookies(res, env)
-         res.json({ data: result })
-      } catch (error) {
-         next(error)
-      }
-   }
-
-   async function logoutAllController(req, res, next) {
-      try {
-         const result = await service.logoutAll(req.auth.userId)
-         clearAuthCookies(res, env)
-         res.json({ data: result })
-      } catch (error) {
-         next(error)
-      }
-   }
-
-   async function listSessionsController(req, res, next) {
-      try {
-         res.json({
-            data: await service.listSessions(req.auth.userId, req.auth.sessionId),
-         })
-      } catch (error) {
-         next(error)
-      }
-   }
-
-   async function revokeSessionController(req, res, next) {
-      try {
-         const result = await service.revokeOwnedSession(
-            req.auth.userId,
-            req.auth.sessionId,
-            req.params.sessionId,
-         )
-         if (result.currentSession) clearAuthCookies(res, env)
-         res.json({ data: result })
-      } catch (error) {
-         next(error)
-      }
-   }
-
-   return {
-      listSessionsController,
-      logoutAllController,
-      logoutController,
-      refreshSessionController,
-      revokeSessionController,
+      setAuthCookies(res, result, env)
+      res.json({ data: safeResult(result) })
+   } catch (error) {
+      clearAuthCookies(res, env)
+      next(error)
    }
 }
 
-const {
-   listSessionsController,
-   logoutAllController,
-   logoutController,
-   refreshSessionController,
-   revokeSessionController,
-} = createSessionController()
+async function logoutController(req, res, next) {
+   try {
+      const result = await logoutService(
+         {
+            accessToken: readAccessToken(req),
+            refreshToken: readRefreshToken(req),
+         },
+         req.app.locals.serviceDependencies.sessionLifecycle,
+      )
+
+      clearAuthCookies(res, env)
+      res.json({ data: result })
+   } catch (error) {
+      next(error)
+   }
+}
+
+async function logoutAllController(req, res, next) {
+   try {
+      const result = await logoutAllService(
+         req.auth.userId,
+         req.app.locals.serviceDependencies.sessionLifecycle,
+      )
+
+      clearAuthCookies(res, env)
+      res.json({ data: result })
+   } catch (error) {
+      next(error)
+   }
+}
+
+async function listSessionsController(req, res, next) {
+   try {
+      const data = await listSessionsService(
+         req.auth.userId,
+         req.auth.sessionId,
+         req.app.locals.serviceDependencies.sessionLifecycle,
+      )
+
+      res.json({ data })
+   } catch (error) {
+      next(error)
+   }
+}
+
+async function revokeSessionController(req, res, next) {
+   try {
+      const result = await revokeOwnedSessionService(
+         req.auth.userId,
+         req.auth.sessionId,
+         req.params.sessionId,
+         req.app.locals.serviceDependencies.sessionLifecycle,
+      )
+
+      if (result.currentSession) clearAuthCookies(res, env)
+      res.json({ data: result })
+   } catch (error) {
+      next(error)
+   }
+}
 
 export {
-   createSessionController,
    listSessionsController,
    logoutAllController,
    logoutController,

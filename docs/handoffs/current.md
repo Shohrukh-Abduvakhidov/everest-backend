@@ -9,6 +9,8 @@ updated_at: 2026-10-25
 
 # Current handoff
 
+> Structural refactor note (26 October 2026): PR #8 now uses configured default routers, direct top-level controllers and business services, optional per-call test dependencies, and test-only service adapters. No milestone status, API contract, migration, schema, security rule or product behavior changed.
+
 ## Completed work
 
 - M00 through M02E are Done in the current feature branch.

@@ -1,45 +1,49 @@
-import { passwordRecoveryService } from '../services/password-recovery-service.js'
+import {
+   requestPasswordRecoveryService,
+   resetPasswordService,
+   verifyPasswordRecoveryService,
+} from '../services/password-recovery-service.js'
 
-function createPasswordRecoveryController(service = passwordRecoveryService) {
-   async function requestPasswordRecoveryController(req, res, next) {
-      try {
-         res.status(202).json({ data: await service.request(req.body) })
-      } catch (error) {
-         next(error)
-      }
-   }
+async function requestPasswordRecoveryController(req, res, next) {
+   try {
+      const data = await requestPasswordRecoveryService(
+         req.body,
+         req.app.locals.serviceDependencies.passwordRecovery,
+      )
 
-   async function verifyPasswordRecoveryController(req, res, next) {
-      try {
-         res.json({ data: await service.verify(req.body) })
-      } catch (error) {
-         next(error)
-      }
-   }
-
-   async function resetPasswordController(req, res, next) {
-      try {
-         res.json({ data: await service.reset(req.body) })
-      } catch (error) {
-         next(error)
-      }
-   }
-
-   return {
-      requestPasswordRecoveryController,
-      resetPasswordController,
-      verifyPasswordRecoveryController,
+      res.status(202).json({ data })
+   } catch (error) {
+      next(error)
    }
 }
 
-const {
-   requestPasswordRecoveryController,
-   resetPasswordController,
-   verifyPasswordRecoveryController,
-} = createPasswordRecoveryController()
+async function verifyPasswordRecoveryController(req, res, next) {
+   try {
+      const data = await verifyPasswordRecoveryService(
+         req.body,
+         req.app.locals.serviceDependencies.passwordRecovery,
+      )
+
+      res.json({ data })
+   } catch (error) {
+      next(error)
+   }
+}
+
+async function resetPasswordController(req, res, next) {
+   try {
+      const data = await resetPasswordService(
+         req.body,
+         req.app.locals.serviceDependencies.passwordRecovery,
+      )
+
+      res.json({ data })
+   } catch (error) {
+      next(error)
+   }
+}
 
 export {
-   createPasswordRecoveryController,
    requestPasswordRecoveryController,
    resetPasswordController,
    verifyPasswordRecoveryController,

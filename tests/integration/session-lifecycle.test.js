@@ -8,9 +8,11 @@ import env from '../../src/configs/env.js';
 import * as authRepository from '../../src/repositories/auth-repository.js';
 import * as sessionRepository from '../../src/repositories/session-repository.js';
 import { withTransaction } from '../../src/repositories/transaction-repository.js';
-import { createSessionService } from '../../src/services/auth/session-service.js';
-import { createSessionLifecycleService } from '../../src/services/session-lifecycle-service.js';
-import { createTelegramAuthService } from '../../src/services/telegram-auth-service.js';
+import {
+  createSessionLifecycleTestService,
+  createSessionTestService,
+  createTelegramAuthTestService,
+} from '../helpers/service-factories.js';
 
 const { Client } = pg;
 const fixtureIds = [];
@@ -71,10 +73,13 @@ async function cleanup(client) {
 test('secure multi-device session lifecycle integration', async (t) => {
   const client = new Client(env.database);
   await client.connect();
-  const sessionService = createSessionService({ config });
-  const lifecycle = createSessionLifecycleService({ config });
-  const authService = createTelegramAuthService({ config });
-  const app = createApp(authService, undefined, undefined, lifecycle);
+  const sessionService = createSessionTestService({ config });
+  const lifecycle = createSessionLifecycleTestService({ config });
+  const authService = createTelegramAuthTestService({ config });
+  const app = createApp({
+    telegramAuth: authService.dependencies,
+    sessionLifecycle: lifecycle.dependencies,
+  });
   const server = await new Promise((resolve) => {
     const listener = app.listen(0, '127.0.0.1', () => resolve(listener));
   });
@@ -234,7 +239,7 @@ test('secure multi-device session lifecycle integration', async (t) => {
 
     await t.test('rolls back rotation when replacement persistence fails', async () => {
       const issued = await issue(sessionService, userId);
-      const failing = createSessionLifecycleService({
+      const failing = createSessionLifecycleTestService({
         config,
         repository: {
           ...sessionRepository,
@@ -250,7 +255,7 @@ test('secure multi-device session lifecycle integration', async (t) => {
     await t.test('rolls back owned-session revocation when audit persistence fails', async () => {
       const current = await issue(sessionService, userId);
       const target = await issue(sessionService, userId);
-      const failing = createSessionLifecycleService({
+      const failing = createSessionLifecycleTestService({
         config,
         auth: {
           ...authRepository,
