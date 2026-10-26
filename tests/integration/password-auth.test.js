@@ -6,9 +6,8 @@ import pg from 'pg';
 import { createApp } from '../../src/app.js';
 import env from '../../src/configs/env.js';
 import * as userRepository from '../../src/repositories/user-repository.js';
-import { createPasswordAuthService } from '../../src/services/password-auth-service.js';
-import { telegramAuthService } from '../../src/services/telegram-auth-service.js';
 import { verifyPassword } from '../../src/utils/password.js';
+import { createPasswordAuthTestService } from '../helpers/service-factories.js';
 
 const { Client, Pool } = pg;
 const fixtureUserIds = [];
@@ -65,8 +64,10 @@ test('password registration and login integration', async (t) => {
       userRepository.findPasswordAccountByPhone(phoneE164, passwordPool)
     ),
   };
-  const passwordService = createPasswordAuthService({ config: testConfig, transaction, users });
-  const app = createApp(telegramAuthService, passwordService);
+  const passwordService = createPasswordAuthTestService({
+    config: testConfig, transaction, users,
+  });
+  const app = createApp({ passwordAuth: passwordService.dependencies });
   const server = await new Promise((resolve) => {
     const listener = app.listen(0, '127.0.0.1', () => resolve(listener));
   });
@@ -170,7 +171,7 @@ test('password registration and login integration', async (t) => {
     await t.test('rolls back all registration writes when a participating write fails', async () => {
       const rollbackPhone = `+99293${String(Date.now() + 2).slice(-7)}`;
       const before = await client.query('SELECT count(*)::int AS count FROM users');
-      const rollbackService = createPasswordAuthService({
+      const rollbackService = createPasswordAuthTestService({
         config: testConfig,
         transaction,
         users: {

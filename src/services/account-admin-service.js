@@ -12,6 +12,14 @@ const accountTransitions = {
    unblock: { from: 'blocked', to: 'active', event: 'admin.account.unblocked' },
 }
 
+function dependencies(overrides = {}) {
+   return {
+      repository: overrides.repository || accountAdminRepository,
+      auth: overrides.auth || authRepository,
+      transaction: overrides.transaction || withTransaction,
+   }
+}
+
 function parseUserId(value) {
    try {
       return normalizeInternalId(value)
@@ -22,7 +30,6 @@ function parseUserId(value) {
 
 function parsePaginationValue(value, fallback, minimum, maximum, field) {
    if (value === undefined) return fallback
-
    const validFormat = typeof value === 'string' && /^(0|[1-9][0-9]*)$/.test(value)
    const parsed = validFormat ? Number(value) : NaN
 
@@ -54,172 +61,138 @@ function safeUser(row) {
    }
 }
 
-function createAccountAdminService({
-   repository = accountAdminRepository,
-   auth = authRepository,
-   transaction = withTransaction,
-} = {}) {
-   async function authorizeAdministrator(userId) {
-      const allowed = await repository.hasAdministratorRole(parseUserId(userId))
-      if (!allowed) {
-         throw new AppError(403, 'ADMIN_ROLE_REQUIRED', 'Administrator role is required')
-      }
+function validateSelfAction(action, actorUserId, userId) {
+   if (action === 'reject' && actorUserId === userId) {
+      throw new AppError(409, 'SELF_REJECTION_FORBIDDEN', 'Cannot reject your own account')
    }
-
-   async function listPending(query) {
-      const pagination = parsePagination(query)
-      const rows = await repository.listPendingUsers(pagination)
-
-      return {
-         users: rows.slice(0, pagination.limit).map(safeUser),
-         pagination: { ...pagination, hasMore: rows.length > pagination.limit },
-      }
+   if (action === 'block' && actorUserId === userId) {
+      throw new AppError(409, 'SELF_BLOCK_FORBIDDEN', 'Cannot block your own account')
    }
+}
 
-   function validateSelfAction(action, actorUserId, userId) {
-      if (action === 'reject' && actorUserId === userId) {
-         throw new AppError(409, 'SELF_REJECTION_FORBIDDEN', 'Cannot reject your own account')
-      }
-
-      if (action === 'block' && actorUserId === userId) {
-         throw new AppError(409, 'SELF_BLOCK_FORBIDDEN', 'Cannot block your own account')
-      }
+async function authorizeAdministratorService(userId, overrides) {
+   const { repository } = dependencies(overrides)
+   const allowed = await repository.hasAdministratorRole(parseUserId(userId))
+   if (!allowed) {
+      throw new AppError(403, 'ADMIN_ROLE_REQUIRED', 'Administrator role is required')
    }
+}
 
-   async function changeState(action, actorValue, targetValue) {
-      const actorUserId = parseUserId(actorValue)
-      const userId = parseUserId(targetValue)
-      const transition = accountTransitions[action]
-      validateSelfAction(action, actorUserId, userId)
-
-      return transaction(async (client) => {
-         const current = await repository.findUserForUpdate(userId, client)
-         if (!current) throw new AppError(404, 'USER_NOT_FOUND', 'User was not found')
-
-         if (current.status !== transition.from) {
-            throw new AppError(
-               409,
-               'INVALID_ACCOUNT_TRANSITION',
-               'Account state transition is not allowed',
-            )
-         }
-
-         const updated = await repository.updateAccountState(
-            { userId, action, actorUserId },
-            client,
-         )
-         let revokedSessions = 0
-
-         if (action === 'block') {
-            revokedSessions = await repository.revokeLiveSessions(userId, 'account_blocked', client)
-            await repository.revokeUserRefreshTokens(userId, client)
-         }
-
-         await auth.appendAuditEvent(
-            {
-               actorUserId,
-               subjectUserId: userId,
-               code: transition.event,
-               entityType: 'user',
-               entityId: userId,
-               metadata: {
-                  fromStatus: transition.from,
-                  toStatus: transition.to,
-                  revokedSessions,
-               },
-            },
-            client,
-         )
-
-         return {
-            action,
-            user: { ...safeUser({ ...current, ...updated }), updatedAt: updated.updated_at },
-            ...(action === 'block' ? { revokedSessions } : {}),
-         }
-      })
-   }
-
-   async function bootstrapOwner(phoneValue) {
-      const phoneE164 = normalizePhone(phoneValue)
-
-      return transaction(async (client) => {
-         await repository.lockOwnerBootstrap(client)
-
-         if (await repository.findOwnerAssignment(client)) {
-            throw new AppError(409, 'OWNER_ALREADY_CONFIGURED', 'An owner is already configured')
-         }
-
-         const user = await repository.findUserByPhoneForUpdate(phoneE164, client)
-         if (!user) {
-            throw new AppError(404, 'BOOTSTRAP_USER_NOT_FOUND', 'Registered account was not found')
-         }
-
-         await repository.activateBootstrapOwner(user.id, client)
-         await repository.assignOwnerRole(user.id, client)
-         await auth.appendAuditEvent(
-            {
-               actorUserId: null,
-               subjectUserId: user.id,
-               code: 'admin.owner.bootstrapped',
-               entityType: 'user',
-               entityId: user.id,
-               metadata: { previousStatus: user.status },
-            },
-            client,
-         )
-
-         return { userId: user.id, status: 'active', role: 'owner' }
-      })
-   }
+async function listPendingUsersService(query, overrides) {
+   const { repository } = dependencies(overrides)
+   const pagination = parsePagination(query)
+   const rows = await repository.listPendingUsers(pagination)
 
    return {
-      approve: (actorUserId, userId) => changeState('approve', actorUserId, userId),
-      authorizeAdministrator,
-      block: (actorUserId, userId) => changeState('block', actorUserId, userId),
-      bootstrapOwner,
-      listPending,
-      reject: (actorUserId, userId) => changeState('reject', actorUserId, userId),
-      unblock: (actorUserId, userId) => changeState('unblock', actorUserId, userId),
+      users: rows.slice(0, pagination.limit).map(safeUser),
+      pagination: { ...pagination, hasMore: rows.length > pagination.limit },
    }
 }
 
-const accountAdminService = createAccountAdminService()
+async function changeAccountStateService(action, actorValue, targetValue, overrides) {
+   const { repository, auth, transaction } = dependencies(overrides)
+   const actorUserId = parseUserId(actorValue)
+   const userId = parseUserId(targetValue)
+   const transition = accountTransitions[action]
+   validateSelfAction(action, actorUserId, userId)
 
-async function authorizeAdministratorService(userId) {
-   return accountAdminService.authorizeAdministrator(userId)
+   return transaction(async (client) => {
+      const current = await repository.findUserForUpdate(userId, client)
+      if (!current) throw new AppError(404, 'USER_NOT_FOUND', 'User was not found')
+      if (current.status !== transition.from) {
+         throw new AppError(
+            409,
+            'INVALID_ACCOUNT_TRANSITION',
+            'Account state transition is not allowed',
+         )
+      }
+
+      const updated = await repository.updateAccountState({ userId, action, actorUserId }, client)
+      let revokedSessions = 0
+
+      if (action === 'block') {
+         revokedSessions = await repository.revokeLiveSessions(userId, 'account_blocked', client)
+         await repository.revokeUserRefreshTokens(userId, client)
+      }
+
+      await auth.appendAuditEvent(
+         {
+            actorUserId,
+            subjectUserId: userId,
+            code: transition.event,
+            entityType: 'user',
+            entityId: userId,
+            metadata: {
+               fromStatus: transition.from,
+               toStatus: transition.to,
+               revokedSessions,
+            },
+         },
+         client,
+      )
+
+      return {
+         action,
+         user: { ...safeUser({ ...current, ...updated }), updatedAt: updated.updated_at },
+         ...(action === 'block' ? { revokedSessions } : {}),
+      }
+   })
 }
 
-async function listPendingUsersService(query) {
-   return accountAdminService.listPending(query)
+async function approveUserService(actorUserId, userId, overrides) {
+   return changeAccountStateService('approve', actorUserId, userId, overrides)
 }
 
-async function approveUserService(actorUserId, userId) {
-   return accountAdminService.approve(actorUserId, userId)
+async function rejectUserService(actorUserId, userId, overrides) {
+   return changeAccountStateService('reject', actorUserId, userId, overrides)
 }
 
-async function rejectUserService(actorUserId, userId) {
-   return accountAdminService.reject(actorUserId, userId)
+async function blockUserService(actorUserId, userId, overrides) {
+   return changeAccountStateService('block', actorUserId, userId, overrides)
 }
 
-async function blockUserService(actorUserId, userId) {
-   return accountAdminService.block(actorUserId, userId)
+async function unblockUserService(actorUserId, userId, overrides) {
+   return changeAccountStateService('unblock', actorUserId, userId, overrides)
 }
 
-async function unblockUserService(actorUserId, userId) {
-   return accountAdminService.unblock(actorUserId, userId)
-}
+async function bootstrapOwnerService(phoneValue, overrides) {
+   const { repository, auth, transaction } = dependencies(overrides)
+   const phoneE164 = normalizePhone(phoneValue)
 
-async function bootstrapOwnerService(phoneValue) {
-   return accountAdminService.bootstrapOwner(phoneValue)
+   return transaction(async (client) => {
+      await repository.lockOwnerBootstrap(client)
+      if (await repository.findOwnerAssignment(client)) {
+         throw new AppError(409, 'OWNER_ALREADY_CONFIGURED', 'An owner is already configured')
+      }
+
+      const user = await repository.findUserByPhoneForUpdate(phoneE164, client)
+      if (!user) {
+         throw new AppError(404, 'BOOTSTRAP_USER_NOT_FOUND', 'Registered account was not found')
+      }
+
+      await repository.activateBootstrapOwner(user.id, client)
+      await repository.assignOwnerRole(user.id, client)
+      await auth.appendAuditEvent(
+         {
+            actorUserId: null,
+            subjectUserId: user.id,
+            code: 'admin.owner.bootstrapped',
+            entityType: 'user',
+            entityId: user.id,
+            metadata: { previousStatus: user.status },
+         },
+         client,
+      )
+
+      return { userId: user.id, status: 'active', role: 'owner' }
+   })
 }
 
 export {
-   accountAdminService,
    approveUserService,
    authorizeAdministratorService,
    blockUserService,
    bootstrapOwnerService,
-   createAccountAdminService,
    listPendingUsersService,
    parsePagination,
    parseUserId,

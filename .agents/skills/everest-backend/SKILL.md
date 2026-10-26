@@ -23,7 +23,7 @@ Keep business rules and transaction scope in services, HTTP handling in controll
 - Keep route modules configured through a default router export and wire explicit controller functions.
 - Name Express controllers with a `Controller` suffix and use exactly `req, res, next` with `try/catch/next`.
 - Name direct async business operations with a `Service` suffix and keep the real business flow in those functions.
-- Avoid singleton wrapper chains and runtime factories. Retain a factory only for a concrete provider or test dependency-injection requirement and document the reason.
+- Do not use ordinary router, controller or business-service factories, singleton wrapper chains, or mutable dependency setters. Use optional function dependencies for controlled tests. Factories are allowed only for real provider adapters or isolated application/test constructors.
 - Keep business validation and transaction scope in services. Keep all SQL in repositories and pass an existing transaction client into transaction-only repository methods.
 - Preserve PostgreSQL `BIGINT` identifiers as decimal strings and never coerce entity identifiers through JavaScript `Number`.
 

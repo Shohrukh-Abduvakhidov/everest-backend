@@ -5,11 +5,13 @@ import pg from 'pg';
 
 import { createApp } from '../../src/app.js';
 import env from '../../src/configs/env.js';
-import { accountAdminService, createAccountAdminService } from '../../src/services/account-admin-service.js';
 import * as accountAdminRepository from '../../src/repositories/account-admin-repository.js';
 import { withTransaction } from '../../src/repositories/transaction-repository.js';
-import { createTelegramAuthService } from '../../src/services/telegram-auth-service.js';
 import { createAccessToken } from '../../src/services/auth/session-token-service.js';
+import {
+  createAccountAdminTestService,
+  createTelegramAuthTestService,
+} from '../helpers/service-factories.js';
 
 const { Client } = pg;
 const fixtureIds = [];
@@ -70,8 +72,12 @@ test('account approval administration integration', async (t) => {
   const client = new Client(env.database);
   await client.connect();
   const stamp = String(Date.now()).slice(-7);
-  const authService = createTelegramAuthService({ config });
-  const app = createApp(authService, undefined, accountAdminService);
+  const authService = createTelegramAuthTestService({ config });
+  const accountAdminService = createAccountAdminTestService();
+  const app = createApp({
+    telegramAuth: authService.dependencies,
+    accountAdmin: accountAdminService.dependencies,
+  });
   const server = await new Promise((resolve) => {
     const listener = app.listen(0, '127.0.0.1', () => resolve(listener));
   });
@@ -207,7 +213,7 @@ test('account approval administration integration', async (t) => {
 
     await t.test('rolls back a transition when its audit write fails', async () => {
       const rollbackId = await createUser(client, { phone: `+99276${stamp}` });
-      const rollbackService = createAccountAdminService({
+      const rollbackService = createAccountAdminTestService({
         repository: accountAdminRepository,
         transaction: withTransaction,
         auth: { appendAuditEvent: async () => { throw new Error('injected audit failure'); } },
