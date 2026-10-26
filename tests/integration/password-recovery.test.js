@@ -7,12 +7,14 @@ import { createApp } from '../../src/app.js'
 import env from '../../src/configs/env.js'
 import * as authRepository from '../../src/repositories/auth-repository.js'
 import { withTransaction } from '../../src/repositories/transaction-repository.js'
-import { createSessionService } from '../../src/services/auth/session-service.js'
-import { createPasswordAuthService } from '../../src/services/password-auth-service.js'
-import { createPasswordRecoveryService } from '../../src/services/password-recovery-service.js'
-import { createTelegramAuthService } from '../../src/services/telegram-auth-service.js'
 import { hashPassword, verifyPassword } from '../../src/utils/password.js'
 import { hashOpaqueToken } from '../../src/utils/recovery-token.js'
+import {
+  createPasswordAuthTestService,
+  createPasswordRecoveryTestService,
+  createSessionTestService,
+  createTelegramAuthTestService,
+} from '../helpers/service-factories.js'
 
 const { Client } = pg
 const fixtureIds = []
@@ -122,10 +124,16 @@ test('password recovery integration', async (t) => {
   await client.connect()
   const telegram = new RecoveryProviderDouble()
   const sms = new RecoveryProviderDouble(false)
-  const recovery = createPasswordRecoveryService({ config, telegramProvider: telegram, smsProvider: sms })
-  const authService = createTelegramAuthService({ config })
-  const passwordService = createPasswordAuthService({ config })
-  const app = createApp(authService, passwordService, undefined, undefined, recovery)
+  const recovery = createPasswordRecoveryTestService({
+    config, telegramProvider: telegram, smsProvider: sms,
+  })
+  const authService = createTelegramAuthTestService({ config })
+  const passwordService = createPasswordAuthTestService({ config })
+  const app = createApp({
+    telegramAuth: authService.dependencies,
+    passwordAuth: passwordService.dependencies,
+    passwordRecovery: recovery.dependencies,
+  })
   const server = await new Promise((resolve) => {
     const listener = app.listen(0, '127.0.0.1', () => resolve(listener))
   })
@@ -207,7 +215,7 @@ test('password recovery integration', async (t) => {
       assert.equal(second.delivery, undefined)
 
       const enabledSms = new RecoveryProviderDouble(true)
-      const smsRecovery = createPasswordRecoveryService({
+      const smsRecovery = createPasswordRecoveryTestService({
         config, telegramProvider: telegram, smsProvider: enabledSms,
       })
       await smsRecovery.request({ phone: account.phone, channel: 'sms' })
@@ -295,7 +303,7 @@ test('password recovery integration', async (t) => {
 
     await t.test('resets atomically, revokes all sessions, and preserves identity, role, and status', async () => {
       const currentPassword = 'Concurrent-password-31'
-      const sessionService = createSessionService({ config })
+      const sessionService = createSessionTestService({ config })
       const first = await withTransaction((db) => sessionService.issueSession({
         userId: account.userId, requestContext: {}, client: db,
       }))
@@ -373,11 +381,11 @@ test('password recovery integration', async (t) => {
       const before = await client.query(
         'SELECT password_hash FROM user_passwords WHERE user_id = $1', [account.userId]
       )
-      const sessionService = createSessionService({ config })
+      const sessionService = createSessionTestService({ config })
       const session = await withTransaction((db) => sessionService.issueSession({
         userId: account.userId, requestContext: {}, client: db,
       }))
-      const failing = createPasswordRecoveryService({
+      const failing = createPasswordRecoveryTestService({
         config,
         telegramProvider: telegram,
         smsProvider: sms,

@@ -2,7 +2,7 @@
 
 # Claude Code Adapter
 
-Follow `AGENTS.md`, including its startup and completion protocols and mandatory repositories layer. At startup, inspect Git state and recent commits, then read `ROADMAP.md`, `docs/handoffs/current.md`, `docs/architecture.md`, `docs/progress.md`, and `docs/decisions.md` before inspecting the selected milestone's code.
+Follow `AGENTS.md`, including its startup and completion protocols, mandatory repositories layer, and mandatory CRM runtime style. At startup, inspect Git state and recent commits, then read `ROADMAP.md`, `docs/handoffs/current.md`, `docs/architecture.md`, `docs/progress.md`, and `docs/decisions.md` before inspecting the selected milestone's code.
 
 Continue the existing Codex implementation in this repository. Inspect git status/diff and applied migrations before editing; do not reinitialize the backend or repeat completed changes.
 

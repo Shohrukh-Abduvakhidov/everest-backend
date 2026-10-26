@@ -1,17 +1,16 @@
-import { accountAdminService } from '../services/account-admin-service.js'
+import { authorizeAdministratorService } from '../services/account-admin-service.js'
 
-function createAdminMiddleware(service = accountAdminService) {
-   return async function adminMiddleware(req, res, next) {
-      try {
-         void res
-         await service.authorizeAdministrator(req.auth.userId)
-         next()
-      } catch (error) {
-         next(error)
-      }
+async function adminMiddleware(req, res, next) {
+   try {
+      void res
+      await authorizeAdministratorService(
+         req.auth.userId,
+         req.app.locals.serviceDependencies.accountAdmin,
+      )
+      next()
+   } catch (error) {
+      next(error)
    }
 }
 
-const adminMiddleware = createAdminMiddleware()
-
-export { adminMiddleware, createAdminMiddleware }
+export { adminMiddleware }

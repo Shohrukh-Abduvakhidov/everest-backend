@@ -27,6 +27,16 @@ Read documentation.md, docs/progress.md when present, package.json, lockfile and
 - Parameterize values; allowlist dynamic identifiers/sorts. Never execute arbitrary AI-generated SQL.
 - Place notification/statistics repositories under src/repositories/notifications/ and src/repositories/stats/. Adapt affected existing modules without unrelated wholesale moves.
 
+## Mandatory CRM runtime style
+
+- Use native ESM, no semicolons, single quotes, three-space indentation and readable multiline formatting.
+- Route modules export one configured router by default and import explicit controller functions. Do not build ordinary router factory graphs.
+- Controllers are direct top-level named async exports ending in `Controller`. They use exactly `req, res, next`, wrap work in `try/catch`, and forward failures with `next(error)`.
+- Business services are direct top-level named async exports ending in `Service`; the real flow lives in those functions, not in factory-created singleton objects or delegating wrappers.
+- Ordinary routes, controllers and business services must not use `create...Router`, `create...Controller`, `create...Service`, mutable dependency setters or singleton wrapper chains.
+- Optional function dependency parameters are allowed only where tests need controlled repositories, transactions, clocks or providers. Real external-provider adapters and isolated application/test constructors may retain factories when justified.
+- SQL remains exclusively in repositories and migrations. Services own transaction orchestration and pass the same client to transaction-only repository methods.
+
 ## Startup, migrations and scope
 
 - Use one bounded pg.Pool per process. Importing app.js must not listen, migrate, start workers or mutate schema.

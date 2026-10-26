@@ -7,9 +7,9 @@ import { createApp } from '../../src/app.js';
 import pool from '../../src/configs/db.js';
 import env from '../../src/configs/env.js';
 import { createAccessToken } from '../../src/services/auth/session-token-service.js';
-import { createTelegramAuthService } from '../../src/services/telegram-auth-service.js';
 import AppError from '../../src/utils/app-error.js';
 import { sha256Hex } from '../../src/utils/telegram-crypto.js';
+import { createTelegramAuthTestService } from '../helpers/service-factories.js';
 
 const { Client } = pg;
 const fixtureUserIds = [];
@@ -102,10 +102,10 @@ function stateFrom(body) {
 test('Telegram start/callback/link/replay/validation/unlink integration', async (t) => {
   const client = new Client(env.database);
   const botProvider = new MockBotProvider();
-  const service = createTelegramAuthService({
+  const service = createTelegramAuthTestService({
     config: testConfig, oidcProvider: new MockOidcProvider(), botProvider,
   });
-  const app = createApp(service);
+  const app = createApp({ telegramAuth: service.dependencies });
   const server = await new Promise((resolve) => {
     const listener = app.listen(0, '127.0.0.1', () => resolve(listener));
   });

@@ -12,7 +12,7 @@ import {
 } from '../utils/telegram-crypto.js'
 import { TelegramBotProvider } from './auth/telegram-bot-provider.js'
 import { expectedIssuer, TelegramOidcProvider } from './auth/telegram-oidc-provider.js'
-import { createSessionService } from './auth/session-service.js'
+import { issueSessionService } from './auth/session-service.js'
 import { verifyAccessToken } from './auth/session-token-service.js'
 
 function requireConfiguration(config) {
@@ -55,287 +55,305 @@ function botAccessGranted(tokenSet) {
    )
 }
 
-function createTelegramAuthService({
-   config = env,
-   repository = authRepository,
-   transaction = withTransaction,
-   oidcProvider = new TelegramOidcProvider(config.telegram),
-   botProvider = new TelegramBotProvider(config.telegram),
-   now = () => new Date(),
-   sessions = createSessionService({ config, repository, now }),
-} = {}) {
-   async function beginTelegramAuthorizationService({ intent, userId = null }) {
-      requireConfiguration(config)
-      if (intent !== 'login' && intent !== 'link')
-         throw new AppError(400, 'INVALID_AUTH_INTENT', 'Invalid authentication intent')
-      if (intent === 'link' && !userId)
-         throw new AppError(401, 'AUTHENTICATION_REQUIRED', 'Authentication is required')
-
-      const state = randomBase64Url()
-      const nonce = randomBase64Url()
-      const { verifier, challenge } = createPkcePair()
-      const expiresAt = new Date(now().getTime() + config.telegramOidcStateTtlSeconds * 1000)
-      await repository.createTelegramOidcState({
-         stateHash: sha256Hex(state),
-         nonceHash: sha256Hex(nonce),
-         codeVerifierCiphertext: encryptStateSecret(verifier, config.telegram.clientSecret),
-         intent,
-         initiatingUserId: userId,
-         expiresAt,
-      })
-      const authorizationUrl = await oidcProvider.buildAuthorizationUrl({
-         state,
-         nonce,
-         codeChallenge: challenge,
-      })
-      return { authorizationUrl, expiresAt }
+function dependencies(overrides = {}) {
+   const config = overrides.config || env
+   const repository = overrides.repository || authRepository
+   const now = overrides.now || (() => new Date())
+   return {
+      config,
+      repository,
+      transaction: overrides.transaction || withTransaction,
+      oidcProvider: overrides.oidcProvider || new TelegramOidcProvider(config.telegram),
+      botProvider: overrides.botProvider || new TelegramBotProvider(config.telegram),
+      now,
+      sessions: overrides.sessions || {
+         issueSession: (input) =>
+            issueSessionService(input, {
+               config,
+               repository,
+               now,
+            }),
+      },
    }
+}
 
-   async function saveConnectionIfGrantedService({ userId, claims, tokenSet, client }) {
-      const chatId = verifiedChatId(claims)
-      if (!botAccessGranted(tokenSet) || !chatId) return false
-      await repository.upsertTelegramConnection(
-         {
-            userId,
-            botId: config.telegram.clientId,
-            chatId,
-         },
-         client,
-      )
-      return true
-   }
+async function beginTelegramAuthorizationService({ intent, userId = null }, overrides) {
+   const { config, repository, oidcProvider, now } = dependencies(overrides)
+   requireConfiguration(config)
+   if (intent !== 'login' && intent !== 'link')
+      throw new AppError(400, 'INVALID_AUTH_INTENT', 'Invalid authentication intent')
+   if (intent === 'link' && !userId)
+      throw new AppError(401, 'AUTHENTICATION_REQUIRED', 'Authentication is required')
 
-   async function completeLinkService(stateRow, claims, tokenSet) {
-      try {
-         return await transaction(async (client) => {
-            const linkedIdentity = await repository.findTelegramIdentityForUpdate(
-               expectedIssuer,
-               claims.sub,
-               client,
-            )
-            if (linkedIdentity && linkedIdentity.user_id !== stateRow.initiating_user_id) {
-               throw new AppError(
-                  409,
-                  'TELEGRAM_IDENTITY_ALREADY_LINKED',
-                  'Telegram identity is already linked',
-               )
-            }
-            const currentIdentity = await repository.findUserTelegramIdentityForUpdate(
-               stateRow.initiating_user_id,
-               expectedIssuer,
-               client,
-            )
-            if (currentIdentity && currentIdentity.provider_subject !== claims.sub) {
-               throw new AppError(
-                  409,
-                  'TELEGRAM_IDENTITY_CONFLICT',
-                  'A different Telegram identity is already linked',
-               )
-            }
+   const state = randomBase64Url()
+   const nonce = randomBase64Url()
+   const { verifier, challenge } = createPkcePair()
+   const expiresAt = new Date(now().getTime() + config.telegramOidcStateTtlSeconds * 1000)
+   await repository.createTelegramOidcState({
+      stateHash: sha256Hex(state),
+      nonceHash: sha256Hex(nonce),
+      codeVerifierCiphertext: encryptStateSecret(verifier, config.telegram.clientSecret),
+      intent,
+      initiatingUserId: userId,
+      expiresAt,
+   })
+   const authorizationUrl = await oidcProvider.buildAuthorizationUrl({
+      state,
+      nonce,
+      codeChallenge: challenge,
+   })
+   return { authorizationUrl, expiresAt }
+}
 
-            const identity =
-               linkedIdentity ||
-               currentIdentity ||
-               (await repository.createTelegramIdentity(
-                  {
-                     userId: stateRow.initiating_user_id,
-                     issuer: expectedIssuer,
-                     subject: claims.sub,
-                     profile: safeProfile(claims),
-                  },
-                  client,
-               ))
-            await repository.touchTelegramIdentity(identity.id, safeProfile(claims), client)
-            const messagingConnected = await saveConnectionIfGrantedService({
-               userId: stateRow.initiating_user_id,
-               claims,
-               tokenSet,
-               client,
-            })
-            await repository.appendAuditEvent(
-               {
-                  actorUserId: stateRow.initiating_user_id,
-                  subjectUserId: stateRow.initiating_user_id,
-                  code: 'auth.telegram.linked',
-                  entityType: 'auth_identity',
-                  entityId: identity.id,
-                  metadata: { messagingConnected },
-               },
-               client,
-            )
-            return { status: 'linked', messagingConnected }
-         })
-      } catch (error) {
-         if (error.code === '23505') {
-            const subjectConflict =
-               error.constraint === 'identities_subject_unique' ||
-               error.constraint === 'telegram_connections_bot_id_chat_id_key'
-            throw new AppError(
-               409,
-               subjectConflict ? 'TELEGRAM_IDENTITY_ALREADY_LINKED' : 'TELEGRAM_IDENTITY_CONFLICT',
-               subjectConflict
-                  ? 'Telegram identity is already linked'
-                  : 'A different Telegram identity is already linked',
-            )
-         }
-         throw error
-      }
-   }
+async function saveConnectionIfGrantedService({ userId, claims, tokenSet, client }, context) {
+   const { config, repository } = context
+   const chatId = verifiedChatId(claims)
+   if (!botAccessGranted(tokenSet) || !chatId) return false
+   await repository.upsertTelegramConnection(
+      {
+         userId,
+         botId: config.telegram.clientId,
+         chatId,
+      },
+      client,
+   )
+   return true
+}
 
-   async function completeLoginService(claims, tokenSet, requestContext) {
-      return transaction(async (client) => {
-         const identity = await repository.findTelegramIdentityForUpdate(
+async function completeLinkService(stateRow, claims, tokenSet, context) {
+   const { config, repository, transaction } = context
+   try {
+      return await transaction(async (client) => {
+         const linkedIdentity = await repository.findTelegramIdentityForUpdate(
             expectedIssuer,
             claims.sub,
             client,
          )
-         if (!identity) return { status: 'linking_required' }
-         if (identity.status !== 'active') {
-            throw new AppError(403, 'ACCOUNT_NOT_ACTIVE', 'Account is not active')
+         if (linkedIdentity && linkedIdentity.user_id !== stateRow.initiating_user_id) {
+            throw new AppError(
+               409,
+               'TELEGRAM_IDENTITY_ALREADY_LINKED',
+               'Telegram identity is already linked',
+            )
          }
+         const currentIdentity = await repository.findUserTelegramIdentityForUpdate(
+            stateRow.initiating_user_id,
+            expectedIssuer,
+            client,
+         )
+         if (currentIdentity && currentIdentity.provider_subject !== claims.sub) {
+            throw new AppError(
+               409,
+               'TELEGRAM_IDENTITY_CONFLICT',
+               'A different Telegram identity is already linked',
+            )
+         }
+
+         const identity =
+            linkedIdentity ||
+            currentIdentity ||
+            (await repository.createTelegramIdentity(
+               {
+                  userId: stateRow.initiating_user_id,
+                  issuer: expectedIssuer,
+                  subject: claims.sub,
+                  profile: safeProfile(claims),
+               },
+               client,
+            ))
          await repository.touchTelegramIdentity(identity.id, safeProfile(claims), client)
-         const messagingConnected = await saveConnectionIfGrantedService({
+         const messagingConnected = await saveConnectionIfGrantedService(
+            {
+               userId: stateRow.initiating_user_id,
+               claims,
+               tokenSet,
+               client,
+            },
+            context,
+         )
+         await repository.appendAuditEvent(
+            {
+               actorUserId: stateRow.initiating_user_id,
+               subjectUserId: stateRow.initiating_user_id,
+               code: 'auth.telegram.linked',
+               entityType: 'auth_identity',
+               entityId: identity.id,
+               metadata: { messagingConnected },
+            },
+            client,
+         )
+         return { status: 'linked', messagingConnected }
+      })
+   } catch (error) {
+      if (error.code === '23505') {
+         const subjectConflict =
+            error.constraint === 'identities_subject_unique' ||
+            error.constraint === 'telegram_connections_bot_id_chat_id_key'
+         throw new AppError(
+            409,
+            subjectConflict ? 'TELEGRAM_IDENTITY_ALREADY_LINKED' : 'TELEGRAM_IDENTITY_CONFLICT',
+            subjectConflict
+               ? 'Telegram identity is already linked'
+               : 'A different Telegram identity is already linked',
+         )
+      }
+      throw error
+   }
+}
+
+async function completeLoginService(claims, tokenSet, requestContext, context) {
+   const { config, repository, transaction, sessions } = context
+   return transaction(async (client) => {
+      const identity = await repository.findTelegramIdentityForUpdate(
+         expectedIssuer,
+         claims.sub,
+         client,
+      )
+      if (!identity) return { status: 'linking_required' }
+      if (identity.status !== 'active') {
+         throw new AppError(403, 'ACCOUNT_NOT_ACTIVE', 'Account is not active')
+      }
+      await repository.touchTelegramIdentity(identity.id, safeProfile(claims), client)
+      const messagingConnected = await saveConnectionIfGrantedService(
+         {
             userId: identity.user_id,
             claims,
             tokenSet,
             client,
-         })
-         const session = await sessions.issueSession({
-            userId: identity.user_id,
-            requestContext,
-            client,
-         })
-         return {
-            status: 'authenticated',
-            accessToken: session.accessToken,
-            expiresAt: session.expiresAt,
-            refreshToken: session.refreshToken,
-            refreshExpiresAt: session.refreshExpiresAt,
-            user: { id: identity.user_id },
-            messagingConnected,
-         }
-      })
-   }
-
-   async function handleTelegramCallbackService({ code, state, error, requestContext }) {
-      requireConfiguration(config)
-      if (typeof state !== 'string' || !state) {
-         throw new AppError(400, 'TELEGRAM_CALLBACK_INVALID', 'Telegram callback is invalid')
-      }
-      const stateRow = await repository.consumeTelegramOidcState(sha256Hex(state))
-      if (!stateRow)
-         throw new AppError(
-            401,
-            'TELEGRAM_STATE_INVALID',
-            'Telegram authorization state is invalid or expired',
-         )
-      if (error)
-         throw new AppError(
-            401,
-            'TELEGRAM_AUTHORIZATION_DENIED',
-            'Telegram authorization was not completed',
-         )
-      if (typeof code !== 'string' || !code) {
-         throw new AppError(400, 'TELEGRAM_CALLBACK_INVALID', 'Telegram callback is invalid')
-      }
-
-      let verifier
-      try {
-         verifier = decryptStateSecret(
-            stateRow.code_verifier_ciphertext,
-            config.telegram.clientSecret,
-         )
-      } catch {
-         throw new AppError(
-            401,
-            'TELEGRAM_STATE_INVALID',
-            'Telegram authorization state is invalid or expired',
-         )
-      }
-      const tokenSet = await oidcProvider.exchangeCode({ code, codeVerifier: verifier })
-      const claims = await oidcProvider.validateIdToken(tokenSet.id_token, stateRow.nonce_hash)
-      if (stateRow.intent === 'link') return completeLinkService(stateRow, claims, tokenSet)
-      return completeLoginService(claims, tokenSet, requestContext)
-   }
-
-   async function authenticateService(token) {
-      requireConfiguration(config)
-      if (!token) throw new AppError(401, 'AUTHENTICATION_REQUIRED', 'Authentication is required')
-      const claims = await verifyAccessToken(token, config.jwtAccessSecret)
-      const session = await repository.findLiveSession(claims.userId, claims.sessionId)
-      if (!session || session.status !== 'active') {
-         throw new AppError(401, 'SESSION_INVALID', 'Session is invalid or expired')
-      }
-      await sessionRepository.touchSessionLastUsed(session.id)
-      return { userId: session.user_id, sessionId: session.id }
-   }
-
-   async function unlinkTelegramService(userId) {
-      requireConfiguration(config)
-      return transaction(async (client) => {
-         const identity = await repository.findUserTelegramIdentityForUpdate(
-            userId,
-            expectedIssuer,
-            client,
-         )
-         if (!identity)
-            throw new AppError(
-               404,
-               'TELEGRAM_IDENTITY_NOT_LINKED',
-               'Telegram identity is not linked',
-            )
-         if (!(await repository.hasAlternativeLogin(userId, identity.id, client))) {
-            throw new AppError(409, 'LAST_LOGIN_METHOD', 'Cannot remove the last login method')
-         }
-         await repository.disconnectTelegramConnection(userId, config.telegram.clientId, client)
-         await repository.deleteTelegramIdentity(identity.id, client)
-         await repository.appendAuditEvent(
-            {
-               actorUserId: userId,
-               subjectUserId: userId,
-               code: 'auth.telegram.unlinked',
-               entityType: 'auth_identity',
-               entityId: identity.id,
-               metadata: {},
-            },
-            client,
-         )
-         return { status: 'unlinked' }
-      })
-   }
-
-   async function sendTelegramTestMessageService(userId) {
-      requireConfiguration(config)
-      const connection = await repository.findActiveTelegramConnection(
-         userId,
-         config.telegram.clientId,
+         },
+         context,
       )
-      if (!connection)
-         throw new AppError(
-            409,
-            'TELEGRAM_CONNECTION_UNAVAILABLE',
-            'Telegram messaging is not connected',
-         )
-      try {
-         await botProvider.sendTestMessage(connection.chat_id)
-         return { status: 'sent' }
-      } catch (error) {
-         if (error.telegramAccessUnavailable) {
-            await repository.markTelegramConnectionBlocked(connection.id)
-         }
-         throw error
+      const session = await sessions.issueSession({
+         userId: identity.user_id,
+         requestContext,
+         client,
+      })
+      return {
+         status: 'authenticated',
+         accessToken: session.accessToken,
+         expiresAt: session.expiresAt,
+         refreshToken: session.refreshToken,
+         refreshExpiresAt: session.refreshExpiresAt,
+         user: { id: identity.user_id },
+         messagingConnected,
       }
+   })
+}
+
+async function handleTelegramCallbackService({ code, state, error, requestContext }, overrides) {
+   const context = dependencies(overrides)
+   const { config, repository, oidcProvider, now } = context
+   requireConfiguration(config)
+   if (typeof state !== 'string' || !state) {
+      throw new AppError(400, 'TELEGRAM_CALLBACK_INVALID', 'Telegram callback is invalid')
+   }
+   const stateRow = await repository.consumeTelegramOidcState(sha256Hex(state))
+   if (!stateRow)
+      throw new AppError(
+         401,
+         'TELEGRAM_STATE_INVALID',
+         'Telegram authorization state is invalid or expired',
+      )
+   if (error)
+      throw new AppError(
+         401,
+         'TELEGRAM_AUTHORIZATION_DENIED',
+         'Telegram authorization was not completed',
+      )
+   if (typeof code !== 'string' || !code) {
+      throw new AppError(400, 'TELEGRAM_CALLBACK_INVALID', 'Telegram callback is invalid')
    }
 
-   return {
-      authenticate: authenticateService,
-      beginTelegramAuthorization: beginTelegramAuthorizationService,
-      handleTelegramCallback: handleTelegramCallbackService,
-      sendTelegramTestMessage: sendTelegramTestMessageService,
-      unlinkTelegram: unlinkTelegramService,
+   let verifier
+   try {
+      verifier = decryptStateSecret(stateRow.code_verifier_ciphertext, config.telegram.clientSecret)
+   } catch {
+      throw new AppError(
+         401,
+         'TELEGRAM_STATE_INVALID',
+         'Telegram authorization state is invalid or expired',
+      )
+   }
+   const tokenSet = await oidcProvider.exchangeCode({ code, codeVerifier: verifier })
+   const claims = await oidcProvider.validateIdToken(tokenSet.id_token, stateRow.nonce_hash)
+   if (stateRow.intent === 'link') {
+      return completeLinkService(stateRow, claims, tokenSet, context)
+   }
+   return completeLoginService(claims, tokenSet, requestContext, context)
+}
+
+async function authenticateService(token, overrides) {
+   const { config, repository } = dependencies(overrides)
+   requireConfiguration(config)
+   if (!token) throw new AppError(401, 'AUTHENTICATION_REQUIRED', 'Authentication is required')
+   const claims = await verifyAccessToken(token, config.jwtAccessSecret)
+   const session = await repository.findLiveSession(claims.userId, claims.sessionId)
+   if (!session || session.status !== 'active') {
+      throw new AppError(401, 'SESSION_INVALID', 'Session is invalid or expired')
+   }
+   await sessionRepository.touchSessionLastUsed(session.id)
+   return { userId: session.user_id, sessionId: session.id }
+}
+
+async function unlinkTelegramService(userId, overrides) {
+   const { config, repository, transaction } = dependencies(overrides)
+   requireConfiguration(config)
+   return transaction(async (client) => {
+      const identity = await repository.findUserTelegramIdentityForUpdate(
+         userId,
+         expectedIssuer,
+         client,
+      )
+      if (!identity)
+         throw new AppError(404, 'TELEGRAM_IDENTITY_NOT_LINKED', 'Telegram identity is not linked')
+      if (!(await repository.hasAlternativeLogin(userId, identity.id, client))) {
+         throw new AppError(409, 'LAST_LOGIN_METHOD', 'Cannot remove the last login method')
+      }
+      await repository.disconnectTelegramConnection(userId, config.telegram.clientId, client)
+      await repository.deleteTelegramIdentity(identity.id, client)
+      await repository.appendAuditEvent(
+         {
+            actorUserId: userId,
+            subjectUserId: userId,
+            code: 'auth.telegram.unlinked',
+            entityType: 'auth_identity',
+            entityId: identity.id,
+            metadata: {},
+         },
+         client,
+      )
+      return { status: 'unlinked' }
+   })
+}
+
+async function sendTelegramTestMessageService(userId, overrides) {
+   const { config, repository, botProvider } = dependencies(overrides)
+   requireConfiguration(config)
+   const connection = await repository.findActiveTelegramConnection(
+      userId,
+      config.telegram.clientId,
+   )
+   if (!connection)
+      throw new AppError(
+         409,
+         'TELEGRAM_CONNECTION_UNAVAILABLE',
+         'Telegram messaging is not connected',
+      )
+   try {
+      await botProvider.sendTestMessage(connection.chat_id)
+      return { status: 'sent' }
+   } catch (error) {
+      if (error.telegramAccessUnavailable) {
+         await repository.markTelegramConnectionBlocked(connection.id)
+      }
+      throw error
    }
 }
 
-const telegramAuthService = createTelegramAuthService()
-
-export { createTelegramAuthService, telegramAuthService }
+export {
+   authenticateService,
+   beginTelegramAuthorizationService,
+   handleTelegramCallbackService,
+   sendTelegramTestMessageService,
+   unlinkTelegramService,
+}
