@@ -1,11 +1,11 @@
 import express from 'express'
 
 import {
-  approve,
-  block,
-  listPending,
-  reject,
-  unblock,
+   approveUserController,
+   blockUserController,
+   listPendingUsersController,
+   rejectUserController,
+   unblockUserController,
 } from '../controllers/account-admin-controller.js'
 import { createAdminMiddleware } from '../middleware/admin-middleware.js'
 import { createAuthMiddleware } from '../middleware/auth-middleware.js'
@@ -13,17 +13,17 @@ import { accountAdminService } from '../services/account-admin-service.js'
 import { telegramAuthService } from '../services/telegram-auth-service.js'
 
 function createAdminRouter(authService = telegramAuthService, service = accountAdminService) {
-  const router = express.Router()
+   const router = express.Router()
 
-  router.use(createAuthMiddleware(authService), createAdminMiddleware(service))
+   router.use(createAuthMiddleware(authService), createAdminMiddleware(service))
 
-  router.get('/users/pending', listPending)
-  router.post('/users/:userId/approve', approve)
-  router.post('/users/:userId/reject', reject)
-  router.post('/users/:userId/block', block)
-  router.post('/users/:userId/unblock', unblock)
+   router.get('/users/pending', listPendingUsersController)
+   router.post('/users/:userId/approve', approveUserController)
+   router.post('/users/:userId/reject', rejectUserController)
+   router.post('/users/:userId/block', blockUserController)
+   router.post('/users/:userId/unblock', unblockUserController)
 
-  return router
+   return router
 }
 
 const adminRouter = createAdminRouter()

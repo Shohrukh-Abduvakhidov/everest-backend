@@ -1,54 +1,60 @@
 import {
-  approveUser,
-  blockUser,
-  listPendingUsers,
-  rejectUser,
-  unblockUser,
+   approveUserService,
+   blockUserService,
+   listPendingUsersService,
+   rejectUserService,
+   unblockUserService,
 } from '../services/account-admin-service.js'
 
-async function listPending(request, response, next) {
-  try {
-    const data = await listPendingUsers(request.query)
-    response.json({ data })
-  } catch (error) {
-    next(error)
-  }
+async function listPendingUsersController(req, res, next) {
+   try {
+      const data = await listPendingUsersService(req.query)
+      res.json({ data })
+   } catch (error) {
+      next(error)
+   }
 }
 
-async function approve(request, response, next) {
-  try {
-    const data = await approveUser(request.auth.userId, request.params.userId)
-    response.json({ data })
-  } catch (error) {
-    next(error)
-  }
+async function approveUserController(req, res, next) {
+   try {
+      const data = await approveUserService(req.auth.userId, req.params.userId)
+      res.json({ data })
+   } catch (error) {
+      next(error)
+   }
 }
 
-async function reject(request, response, next) {
-  try {
-    const data = await rejectUser(request.auth.userId, request.params.userId)
-    response.json({ data })
-  } catch (error) {
-    next(error)
-  }
+async function rejectUserController(req, res, next) {
+   try {
+      const data = await rejectUserService(req.auth.userId, req.params.userId)
+      res.json({ data })
+   } catch (error) {
+      next(error)
+   }
 }
 
-async function block(request, response, next) {
-  try {
-    const data = await blockUser(request.auth.userId, request.params.userId)
-    response.json({ data })
-  } catch (error) {
-    next(error)
-  }
+async function blockUserController(req, res, next) {
+   try {
+      const data = await blockUserService(req.auth.userId, req.params.userId)
+      res.json({ data })
+   } catch (error) {
+      next(error)
+   }
 }
 
-async function unblock(request, response, next) {
-  try {
-    const data = await unblockUser(request.auth.userId, request.params.userId)
-    response.json({ data })
-  } catch (error) {
-    next(error)
-  }
+async function unblockUserController(req, res, next) {
+   try {
+      const data = await unblockUserService(req.auth.userId, req.params.userId)
+      res.json({ data })
+   } catch (error) {
+      next(error)
+   }
 }
 
-export { approve, block, listPending, reject, unblock }
+export {
+   approveUserController,
+   blockUserController,
+   listPendingUsersController,
+   rejectUserController,
+   unblockUserController,
+}

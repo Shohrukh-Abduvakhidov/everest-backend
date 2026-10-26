@@ -17,6 +17,16 @@ Keep src/app.js and src/server.js; configs/, routes/, controllers/, services/, r
 
 Keep business rules and transaction scope in services, HTTP handling in controllers and wiring in routes. Repositories are mandatory for all application SQL. Do not call pool.query/client.query or embed SQL outside repositories. Keep connection construction in configs/db.js and schema SQL in migrations.
 
+## Follow Shohrukh's CRM runtime style
+
+- Use native ESM, single quotes, no semicolons, three-space indentation, and readable multiline formatting.
+- Keep route modules configured through a default router export and wire explicit controller functions.
+- Name Express controllers with a `Controller` suffix and use exactly `req, res, next` with `try/catch/next`.
+- Name direct async business operations with a `Service` suffix and keep the real business flow in those functions.
+- Avoid singleton wrapper chains and runtime factories. Retain a factory only for a concrete provider or test dependency-injection requirement and document the reason.
+- Keep business validation and transaction scope in services. Keep all SQL in repositories and pass an existing transaction client into transaction-only repository methods.
+- Preserve PostgreSQL `BIGINT` identifiers as decimal strings and never coerce entity identifiers through JavaScript `Number`.
+
 ## Implement one increment
 
 1. Read current requirements and schema for the affected module.

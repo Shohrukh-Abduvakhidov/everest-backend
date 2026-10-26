@@ -1,12 +1,22 @@
-import * as healthService from '../services/health-service.js';
+import * as healthService from '../services/health-service.js'
 
-function getLiveness(_request, response) {
-  response.json({ data: { status: 'ok' } });
+async function getLivenessController(req, res, next) {
+   try {
+      void req
+      res.json({ data: { status: 'ok' } })
+   } catch (error) {
+      next(error)
+   }
 }
 
-async function getReadiness(_request, response) {
-  const readiness = await healthService.getReadiness();
-  response.json({ data: readiness });
+async function getReadinessController(req, res, next) {
+   try {
+      void req
+      const readiness = await healthService.getReadinessService()
+      res.json({ data: readiness })
+   } catch (error) {
+      next(error)
+   }
 }
 
-export { getLiveness, getReadiness };
+export { getLivenessController, getReadinessController }
