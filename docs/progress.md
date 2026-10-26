@@ -4,7 +4,16 @@ Updated: 2026-10-25.
 
 ## Current increment
 
-Milestone M02F-A: generalized RBAC and authorization foundations. Implementation and verification are complete on `feat/m02f-a-rbac-authorization`; M02F-B authentication protection hardening is next. Production SMS remains unavailable pending provider approval.
+Milestone M02F-B: authentication protection hardening. Implementation and verification are complete on `feat/m02f-b-auth-protection`; M03 user profiles and onboarding is next. Production SMS remains unavailable pending provider approval.
+
+## 2026-10-26 — M02F-B authentication protection
+
+- Added `20261026020000000_add-auth-protection-state.js`, session-bound CSRF hashes, and persistent atomic authentication counters.
+- Added IP/action throttles for public authentication routes and account-administration mutations plus a five-attempt, 15-minute normalized-account password lockout.
+- Added stable `429 AUTH_RATE_LIMITED` responses with `Retry-After`; successful login resets account failures and known failures are audited without changing external non-enumeration.
+- Added allowed-origin and session-bound CSRF validation for cookie-authenticated mutations. Public auth/recovery and bearer-authenticated calls remain usable.
+- `npm test` passed 62 tests plus migration-source integrity, eight schema-integrity cases, and server lifecycle. Catalog verification passed at 85 tables, 668 columns, 301 indexes, and 16 migrations.
+- Disposable rollback was not run because `everest_app` no longer has `CREATEDB` (`42501`); no rollback ran against `everest_db`.
 
 ## 2026-10-26 — M02F-A RBAC and authorization foundations
 

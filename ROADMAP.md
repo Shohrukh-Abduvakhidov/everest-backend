@@ -1,7 +1,7 @@
 ---
 project: EVEREST Backend
 roadmap_version: 1
-current_milestone: M02F-B
+current_milestone: M03
 current_status: planned
 updated_at: 2026-10-26
 architecture: docs/architecture.md
@@ -117,11 +117,11 @@ This roadmap orders implementation; it does not replace the [current architectur
 
 ## M02F-B — Authentication protection hardening
 
-- **Status:** Planned.
+- **Status:** Done.
 - **Goal:** Add authentication abuse controls and an explicit CSRF defense after selecting concrete policies.
 - **Dependencies:** M02F-A and approved rate-limit/CSRF semantics.
-- **Deliverables:** Brute-force controls, rate limits, CSRF decision/implementation, and authentication security review.
-- **Verification:** Throttling, CSRF behavior, session/account-state checks, and security regression tests.
+- **Deliverables:** PostgreSQL-backed IP/action throttles, privacy-safe password-account lockout, stable `429`/`Retry-After`, session-bound CSRF tokens, allowed-origin checks, and authentication security review.
+- **Verification:** Atomic concurrent lockout, expiry/reset, non-enumeration, rate responses, CSRF missing/invalid/cross-session/valid cases, session/account-state checks, and security regressions passed.
 - **Documentation updates:** API, decisions, architecture, progress, roadmap, and handoff.
 - **Exclusions:** Domain permissions whose product rules remain unresolved.
 

@@ -6,6 +6,7 @@ import pg from 'pg';
 import { createApp } from '../../src/app.js';
 import env from '../../src/configs/env.js';
 import * as userRepository from '../../src/repositories/user-repository.js';
+import { securityKey } from '../../src/services/auth-protection-service.js';
 import { verifyPassword } from '../../src/utils/password.js';
 import { createPasswordAuthTestService } from '../helpers/service-factories.js';
 
@@ -236,6 +237,41 @@ test('password registration and login integration', async (t) => {
       assert.equal(stored.rows[0].event_code, 'auth.password.login_succeeded');
     });
 
+    await t.test('locks repeated password failures atomically, expires, and resets on success', async () => {
+      const attempts = await Promise.all(Array.from({ length: 6 }, () => (
+        request(port, '/api/v1/auth/login/password', {
+          phone, password: 'wrong concurrent password 7',
+        })
+      )));
+      assert.ok(attempts.some(({ response }) => response.status === 429));
+      const limited = attempts.find(({ response }) => response.status === 429);
+      assert.equal(limited.body.error.code, 'AUTH_RATE_LIMITED');
+      assert.ok(Number(limited.response.headers.get('retry-after')) >= 1);
+
+      const keyHash = securityKey(phone, testConfig);
+      const stored = await client.query(
+        `SELECT attempt_count FROM auth_security_counters
+         WHERE scope = 'login.account' AND key_hash = $1`,
+        [keyHash]
+      );
+      assert.equal(stored.rows[0].attempt_count, 6);
+
+      await client.query(
+        `UPDATE auth_security_counters
+         SET window_started_at = CURRENT_TIMESTAMP - INTERVAL '1 hour', blocked_until = NULL
+         WHERE scope = 'login.account' AND key_hash = $1`,
+        [keyHash]
+      );
+      const succeeded = await request(port, '/api/v1/auth/login/password', { phone, password });
+      assert.equal(succeeded.response.status, 200);
+      const cleared = await client.query(
+        `SELECT count(*)::int AS count FROM auth_security_counters
+         WHERE scope = 'login.account' AND key_hash = $1`,
+        [keyHash]
+      );
+      assert.equal(cleared.rows[0].count, 0);
+    });
+
     await t.test('rejects blocked and rejected accounts with the same safe status error', async () => {
       await client.query(
         "UPDATE users SET status = 'blocked', blocked_at = CURRENT_TIMESTAMP WHERE id = $1",
@@ -250,6 +286,12 @@ test('password registration and login integration', async (t) => {
       assert.equal(blocked.body.error.code, 'ACCOUNT_NOT_ACTIVE');
     });
   } finally {
+    await client.query(
+      `DELETE FROM auth_security_counters
+       WHERE scope IN ('register.ip', 'login.ip')
+          OR (scope = 'login.account' AND key_hash = $1)`,
+      [securityKey(phone, testConfig)]
+    );
     await removeFixtures(client);
     await client.end();
     await new Promise((resolve) => server.close(resolve));

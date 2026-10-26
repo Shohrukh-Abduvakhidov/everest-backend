@@ -1,5 +1,11 @@
 # Implemented API
 
+## Authentication protection
+
+Sensitive public authentication routes and account-administration mutations use PostgreSQL-backed request counters. Exceeded limits return `429 AUTH_RATE_LIMITED` with a whole-second `Retry-After` header. Password login additionally permits five attempts per normalized phone in a 15-minute window and blocks further attempts for 15 minutes; keys are HMAC-derived and no phone, password, OTP, access token, or refresh token is stored in the counter table. Successful password login clears its account counter. Unknown and known accounts retain the same `401 INVALID_CREDENTIALS` response before rate limiting.
+
+Password and Telegram login set a readable `everest_csrf` cookie alongside the existing HttpOnly access and refresh cookies. Browser clients must copy its value into `X-CSRF-Token` and send an allowed `Origin` on cookie-authenticated `POST`, `PUT`, `PATCH`, and `DELETE` requests. The server stores only its SHA-256 hash bound to the session. Missing/invalid/cross-session tokens return `403 CSRF_TOKEN_INVALID`; disallowed or missing origins return `403 CSRF_ORIGIN_REJECTED`. Bearer-authenticated mutations are not vulnerable to ambient-cookie CSRF and do not require the header. Public registration/login, Telegram callback, and password-recovery operations remain CSRF-exempt; refresh and logout require CSRF when a valid refresh cookie identifies a live session.
+
 Internal database identifiers are serialized as canonical positive decimal strings. This preserves PostgreSQL `BIGINT` precision across JSON and JWT claims; clients must not assume identifiers are gapless or safely coerce them to JavaScript `Number`.
 
 ## Password recovery

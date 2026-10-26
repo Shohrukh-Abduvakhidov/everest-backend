@@ -2,6 +2,7 @@ import env from '../../configs/env.js'
 import * as authRepository from '../../repositories/auth-repository.js'
 import * as sessionRepository from '../../repositories/session-repository.js'
 import { createRefreshToken, hashRefreshToken } from '../../utils/refresh-token.js'
+import { createCsrfToken, hashCsrfToken } from '../../utils/csrf-token.js'
 import { createAccessToken } from './session-token-service.js'
 
 async function issueSessionService(
@@ -15,12 +16,14 @@ async function issueSessionService(
 ) {
    const expiresAt = new Date(now().getTime() + config.authSessionTtlSeconds * 1000)
    const refreshExpiresAt = new Date(now().getTime() + config.authRefreshTtlSeconds * 1000)
+   const csrfToken = createCsrfToken()
    const session = await repository.createSession(
       {
          userId,
          expiresAt: refreshExpiresAt,
          userAgent: requestContext.userAgent?.slice(0, 1000) || null,
          ipAddress: requestContext.ipAddress || null,
+         csrfTokenHash: hashCsrfToken(csrfToken),
       },
       client,
    )
@@ -41,7 +44,7 @@ async function issueSessionService(
       config.jwtAccessSecret,
    )
 
-   return { accessToken, expiresAt, refreshExpiresAt, refreshToken, sessionId }
+   return { accessToken, csrfToken, expiresAt, refreshExpiresAt, refreshToken, sessionId }
 }
 
 export { issueSessionService }

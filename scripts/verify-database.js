@@ -6,14 +6,14 @@ const { Client } = pg;
 const client = new Client(env.database);
 
 const expected = {
-  tables: 84,
-  columns: 661,
+  tables: 85,
+  columns: 668,
   foreignKeys: 159,
-  indexes: 299,
+  indexes: 301,
   functions: 7,
   triggers: 11,
   roles: 4,
-  migrations: 15,
+  migrations: 16,
   identityColumns: 65,
 };
 
