@@ -1,26 +1,34 @@
-import env from '../configs/env.js';
-import { passwordAuthService } from '../services/password-auth-service.js';
-import { setAuthCookies } from '../utils/auth-cookies.js';
+import env from '../configs/env.js'
+import { passwordAuthService } from '../services/password-auth-service.js'
+import { setAuthCookies } from '../utils/auth-cookies.js'
 
 function createPasswordAuthController(service = passwordAuthService) {
-  async function register(request, response) {
-    const result = await service.register(request.body);
-    response.status(201).json({ data: result });
-  }
+   async function registerController(req, res, next) {
+      try {
+         const result = await service.register(req.body)
+         res.status(201).json({ data: result })
+      } catch (error) {
+         next(error)
+      }
+   }
 
-  async function login(request, response) {
-    const result = await service.login(request.body, {
-      ipAddress: request.ip,
-      userAgent: request.get('user-agent'),
-    });
-    setAuthCookies(response, result, env);
-    const { accessToken: _accessToken, refreshToken: _refreshToken, ...safeResult } = result;
-    response.json({ data: safeResult });
-  }
+   async function loginController(req, res, next) {
+      try {
+         const result = await service.login(req.body, {
+            ipAddress: req.ip,
+            userAgent: req.get('user-agent'),
+         })
+         setAuthCookies(res, result, env)
+         const { accessToken: _accessToken, refreshToken: _refreshToken, ...safeResult } = result
+         res.json({ data: safeResult })
+      } catch (error) {
+         next(error)
+      }
+   }
 
-  return { login, register };
+   return { loginController, registerController }
 }
 
-const passwordAuthController = createPasswordAuthController();
+const { loginController, registerController } = createPasswordAuthController()
 
-export { createPasswordAuthController, passwordAuthController };
+export { createPasswordAuthController, loginController, registerController }
