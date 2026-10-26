@@ -4,7 +4,17 @@ Updated: 2026-10-25.
 
 ## Current increment
 
-Milestone M02E: secure password recovery. Implementation and verification are complete on `feat/m02e-password-recovery`; M02F authorization and authentication protection is next. Production SMS remains unavailable pending provider approval.
+Milestone M02F-A: generalized RBAC and authorization foundations. Implementation and verification are complete on `feat/m02f-a-rbac-authorization`; M02F-B authentication protection hardening is next. Production SMS remains unavailable pending provider approval.
+
+## 2026-10-26 — M02F-A RBAC and authorization foundations
+
+- Added the incremental `20261026010000000_add-rbac-permissions.js` migration with `permissions` and `role_permissions`.
+- Seeded only five existing account-administration actions for `owner` and `admin`; no unresolved domain/resource permissions or implicit role hierarchy were introduced.
+- Added repository-backed permission evaluation, service-owned authorization decisions, and explicit action middleware on every account-administration route.
+- Preserved routes, responses, authentication order, `ADMIN_ROLE_REQUIRED`, account-state rules, transactions, session revocation, and audit behavior.
+- Focused unit tests, all eight account-administration integration subtests, and the full 59-test authentication regression suite passed. Catalog verification passed at 84 tables, 661 columns, 159 foreign keys, 299 indexes, 15 migrations, and 65 identity columns.
+- Both final migration-up runs were no-ops. The disposable cycle passed up/no-op/down/up at 15/15/14/15 migrations and 84/84/82/84 tables, then its generated database was confirmed removed. No rollback ran against `everest_db`.
+- M02F-B rate limiting, brute-force controls, CSRF, and the broader authentication security review are next.
 
 ## 2026-10-25 — M02E password recovery
 
@@ -136,4 +146,4 @@ Production SMS provider selection, whether Telegram-authenticated accounts must 
 
 ## Next concrete milestone
 
-M02C: implement account approval state management with a narrowly scoped authenticated administrator guard: list pending accounts; approve, reject, block, and unblock; audit decisions; and atomically revoke sessions when blocking. General RBAC remains M02F. SMS/OTP, refresh/logout/session management, password recovery, learning domains, and unrelated refactors remain excluded.
+M02F-B: confirm rate-limit, brute-force, and CSRF policies, then implement authentication protection hardening without adding unresolved domain permissions or changing approved authentication contracts.

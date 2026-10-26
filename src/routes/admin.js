@@ -7,16 +7,42 @@ import {
    rejectUserController,
    unblockUserController,
 } from '../controllers/account-admin-controller.js'
-import { adminMiddleware } from '../middleware/admin-middleware.js'
+import {
+   approveUserAuthorizationMiddleware,
+   blockUserAuthorizationMiddleware,
+   listPendingUsersAuthorizationMiddleware,
+   rejectUserAuthorizationMiddleware,
+   unblockUserAuthorizationMiddleware,
+} from '../middleware/admin-middleware.js'
 import { authMiddleware } from '../middleware/auth-middleware.js'
 
 const adminRouter = express.Router()
 
-adminRouter.use(authMiddleware, adminMiddleware)
-adminRouter.get('/users/pending', listPendingUsersController)
-adminRouter.post('/users/:userId/approve', approveUserController)
-adminRouter.post('/users/:userId/reject', rejectUserController)
-adminRouter.post('/users/:userId/block', blockUserController)
-adminRouter.post('/users/:userId/unblock', unblockUserController)
+adminRouter.use(authMiddleware)
+adminRouter.get(
+   '/users/pending',
+   listPendingUsersAuthorizationMiddleware,
+   listPendingUsersController,
+)
+adminRouter.post(
+   '/users/:userId/approve',
+   approveUserAuthorizationMiddleware,
+   approveUserController,
+)
+adminRouter.post(
+   '/users/:userId/reject',
+   rejectUserAuthorizationMiddleware,
+   rejectUserController,
+)
+adminRouter.post(
+   '/users/:userId/block',
+   blockUserAuthorizationMiddleware,
+   blockUserController,
+)
+adminRouter.post(
+   '/users/:userId/unblock',
+   unblockUserAuthorizationMiddleware,
+   unblockUserController,
+)
 
 export default adminRouter

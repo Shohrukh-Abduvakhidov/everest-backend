@@ -1,9 +1,9 @@
 ---
 project: EVEREST Backend
 roadmap_version: 1
-current_milestone: M02F
+current_milestone: M02F-B
 current_status: planned
-updated_at: 2026-10-25
+updated_at: 2026-10-26
 architecture: docs/architecture.md
 ---
 
@@ -105,13 +105,23 @@ This roadmap orders implementation; it does not replace the [current architectur
 - **Documentation updates:** API, decisions, architecture, progress, roadmap, and handoff.
 - **Exclusions:** Selecting or calling an SMS provider without approval.
 
-## M02F — Authorization and auth protection
+## M02F-A — RBAC and authorization foundations
+
+- **Status:** Done.
+- **Goal:** Establish reusable database-backed action authorization without inventing unresolved domain permissions.
+- **Dependencies:** M02B–M02D and the existing account-administration semantics.
+- **Deliverables:** Permission and role-permission persistence, a repository-backed authorization service, and explicit per-action account-administration guards. `owner` and `admin` retain the five existing account actions; `teacher` and `student` receive none.
+- **Verification:** Permission-code validation, allow/deny service tests, per-route denials, existing owner/admin behavior, full authentication regressions, catalog verification, and disposable migration rollback.
+- **Documentation updates:** API, decisions, architecture, progress, roadmap, and handoff.
+- **Exclusions:** Unresolved domain/resource permissions, permission-management APIs, rate limiting, brute-force controls, and CSRF.
+
+## M02F-B — Authentication protection hardening
 
 - **Status:** Planned.
-- **Goal:** Enforce authenticated action and resource scope consistently.
-- **Dependencies:** M02B–M02D and approved permission semantics.
-- **Deliverables:** RBAC, action permissions, resource authorization, brute-force controls, rate limits, CSRF decision/implementation, and authentication security review.
-- **Verification:** Role/action/resource denials, session/account-state checks, throttling, CSRF behavior, and security regression tests.
+- **Goal:** Add authentication abuse controls and an explicit CSRF defense after selecting concrete policies.
+- **Dependencies:** M02F-A and approved rate-limit/CSRF semantics.
+- **Deliverables:** Brute-force controls, rate limits, CSRF decision/implementation, and authentication security review.
+- **Verification:** Throttling, CSRF behavior, session/account-state checks, and security regression tests.
 - **Documentation updates:** API, decisions, architecture, progress, roadmap, and handoff.
 - **Exclusions:** Domain permissions whose product rules remain unresolved.
 
