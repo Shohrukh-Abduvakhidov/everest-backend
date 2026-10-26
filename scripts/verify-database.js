@@ -6,15 +6,15 @@ const { Client } = pg;
 const client = new Client(env.database);
 
 const expected = {
-  tables: 82,
-  columns: 654,
-  foreignKeys: 157,
-  indexes: 296,
+  tables: 84,
+  columns: 661,
+  foreignKeys: 159,
+  indexes: 299,
   functions: 7,
   triggers: 11,
   roles: 4,
-  migrations: 14,
-  identityColumns: 64,
+  migrations: 15,
+  identityColumns: 65,
 };
 
 try {
@@ -112,6 +112,26 @@ try {
     WHERE table_schema = 'public' AND data_type = 'uuid'
     ORDER BY table_name, column_name
   `);
+  const authorizationSeeds = await client.query(`
+    SELECT
+      (SELECT count(*)::integer FROM permissions) AS permissions,
+      (SELECT count(*)::integer FROM role_permissions) AS role_permissions,
+      (SELECT count(*)::integer
+       FROM role_permissions AS grant_record
+       JOIN roles AS role ON role.id = grant_record.role_id
+       WHERE role.code IN ('teacher', 'student')) AS learner_grants
+  `);
+
+  let permissionConstraintCode = null;
+  await client.query('BEGIN');
+  try {
+    await client.query(
+      `INSERT INTO permissions (code, description) VALUES ('accountsXinvalid', 'invalid')`
+    );
+  } catch (error) {
+    permissionConstraintCode = error.code;
+  }
+  await client.query('ROLLBACK');
 
   await client.query('BEGIN');
   const generated = await client.query(
@@ -127,6 +147,10 @@ try {
     && remainingUuidColumns.rowCount === 1
     && remainingUuidColumns.rows[0].table_name === 'sms_deliveries'
     && remainingUuidColumns.rows[0].column_name === 'idempotency_key'
+    && authorizationSeeds.rows[0].permissions === 5
+    && authorizationSeeds.rows[0].role_permissions === 10
+    && authorizationSeeds.rows[0].learner_grants === 0
+    && permissionConstraintCode === '23514'
     && generatedIdentity.type === 'bigint'
     && /^[1-9][0-9]*$/.test(generatedIdentity.id);
 
@@ -139,6 +163,8 @@ try {
     invalidEntityIds: invalidEntityIds.rows,
     invalidForeignKeys: invalidForeignKeys.rows,
     remainingUuidColumns: remainingUuidColumns.rows,
+    authorizationSeeds: authorizationSeeds.rows[0],
+    permissionConstraintCode,
     generatedIdentity,
     valid,
   }, null, 2));

@@ -494,6 +494,8 @@ Rate-limit by phone/IP/global budget and apply resend cooldowns. No configured S
 
 Authentication is split into separate increments: M02B registration/password login; M02C approval/blocking; M02D refresh/logout/session management; M02E Telegram/SMS recovery and password reset; M02F RBAC and protection hardening. A later route is not implemented simply because this document lists it.
 
+M02F-A implements the reusable RBAC foundation with database-backed permissions and role-permission grants. Each protected route names an action permission; middleware calls the authorization service, and only repositories query assignments. The initial grants preserve existing account-administration behavior for `owner` and `admin`. Resource authorization and authentication abuse/CSRF hardening remain separate work and must not be inferred from the presence of the permission tables.
+
 ## 12. Groups, courses and individual access
 
 Groups use groups, group_members, group_teachers, group_announcements and announcement_assets. There is no group_courses relation and group membership never grants course access. A group teacher does not automatically become a course teacher.

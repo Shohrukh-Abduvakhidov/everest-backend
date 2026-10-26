@@ -3,6 +3,7 @@ import './unit/telegram-oidc-provider.test.js';
 import './unit/password.test.js';
 import './unit/session-token.test.js';
 import './unit/account-admin.test.js';
+import './unit/authorization.test.js';
 import './unit/session-lifecycle.test.js';
 import './unit/password-recovery.test.js';
 import './integration/password-auth.test.js';

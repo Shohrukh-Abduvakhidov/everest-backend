@@ -136,6 +136,24 @@ test('account approval administration integration', async (t) => {
       assert.equal((await api(port, '/api/v1/admin/users/pending', { token: adminToken })).response.status, 200);
     });
 
+    await t.test('enforces the permission assigned to each account action', async () => {
+      const deniedActions = [
+        ['approve', pendingOne],
+        ['reject', pendingOne],
+        ['block', studentId],
+        ['unblock', studentId],
+      ];
+
+      for (const [action, userId] of deniedActions) {
+        const denied = await api(port, `/api/v1/admin/users/${userId}/${action}`, {
+          method: 'POST',
+          token: teacherToken,
+        });
+        assert.equal(denied.response.status, 403);
+        assert.equal(denied.body.error.code, 'ADMIN_ROLE_REQUIRED');
+      }
+    });
+
     await t.test('lists pending users deterministically with safe pagination', async () => {
       const listed = await api(port, '/api/v1/admin/users/pending?limit=1&offset=0', { token: adminToken });
       assert.equal(listed.response.status, 200);

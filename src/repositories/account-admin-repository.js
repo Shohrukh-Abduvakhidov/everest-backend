@@ -9,18 +9,6 @@ const accountStateAssignments = {
    unblock: `status = 'active', blocked_by = NULL, blocked_at = NULL`,
 }
 
-async function hasAdministratorRole(userId, db = pool) {
-   const result = await db.query(
-      `SELECT EXISTS (
-       SELECT 1 FROM user_roles AS membership
-       JOIN roles AS role ON role.id = membership.role_id
-       WHERE membership.user_id = $1 AND role.code IN ('owner', 'admin')
-     ) AS allowed`,
-      [normalizeInternalId(userId)],
-   )
-   return result.rows[0].allowed
-}
-
 async function listPendingUsers({ limit, offset }, db = pool) {
    const result = await db.query(
       `SELECT account.id, account.status, account.created_at,
@@ -144,7 +132,6 @@ export {
    findOwnerAssignment,
    findUserByPhoneForUpdate,
    findUserForUpdate,
-   hasAdministratorRole,
    listPendingUsers,
    lockOwnerBootstrap,
    revokeUserRefreshTokens,

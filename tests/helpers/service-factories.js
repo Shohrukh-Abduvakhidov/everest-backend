@@ -1,6 +1,5 @@
 import {
    approveUserService,
-   authorizeAdministratorService,
    blockUserService,
    bootstrapOwnerService,
    listPendingUsersService,
@@ -36,7 +35,6 @@ function createAccountAdminTestService(dependencies = {}) {
    return {
       dependencies,
       approve: (actor, user) => approveUserService(actor, user, dependencies),
-      authorizeAdministrator: (user) => authorizeAdministratorService(user, dependencies),
       block: (actor, user) => blockUserService(actor, user, dependencies),
       bootstrapOwner: (phone) => bootstrapOwnerService(phone, dependencies),
       listPending: (query) => listPendingUsersService(query, dependencies),

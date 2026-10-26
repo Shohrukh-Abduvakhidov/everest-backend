@@ -70,14 +70,6 @@ function validateSelfAction(action, actorUserId, userId) {
    }
 }
 
-async function authorizeAdministratorService(userId, overrides) {
-   const { repository } = dependencies(overrides)
-   const allowed = await repository.hasAdministratorRole(parseUserId(userId))
-   if (!allowed) {
-      throw new AppError(403, 'ADMIN_ROLE_REQUIRED', 'Administrator role is required')
-   }
-}
-
 async function listPendingUsersService(query, overrides) {
    const { repository } = dependencies(overrides)
    const pagination = parsePagination(query)
@@ -190,7 +182,6 @@ async function bootstrapOwnerService(phoneValue, overrides) {
 
 export {
    approveUserService,
-   authorizeAdministratorService,
    blockUserService,
    bootstrapOwnerService,
    listPendingUsersService,

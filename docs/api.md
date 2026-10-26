@@ -56,7 +56,7 @@ Browser clients must send credentials for cookie-authenticated calls. `SameSite=
 
 ## Account administration
 
-All account-administration routes require an authenticated, live session for an active user whose current database roles include `owner` or `admin`. Unauthenticated requests return `401 AUTHENTICATION_REQUIRED`; other roles return `403 ADMIN_ROLE_REQUIRED`.
+All account-administration routes require an authenticated, live session for an active user with the action-specific database permission. The seeded `owner` and `admin` roles have `accounts.pending.read`, `accounts.approve`, `accounts.reject`, `accounts.block`, and `accounts.unblock`; `teacher` and `student` do not. Unauthenticated requests return `401 AUTHENTICATION_REQUIRED`; a missing action permission preserves `403 ADMIN_ROLE_REQUIRED` for this existing API.
 
 ### `GET /api/v1/admin/users/pending`
 
