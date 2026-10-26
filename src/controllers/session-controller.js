@@ -14,7 +14,12 @@ import {
 } from '../utils/auth-cookies.js'
 
 function safeResult(result) {
-   const { accessToken: _accessToken, refreshToken: _refreshToken, ...safe } = result
+   const {
+      accessToken: _accessToken,
+      csrfToken: _csrfToken,
+      refreshToken: _refreshToken,
+      ...safe
+   } = result
    return safe
 }
 

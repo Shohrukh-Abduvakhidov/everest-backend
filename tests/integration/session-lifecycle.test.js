@@ -16,6 +16,7 @@ import {
 
 const { Client } = pg;
 const fixtureIds = [];
+const csrfByToken = new Map();
 const config = {
   ...env,
   jwtAccessSecret: 'session-lifecycle-integration-secret-longer-than-32-characters',
@@ -34,9 +35,12 @@ async function createUser(client, status = 'active') {
 }
 
 async function issue(sessionService, userId, userAgent = 'Mozilla/5.0 Windows Chrome/120.0') {
-  return withTransaction((client) => sessionService.issueSession({
+  const result = await withTransaction((client) => sessionService.issueSession({
     userId, requestContext: { userAgent, ipAddress: '127.0.0.1' }, client,
   }));
+  csrfByToken.set(result.refreshToken, result.csrfToken);
+  csrfByToken.set(result.accessToken, result.csrfToken);
+  return result;
 }
 
 function cookie(name, value) {
@@ -48,17 +52,33 @@ function cookieValue(response, name) {
   return header.match(new RegExp(`${name}=([^;,]+)`))?.[1];
 }
 
-async function api(port, path, { method = 'GET', accessToken, refreshToken } = {}) {
+async function api(port, path, {
+  method = 'GET', accessToken, refreshToken, cookieAccess = false,
+  csrfToken: suppliedCsrf, omitCsrf = false,
+} = {}) {
   const cookies = [];
   if (accessToken) cookies.push(cookie('everest_access', accessToken));
   if (refreshToken) cookies.push(cookie('everest_refresh', refreshToken));
+  const csrfToken = omitCsrf
+    ? null
+    : suppliedCsrf || csrfByToken.get(refreshToken || (cookieAccess ? accessToken : null));
   const response = await fetch(`http://127.0.0.1:${port}${path}`, {
     method,
     headers: {
-      ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}),
+      ...(accessToken && !cookieAccess ? { authorization: `Bearer ${accessToken}` } : {}),
       ...(cookies.length ? { cookie: cookies.join('; ') } : {}),
+      ...(cookieAccess || csrfToken ? { origin: 'http://localhost:3000' } : {}),
+      ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}),
     },
   });
+  const replacement = cookieValue(response, 'everest_refresh');
+  const replacementCsrf = cookieValue(response, 'everest_csrf');
+  if (replacement && (replacementCsrf || csrfToken)) {
+    csrfByToken.set(
+      decodeURIComponent(replacement),
+      replacementCsrf ? decodeURIComponent(replacementCsrf) : csrfToken,
+    );
+  }
   return { response, body: await response.json() };
 }
 
@@ -73,6 +93,7 @@ async function cleanup(client) {
 test('secure multi-device session lifecycle integration', async (t) => {
   const client = new Client(env.database);
   await client.connect();
+  await client.query("DELETE FROM auth_security_counters WHERE scope = 'refresh.ip'");
   const sessionService = createSessionTestService({ config });
   const lifecycle = createSessionLifecycleTestService({ config });
   const authService = createTelegramAuthTestService({ config });
@@ -237,6 +258,35 @@ test('secure multi-device session lifecycle integration', async (t) => {
       assert.equal((await api(port, '/api/v1/auth/refresh', { method: 'POST', refreshToken: other.refreshToken })).response.status, 200);
     });
 
+    await t.test('requires a session-bound CSRF token for cookie-authenticated mutations', async () => {
+      const csrfUserId = await createUser(client);
+      const first = await issue(sessionService, csrfUserId);
+      const second = await issue(sessionService, csrfUserId);
+
+      const missing = await api(port, '/api/v1/auth/logout-all', {
+        method: 'POST', accessToken: first.accessToken, cookieAccess: true, omitCsrf: true,
+      });
+      assert.equal(missing.response.status, 403);
+      assert.equal(missing.body.error.code, 'CSRF_TOKEN_INVALID');
+
+      const invalid = await api(port, '/api/v1/auth/logout-all', {
+        method: 'POST', accessToken: first.accessToken, cookieAccess: true, csrfToken: 'invalid',
+      });
+      assert.equal(invalid.response.status, 403);
+      assert.equal(invalid.body.error.code, 'CSRF_TOKEN_INVALID');
+
+      const crossSession = await api(port, '/api/v1/auth/logout-all', {
+        method: 'POST', accessToken: first.accessToken, cookieAccess: true,
+        csrfToken: second.csrfToken,
+      });
+      assert.equal(crossSession.response.status, 403);
+
+      const valid = await api(port, '/api/v1/auth/logout-all', {
+        method: 'POST', accessToken: first.accessToken, cookieAccess: true,
+      });
+      assert.equal(valid.response.status, 200);
+    });
+
     await t.test('rolls back rotation when replacement persistence fails', async () => {
       const issued = await issue(sessionService, userId);
       const failing = createSessionLifecycleTestService({
@@ -277,6 +327,7 @@ test('secure multi-device session lifecycle integration', async (t) => {
       assert.equal(stored.rows[0].live_tokens, 1);
     });
   } finally {
+    await client.query("DELETE FROM auth_security_counters WHERE scope = 'refresh.ip'");
     await cleanup(client);
     await client.end();
     await new Promise((resolve) => server.close(resolve));

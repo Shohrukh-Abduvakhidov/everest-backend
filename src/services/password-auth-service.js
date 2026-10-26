@@ -11,6 +11,10 @@ import {
 } from '../utils/auth-input.js'
 import { hashPassword, verifyPassword } from '../utils/password.js'
 import { issueSessionService } from './auth/session-service.js'
+import {
+   clearRateLimitService,
+   consumeRateLimitService,
+} from './auth-protection-service.js'
 
 const dummyPasswordHash =
    'scrypt$16384$8$1$YPIwZaby56dLwoJeEAVCKQ$WmyiT5x22N7vIWUPlYs8wJTOB3XsvKr3RBultfXmx-FwcIYNQJkBaoVibAGfr3D86KtJWqKzbG91FNdWa4D0Jw'
@@ -36,6 +40,10 @@ function dependencies(overrides = {}) {
                repository: auth,
                now,
             }),
+      },
+      protection: overrides.protection || {
+         consume: (input) => consumeRateLimitService(input, { config }),
+         clear: (scope, key) => clearRateLimitService(scope, key, { config }),
       },
    }
 }
@@ -89,10 +97,18 @@ async function authRegisterService(body, overrides) {
 }
 
 async function authLoginService(body, requestContext, overrides) {
-   const { users, auth, transaction, passwordHasher, sessions } = dependencies(overrides)
+   const { users, auth, transaction, passwordHasher, sessions, protection, config } = dependencies(overrides)
    validateBody(body, ['phone', 'password'])
    const phoneE164 = normalizePhone(body.phone)
    const password = body.password
+
+   await protection.consume({
+      scope: 'login.account',
+      key: phoneE164,
+      limit: config.authLoginMaxAttempts,
+      windowSeconds: config.authRateWindowSeconds,
+      blockSeconds: config.authRateBlockSeconds,
+   })
 
    if (typeof password !== 'string' || password.length === 0 || [...password].length > 128) {
       throw new AppError(401, 'INVALID_CREDENTIALS', 'Phone or password is invalid')
@@ -104,10 +120,23 @@ async function authLoginService(body, requestContext, overrides) {
       account?.password_hash || dummyPasswordHash,
    )
    if (!account || !passwordMatches) {
+      if (account) {
+         await transaction((client) => auth.appendAuditEvent(
+            {
+               actorUserId: null,
+               subjectUserId: account.user_id,
+               code: 'auth.password.login_failed',
+               entityType: 'user',
+               entityId: account.user_id,
+               metadata: {},
+            },
+            client,
+         ))
+      }
       throw new AppError(401, 'INVALID_CREDENTIALS', 'Phone or password is invalid')
    }
 
-   return transaction(async (client) => {
+   const result = await transaction(async (client) => {
       const locked = await users.findPasswordAccountForUpdate(phoneE164, client)
       if (
          !locked ||
@@ -137,16 +166,18 @@ async function authLoginService(body, requestContext, overrides) {
          },
          client,
       )
-
       return {
          status: 'authenticated',
          accessToken: session.accessToken,
          expiresAt: session.expiresAt,
          refreshToken: session.refreshToken,
+         csrfToken: session.csrfToken,
          refreshExpiresAt: session.refreshExpiresAt,
          user: { id: locked.user_id },
       }
    })
+   await protection.clear('login.account', phoneE164)
+   return result
 }
 
 export { authLoginService, authRegisterService }

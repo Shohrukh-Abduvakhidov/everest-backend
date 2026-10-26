@@ -27,7 +27,12 @@ async function loginController(req, res, next) {
       )
 
       setAuthCookies(res, result, env)
-      const { accessToken: _accessToken, refreshToken: _refreshToken, ...safeResult } = result
+      const {
+         accessToken: _accessToken,
+         csrfToken: _csrfToken,
+         refreshToken: _refreshToken,
+         ...safeResult
+      } = result
       res.json({ data: safeResult })
    } catch (error) {
       next(error)

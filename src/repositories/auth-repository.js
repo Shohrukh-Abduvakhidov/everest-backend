@@ -86,10 +86,10 @@ async function createSession(session, client) {
    const userId = normalizeInternalId(session.userId)
    const result = await client.query(
       `INSERT INTO auth_sessions
-      (user_id, expires_at, user_agent, ip_address)
-     VALUES ($1, $2, $3, $4)
+      (user_id, expires_at, user_agent, ip_address, csrf_token_hash)
+     VALUES ($1, $2, $3, $4, $5)
      RETURNING id`,
-      [userId, session.expiresAt, session.userAgent, session.ipAddress],
+      [userId, session.expiresAt, session.userAgent, session.ipAddress, session.csrfTokenHash],
    )
    return result.rows[0]
 }

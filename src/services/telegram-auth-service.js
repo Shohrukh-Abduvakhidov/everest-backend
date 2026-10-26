@@ -233,6 +233,7 @@ async function completeLoginService(claims, tokenSet, requestContext, context) {
          accessToken: session.accessToken,
          expiresAt: session.expiresAt,
          refreshToken: session.refreshToken,
+         csrfToken: session.csrfToken,
          refreshExpiresAt: session.refreshExpiresAt,
          user: { id: identity.user_id },
          messagingConnected,
