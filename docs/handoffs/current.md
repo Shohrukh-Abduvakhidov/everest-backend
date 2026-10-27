@@ -1,9 +1,9 @@
 ---
 project: EVEREST Backend
-current_milestone: M05
+current_milestone: M05-B
 status: planned
-branch: feat/m04-b-group-administration
-base_commit: efece5a3
+branch: feat/m05-a-course-management
+base_commit: f5121891
 updated_at: 2026-10-27
 ---
 
@@ -11,29 +11,30 @@ updated_at: 2026-10-27
 
 ## Completed work
 
-- M00 through M04-B are Done.
-- M04-B added group administration, student membership lifecycle, teacher assignment, and text announcements with database-backed permission and resource scope checks.
-- The completion record is archived at `docs/handoffs/2026-10-27-m04-b-group-administration.md`.
+- M00 through M05-A are Done.
+- M05-A added administrative course catalog/lifecycle APIs and course-scoped teacher assignments.
+- The completion record is archived at `docs/handoffs/2026-10-27-m05-a-course-management.md`.
 
 ## Verification
 
-- Focused M04-B integration passed nine subtests; the full suite passed 91 tests plus migration-source integrity, eight schema-integrity cases, and server lifecycle.
-- Migration up is a no-op. Catalog verification passed at 85 tables, 668 columns, 159 foreign keys, 301 indexes, 17 migrations, and 65 identity columns.
-- The disposable migration cycle passed 17/17/16/17 and dropped its generated database. No rollback ran against `everest_db`.
+- Focused M05-A PostgreSQL integration passed ten subtests; the full suite passed 102 tests plus migration-source integrity, eight schema-integrity cases, and server lifecycle.
+- Migration up is a no-op. Catalog verification passed at 85 tables, 669 columns, 159 foreign keys, 301 indexes, 18 migrations, and 65 identity columns.
+- The disposable cycle passed 18/18/17/18 and dropped its generated database. No rollback ran against `everest_db`.
 
 ## Current milestone
 
-M05 — course management — is Planned.
+M05-B — modules, ordering, preview, and course copying — is Planned.
 
 ## Next concrete task
 
-Confirm the M05 course lifecycle, module ordering, teacher permissions, publication rules, and copy semantics before implementation.
+Confirm module lifecycle/order, preview exposure, and copy semantics before implementing M05-B.
 
 ## Constraints
 
 - Preserve route → middleware → controller → service → repository → PostgreSQL.
-- Groups remain independent from courses and never grant course or module access.
-- Do not edit the 17 published migrations; add an incremental reversible migration only if M05 requires schema or permission seeds.
+- M05-B must not issue student enrollments or module access grants; those belong to M06.
+- Groups remain independent from courses; never add `group_courses`.
+- Do not edit the 18 published migrations.
 
 ## Safe startup commands
 

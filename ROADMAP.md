@@ -1,7 +1,7 @@
 ---
 project: EVEREST Backend
 roadmap_version: 1
-current_milestone: M05
+current_milestone: M05-B
 current_status: planned
 updated_at: 2026-10-27
 architecture: docs/architecture.md
@@ -155,15 +155,25 @@ This roadmap orders implementation; it does not replace the [current architectur
 - **Documentation updates:** API, decisions, architecture, progress, roadmap, handoff.
 - **Exclusions:** Announcement assets before M07; progress summaries before M12; ranking before M13 and an approved formula; `group_courses`.
 
-## M05 — Course management
+## M05-A — Course catalog, lifecycle and teacher assignments
+
+- **Status:** Done
+- **Goal:** Manage the authored course catalog, explicit publication lifecycle, and course teacher assignments.
+- **Dependencies:** M02F, M03, M07–M08 as content dependencies mature.
+- **Deliverables:** Administrative course list/detail, create/update, draft/published lifecycle, and teacher assignments with course-scoped permissions.
+- **Verification:** Permission and resource scope, field validation, lifecycle transitions, teacher assignment concurrency, audit/rollback, and no-access-grant tests.
+- **Documentation updates:** API, decisions, architecture, progress, roadmap.
+- **Exclusions:** Modules, lessons, copying, preview, enrollments, module grants, assets, progress, and `group_courses`.
+
+## M05-B — Course modules, ordering, preview and copying
 
 - **Status:** Planned
-- **Goal:** Manage the authored course catalog and lifecycle.
-- **Dependencies:** M02F, M03, M07–M08 as content dependencies mature.
-- **Deliverables:** Course CRUD, draft/published lifecycle, teachers/permissions, modules/order, preview, and course copying.
-- **Verification:** Permission, lifecycle, ordering, copy atomicity, and publication tests.
-- **Documentation updates:** API, decisions, architecture, progress, roadmap.
-- **Exclusions:** Enrollment or module access grants.
+- **Goal:** Add authored module structure and safe course-authoring workflows.
+- **Dependencies:** M05-A and the relevant M07–M08 content contracts.
+- **Deliverables:** Modules, deterministic ordering, preview, and atomic course copying.
+- **Verification:** Module lifecycle/order, preview safety, permission scope, and copy atomicity tests.
+- **Documentation updates:** API, decisions, architecture, progress, roadmap, handoff.
+- **Exclusions:** Student enrollment, module access grants, protected lesson delivery, and `group_courses`.
 
 ## M06 — Course and module access
 
