@@ -13,7 +13,7 @@ const expected = {
   functions: 7,
   triggers: 11,
   roles: 4,
-  migrations: 16,
+  migrations: 17,
   identityColumns: 65,
 };
 
@@ -119,7 +119,11 @@ try {
       (SELECT count(*)::integer
        FROM role_permissions AS grant_record
        JOIN roles AS role ON role.id = grant_record.role_id
-       WHERE role.code IN ('teacher', 'student')) AS learner_grants
+       WHERE role.code = 'teacher') AS teacher_grants,
+      (SELECT count(*)::integer
+       FROM role_permissions AS grant_record
+       JOIN roles AS role ON role.id = grant_record.role_id
+       WHERE role.code = 'student') AS student_grants
   `);
 
   let permissionConstraintCode = null;
@@ -147,9 +151,10 @@ try {
     && remainingUuidColumns.rowCount === 1
     && remainingUuidColumns.rows[0].table_name === 'sms_deliveries'
     && remainingUuidColumns.rows[0].column_name === 'idempotency_key'
-    && authorizationSeeds.rows[0].permissions === 5
-    && authorizationSeeds.rows[0].role_permissions === 10
-    && authorizationSeeds.rows[0].learner_grants === 0
+    && authorizationSeeds.rows[0].permissions === 10
+    && authorizationSeeds.rows[0].role_permissions === 21
+    && authorizationSeeds.rows[0].teacher_grants === 1
+    && authorizationSeeds.rows[0].student_grants === 0
     && permissionConstraintCode === '23514'
     && generatedIdentity.type === 'bigint'
     && /^[1-9][0-9]*$/.test(generatedIdentity.id);

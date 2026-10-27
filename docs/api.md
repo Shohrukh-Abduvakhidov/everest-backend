@@ -1,6 +1,6 @@
 # Implemented API
 
-## Group read APIs
+## Group APIs
 
 All group routes require a valid active-account session and derive the actor exclusively from that session.
 
@@ -8,8 +8,15 @@ All group routes require a valid active-account session and derive the actor exc
 - `GET /api/v1/groups/:groupId` returns safe group metadata and counts without embedding an unlimited roster.
 - `GET /api/v1/groups/:groupId/members` returns paginated active members with decimal-string user IDs, names, avatar asset references, member/representative role, membership status, and join time.
 - `GET /api/v1/groups/:groupId/teachers` returns paginated assigned teachers with decimal-string IDs, names, avatar references, assignment time, and group-scoped assignment permissions.
+- `POST /api/v1/admin/groups` creates a group; `PATCH /api/v1/admin/groups/:groupId` updates its code, name, description, or active/archived status.
+- `POST` and `DELETE /api/v1/admin/groups/:groupId/members[/:userId]` activate or remove student membership while retaining membership history.
+- `POST` and `DELETE /api/v1/admin/groups/:groupId/teachers[/:userId]` assign or remove eligible teachers and their group-scoped flags.
+- `GET /api/v1/groups/:groupId/announcements` returns a paginated text-announcement feed. Students see published announcements in active memberships; assigned teachers and administrators may also see drafts.
+- `POST /api/v1/groups/:groupId/announcements`, `PATCH /api/v1/groups/:groupId/announcements/:announcementId`, and `DELETE` on the same resource create, update, and archive text announcements.
 
 Active members may read their groups; assigned teachers may read their groups; current owner/admin roles may read all groups. Missing and inaccessible group resources both return `404 GROUP_NOT_FOUND`. `limit` defaults to 20 and is bounded at 100; `offset` defaults to zero. Group membership never grants course or module access, and these responses contain no course, progress, or ranking data.
+
+All mutations require live authentication, database-backed permission checks, cookie CSRF/origin protection where applicable, and atomic auditing. Owner/admin roles receive all five group permissions. A teacher receives only `groups.announcements.manage`, which is additionally restricted to an assignment with announcement-publishing permission in the target group. Announcement authors come only from the authenticated actor. Attachments are not accepted before M07.
 
 ## User profile and onboarding
 

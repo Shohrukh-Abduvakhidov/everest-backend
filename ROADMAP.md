@@ -1,9 +1,9 @@
 ---
 project: EVEREST Backend
 roadmap_version: 1
-current_milestone: M04-B
+current_milestone: M05
 current_status: planned
-updated_at: 2026-10-26
+updated_at: 2026-10-27
 architecture: docs/architecture.md
 ---
 
@@ -147,7 +147,7 @@ This roadmap orders implementation; it does not replace the [current architectur
 
 ## M04-B — Group administration and announcements
 
-- **Status:** Planned
+- **Status:** Done
 - **Goal:** Manage groups, memberships, teacher assignments, and announcements without granting learning access.
 - **Dependencies:** M04-A; announcement assets depend on M07.
 - **Deliverables:** Group administration, member/teacher assignment, teacher permissions, and announcement lifecycle.

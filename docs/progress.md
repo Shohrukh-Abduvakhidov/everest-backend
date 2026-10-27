@@ -1,10 +1,17 @@
 # EVEREST backend progress
 
-Updated: 2026-10-25.
+Updated: 2026-10-27.
 
 ## Current increment
 
-Milestone M04-A: group read APIs. Implementation and verification are complete on `feat/m04-a-group-read-apis`; M04-B group administration and announcements is next. Production SMS remains unavailable pending provider approval.
+Milestone M04-B: group administration and announcements is implemented on `feat/m04-b-group-administration`; M05 course management is next. Production SMS remains unavailable pending provider approval.
+
+## 2026-10-27 — M04-B group administration and announcements
+
+- Added group create/update, membership lifecycle, teacher assignment, and text-announcement lifecycle APIs without introducing course access or `group_courses`.
+- Added five database-backed group permissions in reversible migration `20261027010000000_add-group-management-permissions.js`; owner/admin receive all, while assigned teachers are scoped to announcement management in their group.
+- Mutations use live authentication, permission middleware, cookie CSRF/origin protection, service-owned transactions, repository SQL, and atomic audit events. Membership and announcements retain lifecycle history where the schema supports it.
+- Focused PostgreSQL integration covers authorization, CSRF, concurrency, eligibility, safe author derivation, visibility, audit rollback, decimal IDs, and no course/module grants. The disposable 17/17/16/17 migration cycle passed and removed its database.
 
 ## 2026-10-26 — M04-A group read APIs
 
