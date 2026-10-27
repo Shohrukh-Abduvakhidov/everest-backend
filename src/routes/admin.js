@@ -16,6 +16,20 @@ import {
 } from '../middleware/admin-middleware.js'
 import { authMiddleware } from '../middleware/auth-middleware.js'
 import {
+   createGroupAuthorizationMiddleware,
+   manageGroupMembersAuthorizationMiddleware,
+   manageGroupTeachersAuthorizationMiddleware,
+   updateGroupAuthorizationMiddleware,
+} from '../middleware/group-admin-middleware.js'
+import {
+   addGroupMemberController,
+   addGroupTeacherController,
+   createGroupController,
+   removeGroupMemberController,
+   removeGroupTeacherController,
+   updateGroupController,
+} from '../controllers/group-controller.js'
+import {
    adminMutationRateMiddleware,
    authenticatedCsrfMiddleware,
 } from '../middleware/auth-protection-middleware.js'
@@ -23,6 +37,48 @@ import {
 const adminRouter = express.Router()
 
 adminRouter.use(authMiddleware)
+adminRouter.post(
+   '/groups',
+   createGroupAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   createGroupController,
+)
+adminRouter.patch(
+   '/groups/:groupId',
+   updateGroupAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   updateGroupController,
+)
+adminRouter.post(
+   '/groups/:groupId/members',
+   manageGroupMembersAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   addGroupMemberController,
+)
+adminRouter.delete(
+   '/groups/:groupId/members/:userId',
+   manageGroupMembersAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   removeGroupMemberController,
+)
+adminRouter.post(
+   '/groups/:groupId/teachers',
+   manageGroupTeachersAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   addGroupTeacherController,
+)
+adminRouter.delete(
+   '/groups/:groupId/teachers/:userId',
+   manageGroupTeachersAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   removeGroupTeacherController,
+)
 adminRouter.get(
    '/users/pending',
    listPendingUsersAuthorizationMiddleware,

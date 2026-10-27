@@ -1,40 +1,39 @@
 ---
 project: EVEREST Backend
-current_milestone: M04-B
+current_milestone: M05
 status: planned
-branch: feat/m04-a-group-read-apis
-base_commit: b83decb6
-updated_at: 2026-10-26
+branch: feat/m04-b-group-administration
+base_commit: efece5a3
+updated_at: 2026-10-27
 ---
 
 # Current handoff
 
 ## Completed work
 
-- M00 through M03 and M04-A are Done.
-- M04-A added relationship-scoped group list/detail and safe paginated rosters without a migration.
-- The completion record is archived at `docs/handoffs/2026-10-26-m04-a-group-read-apis.md`.
+- M00 through M04-B are Done.
+- M04-B added group administration, student membership lifecycle, teacher assignment, and text announcements with database-backed permission and resource scope checks.
+- The completion record is archived at `docs/handoffs/2026-10-27-m04-b-group-administration.md`.
 
 ## Verification
 
-- Focused group integration passed 11 tests against PostgreSQL.
-- `npm test` passed 81 tests plus migration-source integrity, eight schema-integrity cases, and server lifecycle.
-- `npm run migrate:up` was a no-op; the catalog remains at 85 tables and 16 migrations.
+- Focused M04-B integration passed nine subtests; the full suite passed 91 tests plus migration-source integrity, eight schema-integrity cases, and server lifecycle.
+- Migration up is a no-op. Catalog verification passed at 85 tables, 668 columns, 159 foreign keys, 301 indexes, 17 migrations, and 65 identity columns.
+- The disposable migration cycle passed 17/17/16/17 and dropped its generated database. No rollback ran against `everest_db`.
 
 ## Current milestone
 
-M04-B — group administration and announcements — is Planned.
+M05 — course management — is Planned.
 
 ## Next concrete task
 
-Confirm group CRUD, membership/teacher assignment, and announcement lifecycle permissions before implementing M04-B.
+Confirm the M05 course lifecycle, module ordering, teacher permissions, publication rules, and copy semantics before implementation.
 
 ## Constraints
 
 - Preserve route → middleware → controller → service → repository → PostgreSQL.
-- Groups never grant course/module access; never add `group_courses`.
-- Announcement assets depend on M07, progress summaries on M12, and ranking on M13 plus an approved formula.
-- Preserve M04-A non-disclosing reads and do not edit the 16 published migrations.
+- Groups remain independent from courses and never grant course or module access.
+- Do not edit the 17 published migrations; add an incremental reversible migration only if M05 requires schema or permission seeds.
 
 ## Safe startup commands
 

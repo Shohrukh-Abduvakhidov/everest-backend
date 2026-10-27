@@ -500,6 +500,8 @@ M02F-A implements the reusable RBAC foundation with database-backed permissions 
 
 Groups use groups, group_members, group_teachers, group_announcements and announcement_assets. There is no group_courses relation and group membership never grants course access. A group teacher does not automatically become a course teacher.
 
+Current implementation through M04-B provides relationship-scoped group reads, owner/admin group administration, student membership lifecycle, teacher assignment, and text-only announcement lifecycle. These operations use database-backed permissions, current group scope, service-owned transactions, and atomic audit events. Announcement assets remain deferred to the protected asset milestone.
+
 Courses contain course_modules and lessons; lesson_resources refer to assets. An authorized administrator individually grants course_enrollments and separate module_access_grants. A course grant does not open all modules.
 
 Effective lesson access requires an active completed account, valid session, published resources, an effective course enrollment and an effective module grant. Check dates and revocation at protected reads, video/file issuance, course-scoped tests and offline lease creation. The frontend lock is not an access-control boundary.
