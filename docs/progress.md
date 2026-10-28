@@ -4,7 +4,15 @@ Updated: 2026-10-27.
 
 ## Current increment
 
-Milestone M04-B: group administration and announcements is implemented on `feat/m04-b-group-administration`; M05 course management is next. Production SMS remains unavailable pending provider approval.
+Milestone M05-A: course catalog, lifecycle, and teacher assignments is implemented on `feat/m05-a-course-management`; M05-B modules, ordering, preview, and copying is next. Production SMS remains unavailable pending provider approval.
+
+## 2026-10-27 — M05-A course catalog, lifecycle, and teacher assignments
+
+- Split M05 into M05-A catalog/lifecycle/teacher assignments and M05-B modules/order/preview/copying.
+- Added administrative course list/detail/create/update plus locked publish/unpublish commands and eligible teacher assignment management.
+- Added `can_edit_course` and five permission seeds in reversible migration `20261027020000000_add-course-management-permissions.js`. Teacher reads and edits remain target-course scoped; publishing and assignment management remain owner/admin-only.
+- Catalog validation supports schema-defined subject, title, description, language, translations, and optional cover reference while rejecting status, creator, unknown fields, invalid references, and unsupported languages.
+- Focused PostgreSQL integration passed ten subtests covering authorization, CSRF, lifecycle conflicts, concurrency, scope, safe DTOs, audit rollback, decimal IDs, and proof that no enrollment/module/group access was created. The disposable cycle passed 18/18/17/18 and removed its database.
 
 ## 2026-10-27 — M04-B group administration and announcements
 

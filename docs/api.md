@@ -1,5 +1,22 @@
 # Implemented API
 
+## Course administration APIs
+
+All course-administration routes require a live active-account session and current database permissions.
+
+- `GET /api/v1/admin/courses` returns a deterministic `limit`/`offset` page. Owner/admin see all courses; teachers see only assigned courses.
+- `GET /api/v1/admin/courses/:courseId` returns safe catalog metadata and the actor's administrative/teacher edit relationship.
+- `POST /api/v1/admin/courses` creates a draft course. Supported fields are `subjectId`, `title`, `description`, `languageCode`, `translations`, and `coverAssetId`.
+- `PATCH /api/v1/admin/courses/:courseId` partially updates those same catalog fields. It never accepts creator or lifecycle status.
+- `POST /api/v1/admin/courses/:courseId/publish` performs the locked `draft → published` transition; publication requires a non-empty title and subject.
+- `POST /api/v1/admin/courses/:courseId/unpublish` performs the locked `published → draft` transition.
+- `GET /api/v1/admin/courses/:courseId/teachers` returns safe assigned-teacher profiles and course-scoped permission flags.
+- `POST /api/v1/admin/courses/:courseId/teachers`, `PATCH /api/v1/admin/courses/:courseId/teachers/:userId`, and `DELETE` on that assignment add, update, and remove eligible teachers.
+
+Course text is trimmed. Primary languages and translation keys are `tg`, `ru`, and `en`; each translation supports only `title` and nullable `description`. Nullable subject, description, and cover values distinguish explicit `null` from omission. Missing and inaccessible assigned-teacher resources return the same `404 COURSE_NOT_FOUND`. Mutations require cookie CSRF/origin protection when cookie-authenticated and write audit events atomically.
+
+Permissions are `courses.read`, `courses.create`, `courses.update`, `courses.publish`, and `courses.teachers.manage`. Owner/admin receive all five. Teachers receive read/update actions, but repository scope restricts reads to assignments and updates additionally require `canEditCourse`. Teacher assignment never implies publication, enrollment, module access, or group access. No student course API exists yet.
+
 ## Group APIs
 
 All group routes require a valid active-account session and derive the actor exclusively from that session.

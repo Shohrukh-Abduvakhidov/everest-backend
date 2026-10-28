@@ -16,6 +16,25 @@ import {
 } from '../middleware/admin-middleware.js'
 import { authMiddleware } from '../middleware/auth-middleware.js'
 import {
+   createCourseAuthorizationMiddleware,
+   manageCourseTeachersAuthorizationMiddleware,
+   publishCourseAuthorizationMiddleware,
+   readCoursesAuthorizationMiddleware,
+   updateCourseAuthorizationMiddleware,
+} from '../middleware/course-admin-middleware.js'
+import {
+   addCourseTeacherController,
+   createCourseController,
+   getCourseController,
+   listCoursesController,
+   listCourseTeachersController,
+   publishCourseController,
+   removeCourseTeacherController,
+   unpublishCourseController,
+   updateCourseController,
+   updateCourseTeacherController,
+} from '../controllers/course-controller.js'
+import {
    createGroupAuthorizationMiddleware,
    manageGroupMembersAuthorizationMiddleware,
    manageGroupTeachersAuthorizationMiddleware,
@@ -37,6 +56,62 @@ import {
 const adminRouter = express.Router()
 
 adminRouter.use(authMiddleware)
+adminRouter.get('/courses', readCoursesAuthorizationMiddleware, listCoursesController)
+adminRouter.get('/courses/:courseId', readCoursesAuthorizationMiddleware, getCourseController)
+adminRouter.post(
+   '/courses',
+   createCourseAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   createCourseController,
+)
+adminRouter.patch(
+   '/courses/:courseId',
+   updateCourseAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   updateCourseController,
+)
+adminRouter.post(
+   '/courses/:courseId/publish',
+   publishCourseAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   publishCourseController,
+)
+adminRouter.post(
+   '/courses/:courseId/unpublish',
+   publishCourseAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   unpublishCourseController,
+)
+adminRouter.get(
+   '/courses/:courseId/teachers',
+   readCoursesAuthorizationMiddleware,
+   listCourseTeachersController,
+)
+adminRouter.post(
+   '/courses/:courseId/teachers',
+   manageCourseTeachersAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   addCourseTeacherController,
+)
+adminRouter.patch(
+   '/courses/:courseId/teachers/:userId',
+   manageCourseTeachersAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   updateCourseTeacherController,
+)
+adminRouter.delete(
+   '/courses/:courseId/teachers/:userId',
+   manageCourseTeachersAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   removeCourseTeacherController,
+)
 adminRouter.post(
    '/groups',
    createGroupAuthorizationMiddleware,
