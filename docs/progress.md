@@ -1,10 +1,26 @@
 # EVEREST backend progress
 
-Updated: 2026-10-27.
+Updated: 2026-10-28.
 
 ## Current increment
 
-Milestone M05-A: course catalog, lifecycle, and teacher assignments is implemented on `feat/m05-a-course-management`; M05-B modules, ordering, preview, and copying is next. Production SMS remains unavailable pending provider approval.
+Milestone M05-B (course modules, ordering, preview and copying) is implemented on `feat/m05-b-course-modules`. M06 course and module access is next. Production SMS remains unavailable pending provider approval.
+
+## 2026-10-28 — M05-B course modules, ordering, preview, and copying
+
+- Added module create/update, a `draft → published → archived → draft` lifecycle, and deletion of empty draft modules only.
+- Added full-list reordering, done in two passes inside one transaction.
+- Added a read-only structure preview with lesson and test counts.
+- Added transactional course copying (course and modules as drafts) built from extensible copy steps for M07.
+- Added the reversible migration `20261028010000000_add-course-module-permissions.js`. It creates `courses.modules.manage` (owner/admin/teacher; teachers are additionally scoped by `can_edit_course`) and `courses.copy` (owner/admin).
+- Updated the expected values in `verify-database.js` (19 migrations, 17 permissions, 38 role grants, 4 teacher grants) and in `test-migration-cycle.js` (19/19/18/19).
+- New focused PostgreSQL integration test `tests/integration/course-modules.test.js`: 11/11 passed. It covers append order under concurrency, validation, foreign-module hiding, lifecycle conflicts, reorder validation and renumbering, preview counts and scope, delete rules, teacher edit scope, copy contents, no copied teachers or grants, copy rollback on audit failure, and audit codes.
+- Commands run on 2026-10-28:
+   - `npm run migrate:up` applied the new migration to `everest_db`.
+   - `node scripts/verify-database.js`: `valid: true`.
+   - `npm test`: 113 tests passed with 0 failures, plus source integrity, schema integrity, and server lifecycle.
+   - `npm run test:migrations`: the disposable cycle passed 19/19/18/19 and its database was dropped. No rollback ran against `everest_db`.
+- Baseline before this work, after pulling `main`: `migrate:up` was a no-op and `npm test` passed 102 tests.
 
 ## 2026-10-27 — M05-A course catalog, lifecycle, and teacher assignments
 

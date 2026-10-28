@@ -15,4 +15,5 @@ import './integration/profile.test.js';
 import './integration/groups.test.js';
 import './integration/group-administration.test.js';
 import './integration/course-management.test.js';
+import './integration/course-modules.test.js';
 import './integration/telegram-auth.test.js';

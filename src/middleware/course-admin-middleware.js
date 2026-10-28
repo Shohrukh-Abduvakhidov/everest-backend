@@ -59,8 +59,30 @@ async function manageCourseTeachersAuthorizationMiddleware(req, res, next) {
    }
 }
 
+async function manageCourseModulesAuthorizationMiddleware(req, res, next) {
+   try {
+      void res
+      await authorize(req, 'courses.modules.manage')
+      next()
+   } catch (error) {
+      next(error)
+   }
+}
+
+async function copyCourseAuthorizationMiddleware(req, res, next) {
+   try {
+      void res
+      await authorize(req, 'courses.copy')
+      next()
+   } catch (error) {
+      next(error)
+   }
+}
+
 export {
+   copyCourseAuthorizationMiddleware,
    createCourseAuthorizationMiddleware,
+   manageCourseModulesAuthorizationMiddleware,
    manageCourseTeachersAuthorizationMiddleware,
    publishCourseAuthorizationMiddleware,
    readCoursesAuthorizationMiddleware,
