@@ -17,6 +17,22 @@ Course text is trimmed. Primary languages and translation keys are `tg`, `ru`, a
 
 Permissions are `courses.read`, `courses.create`, `courses.update`, `courses.publish`, and `courses.teachers.manage`. Owner/admin receive all five. Teachers receive read/update actions, but repository scope restricts reads to assignments and updates additionally require `canEditCourse`. Teacher assignment never implies publication, enrollment, module access, or group access. No student course API exists yet.
 
+## Course module, preview and copy APIs
+
+All routes require a live active-account session and current database permissions. Mutations require cookie CSRF/origin protection when cookie-authenticated, lock the course row, and write audit events in the same transaction.
+
+- `GET /api/v1/admin/courses/:courseId/preview` (`courses.read`) is read-only and returns `{ course: { id, title, status }, modules: [{ id, title, description, position, status, lessonsCount, testsCount }] }` ordered by position. It includes draft, published, and archived modules. `lessonsCount` counts `lessons` rows in the module; `testsCount` counts distinct tests assigned through `test_assignments.lesson_id` to those lessons. It grants no access and exposes no progress or lock state.
+- `POST /api/v1/admin/courses/:courseId/modules` creates a `draft` module at `max(position) + 1`. Fields: required `title`, optional nullable `description`, optional `translations`.
+- `PATCH /api/v1/admin/courses/:courseId/modules/:moduleId` partially updates those same fields. Status and position are not accepted.
+- `POST .../modules/:moduleId/publish` (`draft → published`), `POST .../archive` (`published → archived`), and `POST .../restore` (`archived → draft`). Any other transition returns `409 INVALID_MODULE_TRANSITION`. Archived modules keep their position.
+- `DELETE .../modules/:moduleId` deletes only a `draft` module with no `lessons` rows. Otherwise it returns `409 COURSE_MODULE_NOT_DELETABLE`. The response is `{ id, status: 'deleted' }`.
+- `PUT /api/v1/admin/courses/:courseId/modules/order` takes `{ moduleIds: [...] }`. Malformed or duplicate IDs return `400 VALIDATION_ERROR`. A list that is not exactly the course's current module set returns `409 COURSE_MODULE_ORDER_MISMATCH`. On success it returns all modules renumbered `1..n`.
+- `POST /api/v1/admin/courses/:courseId/copy` (`courses.copy`) takes an optional `{ title }`. It creates a new `draft` course with the source's subject, description, language, translations, and cover reference. The default title is `<source title> (copy)`. All modules are copied as `draft` with their titles, descriptions, translations, and positions. Teachers, enrollments, module grants, and progress are not copied. Responds `201` with `{ course, sourceCourseId, copied: { modules } }`.
+
+Module DTO: `id`, `courseId`, `title`, `description`, `translations`, `position`, `status`, `createdAt`. Module translations follow the course rules (`tg`/`ru`/`en`, `title` and nullable `description`).
+
+Permissions: `courses.modules.manage` is granted to owner/admin/teacher, and teachers are additionally scoped to assignments with `canEditCourse`. Otherwise they receive the same `404 COURSE_NOT_FOUND` as a missing course. `courses.copy` is owner/admin only. A module from another course returns `404 COURSE_MODULE_NOT_FOUND`. A malformed module ID returns `400 INVALID_MODULE_ID`.
+
 ## Group APIs
 
 All group routes require a valid active-account session and derive the actor exclusively from that session.

@@ -16,12 +16,25 @@ import {
 } from '../middleware/admin-middleware.js'
 import { authMiddleware } from '../middleware/auth-middleware.js'
 import {
+   copyCourseAuthorizationMiddleware,
    createCourseAuthorizationMiddleware,
+   manageCourseModulesAuthorizationMiddleware,
    manageCourseTeachersAuthorizationMiddleware,
    publishCourseAuthorizationMiddleware,
    readCoursesAuthorizationMiddleware,
    updateCourseAuthorizationMiddleware,
 } from '../middleware/course-admin-middleware.js'
+import {
+   archiveCourseModuleController,
+   copyCourseController,
+   createCourseModuleController,
+   deleteCourseModuleController,
+   previewCourseModulesController,
+   publishCourseModuleController,
+   reorderCourseModulesController,
+   restoreCourseModuleController,
+   updateCourseModuleController,
+} from '../controllers/course-module-controller.js'
 import {
    addCourseTeacherController,
    createCourseController,
@@ -85,6 +98,67 @@ adminRouter.post(
    authenticatedCsrfMiddleware,
    adminMutationRateMiddleware,
    unpublishCourseController,
+)
+adminRouter.post(
+   '/courses/:courseId/copy',
+   copyCourseAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   copyCourseController,
+)
+adminRouter.get(
+   '/courses/:courseId/preview',
+   readCoursesAuthorizationMiddleware,
+   previewCourseModulesController,
+)
+adminRouter.post(
+   '/courses/:courseId/modules',
+   manageCourseModulesAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   createCourseModuleController,
+)
+adminRouter.put(
+   '/courses/:courseId/modules/order',
+   manageCourseModulesAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   reorderCourseModulesController,
+)
+adminRouter.patch(
+   '/courses/:courseId/modules/:moduleId',
+   manageCourseModulesAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   updateCourseModuleController,
+)
+adminRouter.post(
+   '/courses/:courseId/modules/:moduleId/publish',
+   manageCourseModulesAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   publishCourseModuleController,
+)
+adminRouter.post(
+   '/courses/:courseId/modules/:moduleId/archive',
+   manageCourseModulesAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   archiveCourseModuleController,
+)
+adminRouter.post(
+   '/courses/:courseId/modules/:moduleId/restore',
+   manageCourseModulesAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   restoreCourseModuleController,
+)
+adminRouter.delete(
+   '/courses/:courseId/modules/:moduleId',
+   manageCourseModulesAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   deleteCourseModuleController,
 )
 adminRouter.get(
    '/courses/:courseId/teachers',

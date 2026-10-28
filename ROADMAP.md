@@ -1,9 +1,9 @@
 ---
 project: EVEREST Backend
 roadmap_version: 1
-current_milestone: M05-B
+current_milestone: M06
 current_status: planned
-updated_at: 2026-10-27
+updated_at: 2026-10-28
 architecture: docs/architecture.md
 ---
 
@@ -167,7 +167,7 @@ This roadmap orders implementation; it does not replace the [current architectur
 
 ## M05-B — Course modules, ordering, preview and copying
 
-- **Status:** Planned
+- **Status:** Done
 - **Goal:** Add authored module structure and safe course-authoring workflows.
 - **Dependencies:** M05-A and the relevant M07–M08 content contracts.
 - **Deliverables:** Modules, deterministic ordering, preview, and atomic course copying.
