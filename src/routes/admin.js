@@ -18,12 +18,24 @@ import { authMiddleware } from '../middleware/auth-middleware.js'
 import {
    copyCourseAuthorizationMiddleware,
    createCourseAuthorizationMiddleware,
+   manageCourseAccessAuthorizationMiddleware,
    manageCourseModulesAuthorizationMiddleware,
    manageCourseTeachersAuthorizationMiddleware,
    publishCourseAuthorizationMiddleware,
+   readCourseAccessAuthorizationMiddleware,
    readCoursesAuthorizationMiddleware,
    updateCourseAuthorizationMiddleware,
 } from '../middleware/course-admin-middleware.js'
+import {
+   extendCourseEnrollmentController,
+   extendModuleAccessController,
+   grantCourseEnrollmentController,
+   grantModuleAccessController,
+   listCourseEnrollmentsController,
+   listModuleAccessGrantsController,
+   revokeCourseEnrollmentController,
+   revokeModuleAccessController,
+} from '../controllers/course-access-controller.js'
 import {
    archiveCourseModuleController,
    copyCourseController,
@@ -185,6 +197,58 @@ adminRouter.delete(
    authenticatedCsrfMiddleware,
    adminMutationRateMiddleware,
    removeCourseTeacherController,
+)
+adminRouter.get(
+   '/courses/:courseId/enrollments',
+   readCourseAccessAuthorizationMiddleware,
+   listCourseEnrollmentsController,
+)
+adminRouter.post(
+   '/courses/:courseId/enrollments',
+   manageCourseAccessAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   grantCourseEnrollmentController,
+)
+adminRouter.patch(
+   '/courses/:courseId/enrollments/:userId',
+   manageCourseAccessAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   extendCourseEnrollmentController,
+)
+adminRouter.post(
+   '/courses/:courseId/enrollments/:userId/revoke',
+   manageCourseAccessAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   revokeCourseEnrollmentController,
+)
+adminRouter.get(
+   '/courses/:courseId/enrollments/:userId/modules',
+   readCourseAccessAuthorizationMiddleware,
+   listModuleAccessGrantsController,
+)
+adminRouter.post(
+   '/courses/:courseId/enrollments/:userId/modules',
+   manageCourseAccessAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   grantModuleAccessController,
+)
+adminRouter.patch(
+   '/courses/:courseId/enrollments/:userId/modules/:moduleId',
+   manageCourseAccessAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   extendModuleAccessController,
+)
+adminRouter.post(
+   '/courses/:courseId/enrollments/:userId/modules/:moduleId/revoke',
+   manageCourseAccessAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   revokeModuleAccessController,
 )
 adminRouter.post(
    '/groups',

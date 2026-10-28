@@ -15,7 +15,7 @@ All course-administration routes require a live active-account session and curre
 
 Course text is trimmed. Primary languages and translation keys are `tg`, `ru`, and `en`; each translation supports only `title` and nullable `description`. Nullable subject, description, and cover values distinguish explicit `null` from omission. Missing and inaccessible assigned-teacher resources return the same `404 COURSE_NOT_FOUND`. Mutations require cookie CSRF/origin protection when cookie-authenticated and write audit events atomically.
 
-Permissions are `courses.read`, `courses.create`, `courses.update`, `courses.publish`, and `courses.teachers.manage`. Owner/admin receive all five. Teachers receive read/update actions, but repository scope restricts reads to assignments and updates additionally require `canEditCourse`. Teacher assignment never implies publication, enrollment, module access, or group access. No student course API exists yet.
+Permissions are `courses.read`, `courses.create`, `courses.update`, `courses.publish`, and `courses.teachers.manage`. Owner/admin receive all five. Teachers receive read/update actions, but repository scope restricts reads to assignments and updates additionally require `canEditCourse`. Teacher assignment never implies publication, enrollment, module access, or group access. Student course access is described in the enrollment section below.
 
 ## Course module, preview and copy APIs
 
@@ -32,6 +32,31 @@ All routes require a live active-account session and current database permission
 Module DTO: `id`, `courseId`, `title`, `description`, `translations`, `position`, `status`, `createdAt`. Module translations follow the course rules (`tg`/`ru`/`en`, `title` and nullable `description`).
 
 Permissions: `courses.modules.manage` is granted to owner/admin/teacher, and teachers are additionally scoped to assignments with `canEditCourse`. Otherwise they receive the same `404 COURSE_NOT_FOUND` as a missing course. `courses.copy` is owner/admin only. A module from another course returns `404 COURSE_MODULE_NOT_FOUND`. A malformed module ID returns `400 INVALID_MODULE_ID`.
+
+## Course enrollment and module access APIs
+
+Administrative routes require a live active-account session and the permissions `courses.access.read` (reads) or `courses.access.manage` (mutations), both granted to owner/admin only. Mutations require cookie CSRF/origin protection when cookie-authenticated, the admin mutation rate limit, and write audit events in the same transaction. Dates are ISO 8601 timestamps with an offset (`2026-12-01T00:00:00Z`). `expiresAt` is required on every grant and extension; `null` means no expiry. Rules and reasons are in [decisions](decisions.md).
+
+- `GET /api/v1/admin/courses/:courseId/enrollments?state=&limit=&offset=` returns `{ enrollments, pagination }`, newest grant first. `state` is `active`, `scheduled`, `expired` or `revoked`.
+- `POST /api/v1/admin/courses/:courseId/enrollments` takes `{ userId, beginsAt?, expiresAt }` and responds `201` with the enrollment. The course must be `published` and the user an `active` student. A revoked enrollment is reset in place (audit `course.enrollment.regranted`).
+- `PATCH .../enrollments/:userId` takes `{ expiresAt }` and extends, shortens or removes the expiry. An expired enrollment is renewed this way; a revoked one returns `409 ENROLLMENT_REVOKED`.
+- `POST .../enrollments/:userId/revoke` revokes the enrollment and, in the same transaction, all of its module grants.
+- `GET .../enrollments/:userId/modules` returns `{ moduleGrants }` for that user and course.
+- `POST .../enrollments/:userId/modules` takes `{ moduleId, beginsAt?, expiresAt }` and responds `201`. The module must be `published` and belong to the course, and the enrollment must be `active` or `scheduled`.
+- `PATCH .../enrollments/:userId/modules/:moduleId` takes `{ expiresAt }`; `POST .../modules/:moduleId/revoke` revokes one module grant.
+
+Enrollment DTO: `id`, `userId`, `courseId`, `state`, `grantedBy`, `grantedAt`, `beginsAt`, `expiresAt`, `revokedAt`, `revokedBy`, plus `user: { firstName, lastName }` in lists. Module grant DTO adds `moduleId` (and `moduleTitle` in lists). IDs are decimal strings.
+
+Stable errors: `400 VALIDATION_ERROR`, `400 INVALID_COURSE_ID`/`INVALID_USER_ID`/`INVALID_MODULE_ID`, `403 ACTION_FORBIDDEN`, `404 COURSE_NOT_FOUND`, `USER_NOT_FOUND`, `COURSE_MODULE_NOT_FOUND`, `ENROLLMENT_NOT_FOUND`, `MODULE_ACCESS_NOT_FOUND`, and `409` `COURSE_NOT_PUBLISHED`, `MODULE_NOT_PUBLISHED`, `ENROLLMENT_USER_INELIGIBLE`, `ENROLLMENT_ALREADY_EXISTS`, `ENROLLMENT_NOT_ACTIVE`, `ENROLLMENT_REVOKED`, `ENROLLMENT_ALREADY_REVOKED`, `MODULE_ACCESS_ALREADY_EXISTS`, `MODULE_ACCESS_REVOKED`, `MODULE_ACCESS_ALREADY_REVOKED`.
+
+### Learner course access
+
+These routes need only a live active-account session and read the caller's own data.
+
+- `GET /api/v1/courses` returns `{ courses: [{ id, title, description, languageCode, translations, coverAssetId, enrollment: { state, beginsAt, expiresAt } }] }` for the caller's non-revoked enrollments in `published` courses. Group membership never adds a course.
+- `GET /api/v1/courses/:courseId/modules` returns `{ course, modules }` where each published module is `{ id, position, title, description, translations, access: { granted, lockReason } }`. `lockReason` is `null` when granted, otherwise `onboarding_required`, `not_started`, `expired`, `not_granted` or `unavailable`. Locked modules expose no lessons, assets, tests, counts or grant history. A course without a non-revoked enrollment, or an unpublished or unknown course, returns `404 COURSE_NOT_FOUND`.
+
+Protected content (M07 onward) must call `requireModuleAccessService(userId, moduleId)`, which throws `403 MODULE_ACCESS_DENIED` unless the database predicate `can_access_module` allows it. No protected-content route exists yet.
 
 ## Group APIs
 
