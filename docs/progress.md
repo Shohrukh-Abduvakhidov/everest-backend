@@ -1,10 +1,23 @@
 # EVEREST backend progress
 
-Updated: 2026-10-28.
+Updated: 2026-10-29.
 
 ## Current increment
 
-Milestone M05-B (course modules, ordering, preview and copying) is implemented on `feat/m05-b-course-modules`. M06 course and module access is next. Production SMS remains unavailable pending provider approval.
+Milestone M06 (course enrollments and module access grants) is implemented on `feat/m06-course-access`. M07 lessons and protected assets is next. Production SMS remains unavailable pending provider approval.
+
+## 2026-10-29 — M06 course enrollments and module access grants
+
+- Added administrative enrollment and module-grant APIs (grant, list, extend, revoke, re-grant) and learner reads of own courses and module lock state. See [API](api.md) and [decisions](decisions.md) (15 assumptions chosen deny-by-default because the user was unavailable).
+- Added the reversible migration `20261029010000000_add-course-access-permissions.js` (`courses.access.read`, `courses.access.manage`; owner/admin only). No table changes: the existing tables and `can_access_module` were sufficient.
+- Added `course-access-repository`, `course-access-service`, `learner-course-service`, two controllers, `routes/courses.js`, and the reusable `requireModuleAccessService` guard for M07.
+- Updated expected values in `verify-database.js` (20 migrations, 19 permissions, 42 role grants) and `test-migration-cycle.js` (20/20/19/20).
+- New PostgreSQL integration test `tests/integration/course-access.test.js`: 16 subtests passed (17 reported tests) (permissions, validation, eligibility, concurrency, group non-grant, locked metadata, onboarding, expiry/renewal with progress preserved, revocation cascade and non-restoring re-grant, publish/archive effects, blocked account, listing, audit and rollback).
+- Commands run on 2026-10-29:
+   - Baseline on `main`: `migrate:up` no-op; `npm test` passed 113 tests.
+   - `npm run migrate:up` applied the new migration; `node scripts/verify-database.js`: `valid: true`.
+   - `npm test`: 130 tests passed with 0 failures, plus source integrity, schema integrity and server lifecycle.
+   - `npm run test:migrations`: disposable cycle passed 20/20/19/20 and its database was dropped. No rollback ran against `everest_db`.
 
 ## 2026-10-28 — M05-B course modules, ordering, preview, and copying
 

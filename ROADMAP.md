@@ -1,9 +1,9 @@
 ---
 project: EVEREST Backend
 roadmap_version: 1
-current_milestone: M06
+current_milestone: M07
 current_status: planned
-updated_at: 2026-10-28
+updated_at: 2026-10-29
 architecture: docs/architecture.md
 ---
 
@@ -177,13 +177,13 @@ This roadmap orders implementation; it does not replace the [current architectur
 
 ## M06 — Course and module access
 
-- **Status:** Planned
+- **Status:** Done
 - **Goal:** Enforce individually granted course and protected-module access.
 - **Dependencies:** M02F and M05.
-- **Deliverables:** `course_enrollments`, validity windows, revoke/extend, separate `module_access_grants`, locked metadata, protected-content checks, and progress preservation after expiry.
-- **Verification:** Grant/date/revocation matrix, locked metadata, cross-course denial, and preserved-progress tests.
-- **Documentation updates:** API, decisions, architecture, progress, roadmap.
-- **Exclusions:** No `group_courses`; group membership grants nothing; course and module grants remain separate.
+- **Deliverables:** `course_enrollments`, validity windows, revoke/extend/re-grant, separate `module_access_grants`, locked metadata, protected-content guard (`requireModuleAccessService`), and progress preservation after expiry. Administrative routes under `/api/v1/admin/courses/:courseId/enrollments`; learner reads at `/api/v1/courses`.
+- **Verification:** `tests/integration/course-access.test.js` (16 subtests, 17 reported tests) covers the grant/date/revocation matrix, concurrency, locked metadata, cross-course and cross-user denial, group non-grant, onboarding, audit rollback, and preserved-progress rows. `npm test` passed 130 tests; the disposable migration cycle passed 20/20/19/20.
+- **Documentation updates:** API, decisions (15 recorded assumptions made without user input), architecture, progress, roadmap, handoff.
+- **Exclusions:** No `group_courses`; group membership grants nothing; course and module grants remain separate. Teacher and administrator access to protected content is left to M07.
 
 ## M07 — Lessons and protected assets
 

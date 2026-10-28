@@ -1,67 +1,64 @@
 ---
 project: EVEREST Backend
-current_milestone: M06
+current_milestone: M07
 status: planned
-branch: feat/m05-b-course-modules
-base_commit: b766277
-updated_at: 2026-10-28
+branch: feat/m06-course-access
+base_commit: b630bea
+updated_at: 2026-10-29
 ---
 
 # Current handoff
 
 ## Completed work
 
-- M00 through M05-B are Done. M05-A is merged into `main` (PR #15, `b766277`).
-- M05-B is on `feat/m05-b-course-modules`, which branches from `b766277` and waits for a PR into `main`. It adds:
-   - module create and update;
-   - the lifecycle `draft → published → archived → draft`;
-   - deletion of empty draft modules only;
-   - full-list reordering in two passes;
-   - a read-only preview with lesson and test counts;
-   - transactional copying of a course and its modules as drafts.
+- M00 through M06 are Done. M05-B is merged into `main` (PR #16, `b630bea`).
+- M06 is on `feat/m06-course-access`, which branches from `b630bea` and waits for a PR into `main`. It adds:
+   - administrative course enrollments and module access grants (grant, list, extend, revoke, re-grant) under `/api/v1/admin/courses/:courseId/enrollments`;
+   - learner reads `GET /api/v1/courses` and `GET /api/v1/courses/:courseId/modules` with locked-module metadata;
+   - the reusable guard `requireModuleAccessService(userId, moduleId)` for protected content.
 - New files:
-   - `src/migrations/20261028010000000_add-course-module-permissions.js`
-   - `src/repositories/course-module-repository.js`
-   - `src/services/course-module-service.js`
-   - `src/controllers/course-module-controller.js`
-   - `tests/integration/course-modules.test.js`
-- Changed files:
-   - `src/routes/admin.js`
-   - `src/middleware/course-admin-middleware.js`
-   - `src/services/course-service.js`: helper exports only
-   - `scripts/verify-database.js`
-   - `scripts/test-migration-cycle.js`
-- The completion record is archived at `docs/handoffs/2026-10-28-m05-b-course-modules.md`.
+   - `src/migrations/20261029010000000_add-course-access-permissions.js`
+   - `src/repositories/course-access-repository.js`
+   - `src/services/course-access-service.js`, `src/services/learner-course-service.js`
+   - `src/controllers/course-access-controller.js`, `src/controllers/learner-course-controller.js`
+   - `src/routes/courses.js`
+   - `tests/integration/course-access.test.js`
+- Changed files: `src/routes/admin.js`, `src/routes/index.js`, `src/middleware/course-admin-middleware.js`, `tests/all.test.js`, `scripts/verify-database.js`, `scripts/test-migration-cycle.js`, and the documentation.
+- No table was added or altered; the schema and `can_access_module` already covered M06.
+- The completion record is archived at `docs/handoffs/2026-10-29-m06-course-access.md`.
 
-## Verification (2026-10-28)
+## Decisions made without the user (please review)
 
-- `npm run migrate:up` applied the new migration, which is the 19th.
-- `node scripts/verify-database.js` passed: 17 permissions, 38 role grants, 4 teacher grants.
-- `npm test` passed 113 tests with 0 failures, plus source integrity, schema integrity, and server lifecycle.
-- The disposable `npm run test:migrations` cycle passed 19/19/18/19 and dropped its database. No rollback ran against `everest_db`.
+The user was unavailable, so 15 ambiguities were resolved deny-by-default and recorded in `docs/decisions.md` under "Course enrollments and module access grants (M06)". The ones most worth a second look:
 
-## Task carried into M07: extend course copying
+- Only owner/admin can read or manage grants; course teachers cannot.
+- Only `active` accounts with the `student` role can be enrolled, and only in a `published` course; module grants need a `published` module and a current enrollment.
+- `expiresAt` is required on every grant (`null` = no expiry), so unlimited access is explicit.
+- Revoking an enrollment also revokes its module grants; re-granting the course does not restore them. Expiry is passive.
+- Revoked rows are reset in place on re-grant (one row per user/course and user/module); history is in `audit_events`.
+- Learners with a revoked enrollment, or none, get `404 COURSE_NOT_FOUND`; an expired enrollment still lists the course with every module locked.
 
-`courseCopySteps` in `src/services/course-module-service.js` is an ordered list. Each step receives `{ client, repository, actorId, sourceCourseId, targetCourseId, moduleIdMap }` and returns a summary that is merged into `copied`. When M07 adds lessons, videos, chapters and materials, append steps after `copyModulesStep`. Those steps must:
+## Verification (2026-10-29)
 
-- map lessons to their copied modules through `moduleIdMap`;
-- create copied lessons as `draft`;
-- reuse asset references instead of duplicating files;
-- never copy progress, notes, favorites, offline downloads, or test attempts.
+- Baseline on `main`: `migrate:up` no-op, `npm test` 113 passed.
+- `npm run migrate:up` applied the new migration, which is the 20th. `node scripts/verify-database.js`: `valid: true` (19 permissions, 42 role grants).
+- `npm test` passed 130 tests with 0 failures, plus source integrity, schema integrity, and server lifecycle.
+- The disposable `npm run test:migrations` cycle passed 20/20/19/20 and dropped its database. No rollback ran against `everest_db`.
 
 ## Next concrete task
 
-M06, course and module access. Before writing code, confirm with the user:
+M07, lessons and protected assets. Requirements carried from M06:
 
-- the expiry, extension, and reactivation policy;
-- what an expired or revoked grant means for existing module grants;
-- what the student-facing locked-module DTO contains.
+- Every lesson, asset or test content route must call `requireModuleAccessService` (or the same `can_access_module` predicate) before returning content; locked modules stay metadata-only.
+- Decide explicitly how teachers and administrators preview or author protected content; M06 grants them no learner access.
+- Extend `courseCopySteps` in `src/services/course-module-service.js` for lessons (copied as `draft`, mapped through `moduleIdMap`, assets referenced not duplicated, no progress/notes/favorites/attempts).
+- Storage/provider selection still needs user approval.
 
 ## Constraints
 
 - Preserve route → middleware → controller → service → repository → PostgreSQL.
 - Groups remain independent from courses; never add `group_courses`.
-- Do not edit the 19 published migrations.
+- Do not edit the 20 published migrations.
 - Commit and push only on the user's request; never merge or force-push.
 
 ## Safe startup commands
