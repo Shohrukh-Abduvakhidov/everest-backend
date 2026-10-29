@@ -221,8 +221,17 @@ async function getOfflineLicenseDownloadService(userId, sessionIdValue, licenseI
    const sessionId = parseSessionId(sessionIdValue)
    const licenseId = parseLicenseId(licenseIdValue)
    const license = await requireOwnSessionLicense(await deps.offline.findLicense(licenseId), actorId, sessionId)
-   if (!license.is_active) throw offlineDenied(license.revoked_at ? 'license_revoked' : 'license_expired')
    const lesson = await deps.learner.findLearnerLesson(actorId, license.course_id, license.lesson_id)
+   if (!license.is_active) {
+      // A license revoked because access was lost reports the current cause, e.g.
+      // video_unavailable after the lesson video was replaced.
+      if (license.revoke_reason === 'access_lost') {
+         const lost = await evaluateOfflineAccess(deps, actorId, lesson)
+         const replaced = !lost.reason && lost.asset.id !== license.asset_id
+         throw offlineDenied(lost.reason || (replaced ? 'video_unavailable' : 'license_revoked'))
+      }
+      throw offlineDenied(license.revoked_at ? 'license_revoked' : 'license_expired')
+   }
    const access = await evaluateOfflineAccess(deps, actorId, lesson)
    const reason = access.reason
       || (access.asset.id !== license.asset_id ? 'video_unavailable' : null)

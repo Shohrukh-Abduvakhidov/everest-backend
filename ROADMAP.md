@@ -216,7 +216,7 @@ This roadmap orders implementation; it does not replace the [current architectur
    - Session-bound offline licenses: 3-day bounded lease, 2 devices, renew/list/delete, admin revoke, 15-minute download URLs.
    - Lesson copy steps.
    - Migration `20261030020000000_add-lesson-playback.js` with the `lessons.*` permissions.
-- **Verification:** `tests/integration/lessons.test.js` (13 subtests) passes against the storage double, together with the updated unit inspection and upload tests. `npm test` reports 173 tests (172 passed, 1 skipped); the disposable migration cycle passed 22/22/21/22.
+- **Verification:** `tests/integration/lessons.test.js` (14 subtests, including direct editing of published lessons) passes against the storage double, together with the updated unit inspection and upload tests. `npm test` reports 174 tests (173 passed, 1 skipped); the disposable migration cycle passed 22/22/21/22.
 - **Pending:**
    - Real MinIO/S3 verification pending: install Docker Desktop (or the MinIO Windows binary), run docker-compose up, and run the optional real-storage test, including a 3 GB upload with a network interruption and resume.
    - Verify Range seeking of a real faststart mp4 through a signed URL against real storage.

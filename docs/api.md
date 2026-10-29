@@ -15,12 +15,15 @@ Mutations use the CSRF check and the administrative mutation rate limit, and are
    - Body: `{ title, lessonType: video|text|test|mixed, content?, translations?, videoAssetId?, allowOffline? }`.
 - `PUT /modules/:moduleId/lessons/order` → `{ lessonIds }`. Every lesson of the module must be listed exactly once, otherwise `409 LESSON_ORDER_MISMATCH`.
 - `GET /lessons/:lessonId` → detail plus `relationship.canManage`.
-- `PATCH /lessons/:lessonId` → partial update, drafts only (`409 LESSON_NOT_EDITABLE`).
+- `PATCH /lessons/:lessonId` → partial update in any status (draft, published, archived). Learners see changes to a published lesson immediately.
+   - Published lessons must stay publishable: they cannot become `test` lessons (`409 LESSON_TYPE_NOT_PUBLISHABLE`) or lose the video of a `video`/`mixed` lesson (`409 LESSON_VIDEO_REQUIRED`).
+   - A new video must be ready, seek-ready and from the same course. If existing chapters would start at or after the new video's end, the request fails with `409 CHAPTERS_EXCEED_VIDEO_DURATION` and nothing changes.
+   - Replacing the video revokes active offline licenses for the old video in the same transaction. Their next check returns `403 OFFLINE_ACCESS_DENIED` with reason `video_unavailable`. Progress is kept.
 - `POST /lessons/:lessonId/publish`, `/archive`, `/restore` → `draft → published → archived → draft`. Other transitions return `409 INVALID_LESSON_TRANSITION`. Publication can also return `409 LESSON_VIDEO_REQUIRED`, `LESSON_TYPE_NOT_PUBLISHABLE` (test lessons) or `VIDEO_NOT_PLAYABLE`.
 - `DELETE /lessons/:lessonId` → empty drafts only (`409 LESSON_NOT_DELETABLE`).
-- `PUT /lessons/:lessonId/chapters` → atomically replaces `{ chapters: [{ startSeconds, title, translations? }] }`, drafts only.
+- `PUT /lessons/:lessonId/chapters` → atomically replaces `{ chapters: [{ startSeconds, title, translations? }] }` in any status.
    - `startSeconds` must be strictly increasing and below the video duration. There are at most 100 chapters, and a video is required (`409 LESSON_HAS_NO_VIDEO`).
-- `PUT /lessons/:lessonId/resources` → atomically replaces `{ resources: [{ assetId, title? }] }`, drafts only, at most 50. Each item must be a ready material asset of the course.
+- `PUT /lessons/:lessonId/resources` → atomically replaces `{ resources: [{ assetId, title? }] }` in any status, at most 50. Each item must be a ready material asset of the course.
 - `GET /lessons/:lessonId/playback` → staff preview `{ playback, chapters }`, for any status.
 - `GET /lessons/:lessonId/resources/:resourceId/download` → staff material URL.
 - `GET /api/v1/admin/users/:userId/offline-licenses` and `POST /api/v1/admin/offline-licenses/:licenseId/revoke` (`lessons.offline.manage`, owner/admin) list a user's licenses and revoke one (idempotent, `admin_revoked`).

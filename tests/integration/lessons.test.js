@@ -164,6 +164,7 @@ test('lessons, playback, notes, progress and offline licenses integration', asyn
       const lockedId = await createUser(client, 'student', 'Locked')
       const outsiderId = await createUser(client, 'student', 'Outsider')
       const peerId = await createUser(client, 'student', 'Peer')
+      const watcherId = await createUser(client, 'student', 'Watcher')
       const { courseId, moduleIds } = await createCourse(ownerId)
       const { courseId: otherCourseId } = await createCourse(ownerId, 1)
       await client.query(
@@ -174,6 +175,7 @@ test('lessons, playback, notes, progress and offline licenses integration', asyn
       await grant(adminId, studentId, courseId, [moduleIds[0]], { grantDays: 1 })
       await grant(adminId, lockedId, courseId, [])
       await grant(adminId, peerId, courseId, [moduleIds[0]])
+      await grant(adminId, watcherId, courseId, [moduleIds[0]])
       const admin = await issue(adminId)
       const manager = await issue(managerId)
       const viewer = await issue(viewerId)
@@ -181,6 +183,7 @@ test('lessons, playback, notes, progress and offline licenses integration', asyn
       const locked = await issue(lockedId)
       const outsider = await issue(outsiderId)
       const peer = await issue(peerId)
+      const watcher = await issue(watcherId)
       const videoId = await upload(admin, courseId, 'video', 'intro.mp4', 'video/mp4', isoMedia({ seconds: 90 }))
       const pdfId = await upload(admin, courseId, 'material', 'notes.pdf', 'application/pdf', pdf)
       const foreignVideoId = await upload(admin, otherCourseId, 'video', 'other.mp4', 'video/mp4', isoMedia())
@@ -278,8 +281,6 @@ test('lessons, playback, notes, progress and offline licenses integration', asyn
             const published = await api('POST', `${lessonPath(id)}/publish`, manager)
             assert.equal(published.status, 200, JSON.stringify(published.body))
          }
-         const edit = await api('PATCH', lessonPath(videoLessonId), manager, { title: 'Changed' })
-         assert.equal(edit.body.error.code, 'LESSON_NOT_EDITABLE')
          const twice = await api('POST', `${lessonPath(videoLessonId)}/publish`, manager)
          assert.equal(twice.body.error.code, 'INVALID_LESSON_TRANSITION')
 
@@ -480,6 +481,80 @@ test('lessons, playback, notes, progress and offline licenses integration', asyn
             'lesson.offline.renewed',
             'lesson.offline.revoked',
          ])
+      })
+
+      await t.test('published lessons are edited directly and stay publishable', async () => {
+         const learnerPath = `/courses/${courseId}/lessons/${videoLessonId}`
+         const renamed = await api('PATCH', lessonPath(videoLessonId), manager, {
+            title: 'Intro (updated)',
+            content: { blocks: [{ type: 'paragraph', text: 'Fresh text' }] },
+         })
+         assert.equal(renamed.status, 200, JSON.stringify(renamed.body))
+         assert.equal(renamed.body.data.status, 'published')
+         const seen = await api('GET', learnerPath, watcher)
+         assert.equal(seen.body.data.lesson.title, 'Intro (updated)')
+         assert.equal(seen.body.data.lesson.content.blocks[0].text, 'Fresh text')
+
+         const chapters = await api('PUT', `${lessonPath(videoLessonId)}/chapters`, manager, {
+            chapters: [{ startSeconds: 0, title: 'Start' }, { startSeconds: 45, title: 'Middle' }, { startSeconds: 60, title: 'Late' }],
+         })
+         assert.equal(chapters.status, 200, JSON.stringify(chapters.body))
+         assert.equal((await api('GET', learnerPath, watcher)).body.data.lesson.chapters.length, 3)
+         const resources = await api('PUT', `${lessonPath(videoLessonId)}/resources`, manager, {
+            resources: [{ assetId: pdfId, title: 'Handout v2' }],
+         })
+         assert.equal(resources.status, 200)
+         assert.equal((await api('GET', learnerPath, watcher)).body.data.lesson.resources[0].title, 'Handout v2')
+
+         const removeVideo = await api('PATCH', lessonPath(videoLessonId), manager, { videoAssetId: null })
+         assert.equal(removeVideo.status, 409)
+         assert.equal(removeVideo.body.error.code, 'LESSON_VIDEO_REQUIRED')
+         const toTest = await api('PATCH', lessonPath(videoLessonId), manager, { lessonType: 'test', videoAssetId: null })
+         assert.equal(toTest.body.error.code, 'LESSON_TYPE_NOT_PUBLISHABLE')
+         const foreign = await api('PATCH', lessonPath(videoLessonId), manager, { videoAssetId: foreignVideoId })
+         assert.equal(foreign.status, 400)
+
+         const shortVideoId = await upload(admin, courseId, 'video', 'short.mp4', 'video/mp4', isoMedia({ seconds: 50 }))
+         const tooShort = await api('PATCH', lessonPath(videoLessonId), manager, { videoAssetId: shortVideoId, title: 'Not applied' })
+         assert.equal(tooShort.status, 409)
+         assert.equal(tooShort.body.error.code, 'CHAPTERS_EXCEED_VIDEO_DURATION')
+         const unchanged = await api('GET', lessonPath(videoLessonId), admin)
+         assert.equal(unchanged.body.data.videoAssetId, videoId)
+         assert.equal(unchanged.body.data.title, 'Intro (updated)')
+
+         const license = await api('POST', `${learnerPath}/offline-license`, watcher)
+         assert.equal(license.status, 200, JSON.stringify(license.body))
+         const licenseId = license.body.data.license.id
+         const progressBefore = await client.query(
+            'SELECT count(*)::int AS count FROM lesson_progress WHERE lesson_id = $1',
+            [videoLessonId],
+         )
+         const longVideoId = await upload(admin, courseId, 'video', 'long.mp4', 'video/mp4', isoMedia({ seconds: 120 }))
+         const replaced = await api('PATCH', lessonPath(videoLessonId), manager, { videoAssetId: longVideoId, title: 'Intro' })
+         assert.equal(replaced.status, 200, JSON.stringify(replaced.body))
+         assert.equal(replaced.body.data.video.durationSeconds, 120)
+         const revoked = await client.query('SELECT revoke_reason FROM offline_downloads WHERE id = $1', [licenseId])
+         assert.equal(revoked.rows[0].revoke_reason, 'access_lost')
+         const stale = await api('GET', `/offline-licenses/${licenseId}/download`, watcher)
+         assert.equal(stale.status, 403)
+         assert.equal(stale.body.error.code, 'OFFLINE_ACCESS_DENIED')
+         assert.equal(stale.body.error.details[0].reason, 'video_unavailable')
+         const progressAfter = await client.query(
+            'SELECT count(*)::int AS count FROM lesson_progress WHERE lesson_id = $1',
+            [videoLessonId],
+         )
+         assert.equal(progressAfter.rows[0].count, progressBefore.rows[0].count)
+         const playback = await api('GET', `${learnerPath}/playback`, watcher)
+         assert.equal(playback.body.data.playback.durationSeconds, 120)
+         const audit = await client.query(
+            "SELECT metadata FROM audit_events WHERE event_code = 'lesson.updated' AND entity_id = $1 ORDER BY id DESC LIMIT 1",
+            [videoLessonId],
+         )
+         assert.equal(audit.rows[0].metadata.revokedLicenses, 1)
+         await api('PATCH', lessonPath(videoLessonId), manager, { videoAssetId: videoId })
+         await api('PUT', `${lessonPath(videoLessonId)}/chapters`, manager, {
+            chapters: [{ startSeconds: 0, title: 'Start' }, { startSeconds: 45, title: 'Middle' }],
+         })
       })
 
       await t.test('progress survives revocation and expiry', async () => {

@@ -22,7 +22,12 @@ updated_at: 2026-10-29
 - If the pinned `minio/minio:RELEASE.2025-09-07T16-13-09Z` image cannot be pulled, set `MINIO_IMAGE` to a pinned community rebuild.
 - Add the `S3_*`, `STORAGE_*` and `PLAYBACK_RATE_LIMIT` variables to `.env.example` by hand. Env files are denied to this agent. The list is in `docs/architecture.md` §13a.
 
-## Completed work (M07-B, branch `feat/m07-b-lessons-playback`)
+## Completed work (M07-B, branch `feat/m07-b-lessons-playback`, PR #19)
+
+- **Follow-up (2026-10-29): published lessons are edited directly**, with no archive → restore → edit → publish.
+   - Published lessons must stay publishable: `409 LESSON_VIDEO_REQUIRED` or `LESSON_TYPE_NOT_PUBLISHABLE`.
+   - A video change that would leave chapters beyond the new video fails with `409 CHAPTERS_EXCEED_VIDEO_DURATION` and changes nothing.
+   - A video change revokes the old video's offline licenses in the same transaction (`video_unavailable` for the PWA); progress is kept.
 
 - **Seek-ready video policy** (supersedes the M07-A remux decision):
    - MP4 must be fast start and WebM must have Cues before clusters; QuickTime is refused. Anything else gets `422 VIDEO_NOT_SEEKABLE` and the object is deleted.
@@ -46,7 +51,6 @@ updated_at: 2026-10-29
 
 All are in `docs/decisions.md` under "Lessons, playback and offline licenses (M07-B)": 20 assumptions made without the user. The ones most worth a look:
 
-- Lessons can be edited only as drafts (archive → restore → edit → publish).
 - `test` lessons cannot be published until M10.
 - Notes and progress reads also require current module access; rows are kept.
 - Lessons without a video are completed with `{ completed: true }`.
@@ -58,7 +62,7 @@ All are in `docs/decisions.md` under "Lessons, playback and offline licenses (M0
 
 - Baseline on `main` (`68e4fab`): `migrate:up` was a no-op; 156 tests, 155 passed, 1 skipped.
 - `npm run migrate:up` applied the migration. `verify-database.js` reported `valid: true`.
-- `npm test`: 173 tests, 172 passed, 0 failed, 1 skipped (real storage). Source integrity, schema integrity and the server lifecycle check passed.
+- `npm test` (after the published-lesson editing follow-up): 174 tests, 173 passed, 0 failed, 1 skipped (real storage). Source integrity, schema integrity and the server lifecycle check passed.
 - `npm run test:migrations`: 22/22/21/22; the disposable database was dropped. No rollback ran against `everest_db`.
 - Not verified:
    - any real S3/MinIO call, Range seeking, or browser playback;

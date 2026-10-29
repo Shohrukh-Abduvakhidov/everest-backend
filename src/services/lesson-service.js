@@ -1,6 +1,7 @@
 import { getStorageProvider } from '../providers/storage/index.js'
 import * as authRepository from '../repositories/auth-repository.js'
 import * as lessonRepository from '../repositories/lesson-repository.js'
+import * as offlineLicenseRepository from '../repositories/offline-license-repository.js'
 import { withTransaction } from '../repositories/transaction-repository.js'
 import AppError from '../utils/app-error.js'
 import {
@@ -40,6 +41,7 @@ const blockFields = Object.freeze({
 function dependencies(overrides = {}) {
    return {
       repository: overrides.repository || lessonRepository,
+      offline: overrides.offline || offlineLicenseRepository,
       auth: overrides.auth || authRepository,
       transaction: overrides.transaction || withTransaction,
       storage: () => overrides.storage || getStorageProvider(),
@@ -366,12 +368,11 @@ async function requireManageableCourse(repository, actorId, courseId, client) {
    return course
 }
 
-async function requireDraftLesson(repository, courseId, lessonId, client) {
+// Lessons are editable in every status. A published lesson must stay publishable, so
+// the publication rules are enforced on its edits.
+async function requireEditableLesson(repository, courseId, lessonId, client) {
    const lesson = await repository.findLessonForUpdate(courseId, lessonId, client)
    if (!lesson) throw lessonNotFound()
-   if (lesson.status !== 'draft') {
-      throw conflict('LESSON_NOT_EDITABLE', 'Only draft lessons can be edited; restore it to draft first')
-   }
    return lesson
 }
 
@@ -457,21 +458,33 @@ async function createLessonService(userId, courseIdValue, moduleIdValue, body, o
 }
 
 async function updateLessonService(userId, courseIdValue, lessonIdValue, body, overrides) {
-   const { repository, auth, transaction } = dependencies(overrides)
+   const { repository, offline, auth, transaction } = dependencies(overrides)
    const actorId = parseUserId(userId)
    const courseId = parseCourseId(courseIdValue)
    const lessonId = parseLessonId(lessonIdValue)
    const values = parseLessonBody(body, true)
    return transaction(async (client) => {
       await requireManageableCourse(repository, actorId, courseId, client)
-      const current = await requireDraftLesson(repository, courseId, lessonId, client)
+      const current = await requireEditableLesson(repository, courseId, lessonId, client)
       const lessonType = values.lessonType || current.lesson_type
       const videoAssetId = values.hasVideoAssetId ? values.videoAssetId : current.video_asset_id
       if (videoAssetId && !videoLessonTypes.includes(lessonType)) {
          throw validationError('videoAssetId', 'Only video and mixed lessons can have a video')
       }
+      const videoChanged = values.hasVideoAssetId && videoAssetId !== current.video_asset_id
+      if (current.status === 'published') {
+         if (lessonType === 'test') {
+            throw conflict('LESSON_TYPE_NOT_PUBLISHABLE', 'A published lesson cannot become a test lesson')
+         }
+         if (videoLessonTypes.includes(lessonType) && current.video_asset_id && !videoAssetId) {
+            throw conflict('LESSON_VIDEO_REQUIRED', 'A published video lesson must keep a video')
+         }
+         if (lessonType === 'video' && !videoAssetId) {
+            throw conflict('LESSON_VIDEO_REQUIRED', 'A published video lesson must keep a video')
+         }
+      }
       const chapters = await repository.listChapters([lessonId], client)
-      if (values.hasVideoAssetId && videoAssetId !== current.video_asset_id) {
+      if (videoChanged) {
          if (!videoAssetId && chapters.length) {
             throw conflict('LESSON_HAS_CHAPTERS', 'Remove the chapters before removing the video')
          }
@@ -479,12 +492,25 @@ async function updateLessonService(userId, courseIdValue, lessonIdValue, body, o
             const asset = await validateVideoAsset(repository, courseId, lessonId, videoAssetId, client)
             if (asset.duration_seconds !== null
                && chapters.some((chapter) => chapter.start_seconds >= asset.duration_seconds)) {
-               throw conflict('CHAPTERS_OUT_OF_RANGE', 'Existing chapters start after the end of this video')
+               throw conflict(
+                  'CHAPTERS_EXCEED_VIDEO_DURATION',
+                  'Existing chapters start after the end of the new video; adjust the chapters first',
+               )
             }
          }
       }
       const lesson = await repository.updateLesson(lessonId, values, client)
-      await audit(auth, actorId, 'lesson.updated', lessonId, { courseId, fields: Object.keys(body) }, client)
+      // Offline copies of the replaced video are revoked in the same transaction; the
+      // next license check reports video_unavailable so the PWA deletes the file.
+      // Learner progress is kept.
+      const revokedLicenses = videoChanged && current.video_asset_id
+         ? await offline.revokeLessonAssetLicenses(lessonId, current.video_asset_id, actorId, client)
+         : 0
+      await audit(auth, actorId, 'lesson.updated', lessonId, {
+         courseId,
+         fields: Object.keys(body),
+         ...(videoChanged ? { previousVideoAssetId: current.video_asset_id, revokedLicenses } : {}),
+      }, client)
       return loadLessonDetail(repository, lesson, client)
    })
 }
@@ -595,7 +621,7 @@ async function replaceLessonChaptersService(userId, courseIdValue, lessonIdValue
    const chapters = parseChapters(body)
    return transaction(async (client) => {
       await requireManageableCourse(repository, actorId, courseId, client)
-      const lesson = await requireDraftLesson(repository, courseId, lessonId, client)
+      const lesson = await requireEditableLesson(repository, courseId, lessonId, client)
       if (chapters.length) {
          if (!lesson.video_asset_id) {
             throw conflict('LESSON_HAS_NO_VIDEO', 'Chapters need a lesson video')
@@ -624,7 +650,7 @@ async function replaceLessonResourcesService(userId, courseIdValue, lessonIdValu
    const resources = parseResources(body)
    return transaction(async (client) => {
       await requireManageableCourse(repository, actorId, courseId, client)
-      await requireDraftLesson(repository, courseId, lessonId, client)
+      await requireEditableLesson(repository, courseId, lessonId, client)
       for (const resource of resources) {
          const asset = await repository.findCourseAsset(resource.assetId, courseId, lessonId, client)
          if (!asset || !asset.in_course || asset.kind !== 'material') {

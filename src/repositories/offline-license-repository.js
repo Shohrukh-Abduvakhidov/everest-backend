@@ -114,6 +114,16 @@ async function revokeLicense(licenseId, revokedBy, reason, client) {
    )
 }
 
+async function revokeLessonAssetLicenses(lessonId, assetId, revokedBy, client) {
+   const result = await client.query(
+      `UPDATE offline_downloads
+       SET revoked_at = CURRENT_TIMESTAMP, revoked_by = $3, revoke_reason = 'access_lost'
+       WHERE lesson_id = $1 AND asset_id = $2 AND revoked_at IS NULL`,
+      [normalizeInternalId(lessonId), normalizeInternalId(assetId), normalizeInternalId(revokedBy)],
+   )
+   return result.rowCount
+}
+
 async function listSessionLicenses(userId, sessionId, db = pool) {
    const result = await db.query(
       `SELECT ${licenseColumns} FROM ${licenseFrom}
@@ -146,6 +156,7 @@ export {
    listSessionLicenses,
    listUserLicenses,
    renewLicense,
+   revokeLessonAssetLicenses,
    revokeLicense,
    touchLicense,
 }

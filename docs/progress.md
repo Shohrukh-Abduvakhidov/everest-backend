@@ -6,6 +6,14 @@ Updated: 2026-10-29.
 
 M07-A is merged into `main` (PR #18). M07-B (lessons, playback, notes, progress, offline licenses) is implemented on `feat/m07-b-lessons-playback` and tested against a storage double. Real MinIO/S3 verification and real Range-seek verification are still pending, because Docker is not installed. Production SMS remains unavailable pending provider approval.
 
+## 2026-10-29 — M07-B follow-up: direct editing of published lessons
+
+- Removed the draft-only edit rule. `PATCH`, chapters and resources now work in every status, and published lessons stay publishable (`LESSON_VIDEO_REQUIRED`, `LESSON_TYPE_NOT_PUBLISHABLE`).
+- Replacing a video is refused when chapters would fall beyond the new video (`409 CHAPTERS_EXCEED_VIDEO_DURATION`). Otherwise the old video's active offline licenses are revoked in the same transaction (the PWA gets `video_unavailable`), and progress is kept.
+- Added `offline-license-repository.revokeLessonAssetLicenses`. A download check on a license revoked as `access_lost` now reports the current cause.
+- Added a `lessons.test.js` subtest (14 subtests now): direct edit visible to the learner at once, video removal refused, chapters beyond the new video refused with nothing changed, offline licenses revoked on video change, progress kept.
+- No migration was added. `npm test`: 174 tests, 173 passed, 0 failed, 1 skipped (real storage). `npm run test:migrations`: 22/22/21/22, disposable database dropped.
+
 ## 2026-10-29 — M07-B lessons, playback and offline licenses
 
 - Seek-ready video policy (supersedes the M07-A remux hook):

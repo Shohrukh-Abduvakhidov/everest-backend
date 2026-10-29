@@ -18,7 +18,13 @@ User decision. It replaces M07-A items 5 and 7 and the "remux job" bullet below 
 ### Assumptions made without the user (deny-by-default; please review)
 
 1. Video assets uploaded under M07-A keep `processing_status = 'none'`, so they are not playable. The migration does not reclassify them: WebM Cues were never checked for those uploads. Only pre-production test data was affected.
-2. Lesson fields, video, chapters and materials can be edited only while the lesson is a draft (`409 LESSON_NOT_EDITABLE`). A published lesson is edited by archiving it, restoring it to draft, editing and publishing again. Ordering is allowed in every status, as for modules.
+2. **Superseded on 2026-10-29 (user decision): published lessons are edited directly.** Teachers and administrators should not have to understand statuses, so the earlier "draft-only editing" rule (`LESSON_NOT_EDITABLE`, archive → restore → edit → publish) was removed.
+   - `PATCH`, chapters and resources work in draft, published and archived status, with the same `lessons.manage`/`canManageLessons` scope.
+   - A published lesson must stay publishable. It cannot become `test` (`LESSON_TYPE_NOT_PUBLISHABLE`) or lose the video of a `video`/`mixed` lesson (`LESSON_VIDEO_REQUIRED`). A new video must be ready, seek-ready and from the same course.
+   - Replacing the video is refused, with nothing changed, when existing chapters would start at or after the new video's end (`409 CHAPTERS_EXCEED_VIDEO_DURATION`, which replaces the earlier undocumented `CHAPTERS_OUT_OF_RANGE`).
+   - Replacing the video revokes the lesson's active offline licenses for the old video in the same transaction (`access_lost`). The next download check reports the existing reason `video_unavailable`. Learner progress is not reset.
+   - There are no version history, revision drafts or new tables. The existing audit events stay; `lesson.updated` also records `previousVideoAssetId` and `revokedLicenses` when the video changes.
+   - Deletion is still allowed only for empty drafts. Ordering is allowed in every status.
 3. Publication rules:
    - A `video` lesson needs a playable video (`LESSON_VIDEO_REQUIRED` / `VIDEO_NOT_PLAYABLE`).
    - `test` lessons cannot be published until the test engine exists (M10, `LESSON_TYPE_NOT_PUBLISHABLE`).
