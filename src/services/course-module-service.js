@@ -1,6 +1,7 @@
 import * as authRepository from '../repositories/auth-repository.js'
 import * as courseModuleRepository from '../repositories/course-module-repository.js'
 import * as courseRepository from '../repositories/course-repository.js'
+import * as lessonRepository from '../repositories/lesson-repository.js'
 import { withTransaction } from '../repositories/transaction-repository.js'
 import AppError from '../utils/app-error.js'
 import {
@@ -14,6 +15,7 @@ import {
    validateBody,
    validationError,
 } from './course-service.js'
+import { lessonCopySteps } from './lesson-service.js'
 
 const moduleFields = ['title', 'description', 'translations']
 const copySuffix = ' (copy)'
@@ -24,6 +26,7 @@ function dependencies(overrides = {}) {
    return {
       repository: overrides.repository || courseModuleRepository,
       courses: overrides.courses || courseRepository,
+      lessons: overrides.lessons || lessonRepository,
       auth: overrides.auth || authRepository,
       transaction: overrides.transaction || withTransaction,
    }
@@ -115,8 +118,8 @@ async function requireEditableCourse(courses, actorId, courseId, client) {
 }
 
 // Each step copies one part of the course structure inside the copy transaction and
-// returns a summary. M07 appends lesson, video, chapter and material steps that read
-// context.moduleIdMap to attach copied lessons to the copied modules.
+// returns a summary. The lesson steps read context.moduleIdMap to attach copied lessons
+// to the copied modules.
 const courseCopySteps = [
    async function copyModulesStep(context) {
       const rows = await context.repository.copyModules(
@@ -127,6 +130,7 @@ const courseCopySteps = [
       for (const row of rows) context.moduleIdMap.set(row.source_id, row.target_id)
       return { modules: rows.length }
    },
+   ...lessonCopySteps,
 ]
 
 async function previewCourseModulesService(userId, courseIdValue, overrides) {
@@ -314,7 +318,7 @@ async function reorderCourseModulesService(userId, courseIdValue, body, override
 }
 
 async function copyCourseService(userId, courseIdValue, body, overrides) {
-   const { repository, auth, transaction } = dependencies(overrides)
+   const { repository, lessons, auth, transaction } = dependencies(overrides)
    const actorId = parseUserId(userId)
    const sourceCourseId = parseCourseId(courseIdValue)
    const values = parseCopyBody(body)
@@ -327,6 +331,7 @@ async function copyCourseService(userId, courseIdValue, body, overrides) {
       const context = {
          client,
          repository,
+         lessons,
          actorId,
          sourceCourseId,
          targetCourseId: course.id,

@@ -6,15 +6,15 @@ const { Client } = pg;
 const client = new Client(env.database);
 
 const expected = {
-  tables: 86,
-  columns: 687,
-  foreignKeys: 162,
-  indexes: 306,
+  tables: 87,
+  columns: 697,
+  foreignKeys: 164,
+  indexes: 310,
   functions: 7,
   triggers: 11,
   roles: 4,
-  migrations: 21,
-  identityColumns: 66,
+  migrations: 22,
+  identityColumns: 67,
 };
 
 try {
@@ -151,9 +151,9 @@ try {
     && remainingUuidColumns.rowCount === 1
     && remainingUuidColumns.rows[0].table_name === 'sms_deliveries'
     && remainingUuidColumns.rows[0].column_name === 'idempotency_key'
-    && authorizationSeeds.rows[0].permissions === 21
-    && authorizationSeeds.rows[0].role_permissions === 46
-    && authorizationSeeds.rows[0].teacher_grants === 4
+    && authorizationSeeds.rows[0].permissions === 24
+    && authorizationSeeds.rows[0].role_permissions === 54
+    && authorizationSeeds.rows[0].teacher_grants === 6
     && authorizationSeeds.rows[0].student_grants === 0
     && permissionConstraintCode === '23514'
     && generatedIdentity.type === 'bigint'

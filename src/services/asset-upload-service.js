@@ -5,7 +5,6 @@ import { getStorageProvider } from '../providers/storage/index.js'
 import * as assetUploadRepository from '../repositories/asset-upload-repository.js'
 import * as authRepository from '../repositories/auth-repository.js'
 import * as authorizationRepository from '../repositories/authorization-repository.js'
-import * as backgroundJobRepository from '../repositories/background-job-repository.js'
 import { withTransaction } from '../repositories/transaction-repository.js'
 import AppError from '../utils/app-error.js'
 import { inspectMedia, MediaRejection, mimeTypes } from '../utils/media-inspection.js'
@@ -15,12 +14,13 @@ const mib = 1024 * 1024
 const maxFileBytes = 20 * 1024 * mib
 const maxParts = 10000
 const maxPresignBatch = 100
-const remuxJobType = 'asset.video.remux'
 
-// Extension allowlists per kind. The declared type only selects the expected format;
+// Extension allowlists per kind. QuickTime (.mov) is not accepted: only seek-ready MP4
+// (moov before mdat) and WebM (Cues before clusters) are stored, so no server-side remux
+// is ever needed. The declared type only selects the expected format;
 // completion re-identifies the stored bytes and rejects any mismatch.
 const allowedTypes = Object.freeze({
-   video: { mp4: mimeTypes.mp4, mov: mimeTypes.mov, webm: mimeTypes.webm },
+   video: { mp4: mimeTypes.mp4, webm: mimeTypes.webm },
    material: {
       pdf: mimeTypes.pdf,
       docx: mimeTypes.docx,
@@ -34,7 +34,6 @@ const allowedTypes = Object.freeze({
 function dependencies(overrides = {}) {
    return {
       repository: overrides.repository || assetUploadRepository,
-      jobs: overrides.jobs || backgroundJobRepository,
       auth: overrides.auth || authRepository,
       authorization: overrides.authorization || authorizationRepository,
       transaction: overrides.transaction || withTransaction,
@@ -375,36 +374,27 @@ async function completeAssetUploadService(userId, uploadIdValue, overrides) {
          if (!(error instanceof MediaRejection)) throw error
          return rejectUpload(deps, actorId, upload, { code: error.code, message: error.message }, client)
       }
-      const needsRemux = upload.kind === 'video' && (media.container === 'mov' || !media.faststart)
       await deps.repository.markAssetReady(upload.asset_id, {
          mimeType: media.mimeType,
          sizeBytes: object.size,
          widthPx: media.widthPx,
          heightPx: media.heightPx,
          durationSeconds: media.durationSeconds,
-         processingStatus: needsRemux ? 'pending' : 'none',
+         processingStatus: upload.kind === 'video' ? 'not_required' : 'none',
          media: upload.kind === 'video' ? {
             container: media.container,
             videoCodec: media.videoCodec,
             audioCodec: media.audioCodec,
-            faststart: media.faststart,
          } : {},
       }, client)
       await deps.repository.markUploadCompleted(upload.id, client)
-      if (needsRemux) {
-         await deps.jobs.enqueueJob({
-            jobType: remuxJobType,
-            payload: { assetId: upload.asset_id, mode: 'remux-mp4-faststart' },
-            dedupeKey: `${remuxJobType}:${upload.asset_id}`,
-         }, client)
-      }
       await deps.auth.appendAuditEvent({
          actorUserId: actorId,
          subjectUserId: null,
          code: 'asset.upload.completed',
          entityType: 'asset_upload',
          entityId: upload.id,
-         metadata: { assetId: upload.asset_id, sizeBytes: object.size, needsRemux },
+         metadata: { assetId: upload.asset_id, sizeBytes: object.size },
       }, client)
       return { assetId: upload.asset_id }
    })
@@ -412,7 +402,10 @@ async function completeAssetUploadService(userId, uploadIdValue, overrides) {
       await deps.storage.deleteObject(outcome.storageKey).catch(() => {
          console.error('Rejected upload object could not be deleted', { uploadId })
       })
-      throw new AppError(422, 'UNSUPPORTED_MEDIA', outcome.rejected.message, [
+      const code = outcome.rejected.code === 'VIDEO_NOT_SEEKABLE'
+         ? 'VIDEO_NOT_SEEKABLE'
+         : 'UNSUPPORTED_MEDIA'
+      throw new AppError(422, code, outcome.rejected.message, [
          { code: outcome.rejected.code },
       ])
    }

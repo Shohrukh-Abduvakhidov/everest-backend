@@ -4,7 +4,41 @@ Updated: 2026-10-29.
 
 ## Current increment
 
-M06 is merged into `main` (PR #17). M07-A (media storage and resumable uploads) is implemented on `feat/m07-a-media-storage` and tested against a storage double. Real MinIO/S3 verification is pending because Docker is not installed. M07-B is next. Production SMS remains unavailable pending provider approval.
+M07-A is merged into `main` (PR #18). M07-B (lessons, playback, notes, progress, offline licenses) is implemented on `feat/m07-b-lessons-playback` and tested against a storage double. Real MinIO/S3 verification and real Range-seek verification are still pending, because Docker is not installed. Production SMS remains unavailable pending provider approval.
+
+## 2026-10-29 — M07-B follow-up: direct editing of published lessons
+
+- Removed the draft-only edit rule. `PATCH`, chapters and resources now work in every status, and published lessons stay publishable (`LESSON_VIDEO_REQUIRED`, `LESSON_TYPE_NOT_PUBLISHABLE`).
+- Replacing a video is refused when chapters would fall beyond the new video (`409 CHAPTERS_EXCEED_VIDEO_DURATION`). Otherwise the old video's active offline licenses are revoked in the same transaction (the PWA gets `video_unavailable`), and progress is kept.
+- Added `offline-license-repository.revokeLessonAssetLicenses`. A download check on a license revoked as `access_lost` now reports the current cause.
+- Added a `lessons.test.js` subtest (14 subtests now): direct edit visible to the learner at once, video removal refused, chapters beyond the new video refused with nothing changed, offline licenses revoked on video change, progress kept.
+- No migration was added. `npm test`: 174 tests, 173 passed, 0 failed, 1 skipped (real storage). `npm run test:migrations`: 22/22/21/22, disposable database dropped.
+
+## 2026-10-29 — M07-B lessons, playback and offline licenses
+
+- Seek-ready video policy (supersedes the M07-A remux hook):
+   - MP4 must be fast start and WebM must have Cues before clusters; QuickTime is refused. Other files get `422 VIDEO_NOT_SEEKABLE` and are deleted.
+   - New videos get `processing_status = 'not_required'`, and no remux jobs are created (`background-job-repository` removed).
+   - Added `scripts/remux-faststart.js` (`npm run video:faststart`).
+- Added the reversible migration `20261030020000000_add-lesson-playback.js`:
+   - `lesson_video_chapters`;
+   - offline `revoked_by`, `revoke_reason`, `renewed_at` and `device_label`;
+   - `not_required` processing status;
+   - `lessons.read` and `lessons.manage` (owner/admin/teacher) and `lessons.offline.manage` (owner/admin).
+- Added `lesson-repository`, `learner-lesson-repository`, `offline-license-repository` and the matching services, controllers and routes (`/admin/courses/:courseId/...lessons`, `/courses/:courseId/lessons/...`, `/offline-licenses`).
+- Added `learnerMediaRateMiddleware` (`PLAYBACK_RATE_LIMIT`) and the attachment/inline disposition for `presignDownload`.
+- Course copy now includes lessons, chapters and materials. The M05-B copy test expectations were updated accordingly.
+- Updated `verify-database.js` (87 tables, 697 columns, 164 FKs, 310 indexes, 67 identity columns, 22 migrations, 24 permissions, 54 role grants, 6 teacher grants) and `test-migration-cycle.js` (22/22/21/22).
+- Decisions: the seek-ready policy plus 20 assumptions made without the user, in [decisions](decisions.md).
+- Commands run on 2026-10-29:
+   - Baseline on `main` (`68e4fab`): `migrate:up` was a no-op; the test suite reported 156 tests, 155 passed and 1 skipped.
+   - `npm run migrate:up` applied the new migration. `node scripts/verify-database.js` reported `valid: true`.
+   - `npm test`: 173 tests, 172 passed, 0 failed, 1 skipped (real storage not configured). Source integrity, schema integrity and the server lifecycle check also passed. This includes `tests/integration/lessons.test.js` (13 subtests), the updated `asset-uploads` test (14) and the media inspection tests (14).
+   - `npm run test:migrations`: 22/22/21/22, and the disposable database was dropped. No rollback ran against `everest_db`.
+   - `node scripts/remux-faststart.js` without ffmpeg installed printed the missing-ffmpeg error and exited with code 3. A real remux was not run, because ffmpeg is not installed.
+- Not run:
+   - real storage tests, Range seeking through a real signed URL, and browser playback;
+   - `.env.example` update (file access denied; add `PLAYBACK_RATE_LIMIT` by hand).
 
 ## 2026-10-29 — M07-A media storage and resumable uploads
 

@@ -68,6 +68,7 @@ const env = Object.freeze({
   authLoginMaxAttempts: readInteger('AUTH_LOGIN_MAX_ATTEMPTS', 5, { max: 100 }),
   authPublicRateLimit: readInteger('AUTH_PUBLIC_RATE_LIMIT', 100, { max: 10000 }),
   authAdminRateLimit: readInteger('AUTH_ADMIN_RATE_LIMIT', 100, { max: 10000 }),
+  playbackRateLimit: readInteger('PLAYBACK_RATE_LIMIT', 120, { max: 10000 }),
   otpHmacSecret: readString('OTP_HMAC_SECRET'),
   recoveryChallengeTtlSeconds: readInteger('RECOVERY_CHALLENGE_TTL_SECONDS', 600),
   recoveryResetTtlSeconds: readInteger('RECOVERY_RESET_TTL_SECONDS', 600),

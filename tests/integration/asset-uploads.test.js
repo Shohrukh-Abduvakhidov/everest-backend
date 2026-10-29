@@ -263,7 +263,7 @@ test('asset multipart uploads integration', async (t) => {
          assert.equal(asset.sizeBytes, video.length)
          assert.equal(asset.durationSeconds, 90)
          assert.equal(asset.widthPx, 1920)
-         assert.equal(asset.processingStatus, 'none')
+         assert.equal(asset.processingStatus, 'not_required')
          assert.equal(storage.calls.filter((call) => call.name === 'completeMultipartUpload'
             && call.key === key).length, 1)
          assert.equal(storage.objects.get(key).length, video.length)
@@ -336,8 +336,8 @@ test('asset multipart uploads integration', async (t) => {
       })
 
       await t.test('unsupported codec gives a clear error', async () => {
-         const prores = isoMedia({ brand: 'qt  ', videoCodec: 'apcn' })
-         const created = await initiate(admin, courseId, 'video', 'master.mov', 'video/quicktime', prores)
+         const prores = isoMedia({ videoCodec: 'apcn' })
+         const created = await initiate(admin, courseId, 'video', 'master.mp4', 'video/mp4', prores)
          await uploadAll(admin, created.body.data.id, prores)
          const rejected = await api(port, 'POST', `${uploads}/${created.body.data.id}/complete`, admin)
          assert.equal(rejected.response.status, 422)
@@ -345,29 +345,51 @@ test('asset multipart uploads integration', async (t) => {
          assert.match(rejected.body.error.message, /apcn/)
       })
 
-      await t.test('mov and non-faststart mp4 enqueue one remux job; webm does not', async () => {
+      await t.test('QuickTime uploads are refused at initiation', async () => {
+         const mov = isoMedia({ brand: 'qt  ' })
+         const refused = await initiate(admin, courseId, 'video', 'camera.mov', 'video/quicktime', mov)
+         assert.equal(refused.response.status, 400)
+         assert.equal(refused.body.error.details[0].field, 'fileName')
+      })
+
+      await t.test('non-seek-ready video is rejected with VIDEO_NOT_SEEKABLE and deleted', async () => {
          const cases = [
-            ['late.mp4', 'video/mp4', isoMedia({ faststart: false }), 'pending'],
-            ['camera.mov', 'video/quicktime', isoMedia({ brand: 'qt  ' }), 'pending'],
-            ['screen.webm', 'video/webm', webmMedia(), 'none'],
+            ['late.mp4', 'video/mp4', isoMedia({ faststart: false })],
+            ['nocues.webm', 'video/webm', webmMedia({ cues: 'none' })],
+            ['endcues.webm', 'video/webm', webmMedia({ cues: 'end' })],
          ]
-         for (const [fileName, mimeType, buffer, processingStatus] of cases) {
+         for (const [fileName, mimeType, buffer] of cases) {
+            const created = await initiate(admin, courseId, 'video', fileName, mimeType, buffer)
+            await uploadAll(admin, created.body.data.id, buffer)
+            const key = (await client.query(
+               'SELECT storage_key FROM assets WHERE id = $1',
+               [created.body.data.assetId],
+            )).rows[0].storage_key
+            const rejected = await api(port, 'POST', `${uploads}/${created.body.data.id}/complete`, admin)
+            assert.equal(rejected.response.status, 422, fileName)
+            assert.equal(rejected.body.error.code, 'VIDEO_NOT_SEEKABLE')
+            assert.ok(rejected.body.error.message.includes('fast start (web optimized)'))
+            assert.equal(storage.objects.has(key), false)
+            const asset = await client.query('SELECT status FROM assets WHERE id = $1', [created.body.data.assetId])
+            assert.equal(asset.rows[0].status, 'quarantined')
+         }
+      })
+
+      await t.test('seek-ready videos need no processing and enqueue no jobs', async () => {
+         for (const [fileName, mimeType, buffer] of [
+            ['lesson.mp4', 'video/mp4', isoMedia()],
+            ['screen.webm', 'video/webm', webmMedia()],
+         ]) {
             const created = await initiate(admin, courseId, 'video', fileName, mimeType, buffer)
             await uploadAll(admin, created.body.data.id, buffer)
             const done = await api(port, 'POST', `${uploads}/${created.body.data.id}/complete`, admin)
             assert.equal(done.response.status, 200, JSON.stringify(done.body))
-            assert.equal(done.body.data.asset.processingStatus, processingStatus)
+            assert.equal(done.body.data.asset.processingStatus, 'not_required')
             const jobs = await client.query(
-               "SELECT job_type, payload, status FROM background_jobs WHERE dedupe_key = $1",
+               "SELECT count(*)::int AS count FROM background_jobs WHERE dedupe_key = $1",
                [`asset.video.remux:${created.body.data.assetId}`],
             )
-            assert.equal(jobs.rows.length, processingStatus === 'pending' ? 1 : 0)
-            if (jobs.rows.length) {
-               assert.deepEqual(jobs.rows[0].payload, {
-                  assetId: created.body.data.assetId,
-                  mode: 'remux-mp4-faststart',
-               })
-            }
+            assert.equal(jobs.rows[0].count, 0)
          }
       })
 

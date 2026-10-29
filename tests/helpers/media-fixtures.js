@@ -73,7 +73,13 @@ function uint(value, bytes = 4) {
    return buffer
 }
 
-function webmMedia({ videoCodec = 'V_VP9', audioCodec = 'A_OPUS', docType = 'webm' } = {}) {
+function webmMedia({
+   videoCodec = 'V_VP9',
+   audioCodec = 'A_OPUS',
+   docType = 'webm',
+   cues = 'start',
+} = {}) {
+   const cuesElement = ebml('1c53bb6b', ebml('bb', ebml('b3', uint(0, 1))))
    const duration = Buffer.alloc(8)
    duration.writeDoubleBE(12000)
    const tracks = [ebml('ae', ebml('83', uint(1, 1)), ebml('86', Buffer.from(videoCodec)),
@@ -86,7 +92,9 @@ function webmMedia({ videoCodec = 'V_VP9', audioCodec = 'A_OPUS', docType = 'web
       ebml('18538067',
          ebml('1549a966', ebml('2ad7b1', uint(1000000)), ebml('4489', duration)),
          ebml('1654ae6b', ...tracks),
-         ebml('1f43b675', Buffer.alloc(512, 3))),
+         ...(cues === 'start' ? [cuesElement] : []),
+         ebml('1f43b675', Buffer.alloc(512, 3)),
+         ...(cues === 'end' ? [cuesElement] : [])),
    ])
 }
 

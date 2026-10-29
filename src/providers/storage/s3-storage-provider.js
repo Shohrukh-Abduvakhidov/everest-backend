@@ -133,15 +133,15 @@ function createS3StorageProvider(config) {
 
       // GET presigned URLs honour Range requests, which playback and resumable
       // offline downloads rely on.
-      async presignDownload({ key, expiresIn, fileName, contentType }) {
+      async presignDownload({ key, expiresIn, fileName, contentType, disposition = 'inline' }) {
+         const type = disposition === 'attachment' ? 'attachment' : 'inline'
          return getSignedUrl(signer, new GetObjectCommand({
             Bucket,
             Key: key,
             ResponseContentType: contentType,
-            ...(fileName ? {
-               ResponseContentDisposition:
-                  `inline; filename*=UTF-8''${encodeURIComponent(fileName)}`,
-            } : {}),
+            ResponseContentDisposition: fileName
+               ? `${type}; filename*=UTF-8''${encodeURIComponent(fileName)}`
+               : type,
          }), { expiresIn })
       },
    }

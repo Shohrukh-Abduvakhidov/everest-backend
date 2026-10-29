@@ -277,7 +277,7 @@ test('course modules, preview and copy integration', async (t) => {
          assert.equal(copy.status, 'draft')
          assert.deepEqual(copy.translations, { tg: { title: 'Геометрия' } })
          assert.equal(copied.body.data.sourceCourseId, courseId)
-         assert.deepEqual(copied.body.data.copied, { modules: 4 })
+         assert.deepEqual(copied.body.data.copied, { modules: 4, lessons: 1, chapters: 0, resources: 0 })
 
          const source = await client.query(
             'SELECT title, description, position, translations FROM course_modules WHERE course_id = $1 ORDER BY position',
@@ -298,7 +298,7 @@ test('course modules, preview and copy integration', async (t) => {
                (SELECT count(*)::int FROM lessons WHERE course_id = $1) AS lessons`,
             [copy.id],
          )
-         assert.deepEqual(leftovers.rows[0], { teachers: 0, enrollments: 0, grants: 0, lessons: 0 })
+         assert.deepEqual(leftovers.rows[0], { teachers: 0, enrollments: 0, grants: 0, lessons: 1 })
 
          const named = await api(port, 'POST', `${base}/${courseId}/copy`, sessions.admin, { title: 'Geometry 2027' })
          courseIds.push(named.body.data.course.id)

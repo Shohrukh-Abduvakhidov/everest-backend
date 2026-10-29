@@ -19,5 +19,6 @@ import './integration/course-management.test.js';
 import './integration/course-modules.test.js';
 import './integration/course-access.test.js';
 import './integration/asset-uploads.test.js';
+import './integration/lessons.test.js';
 import './integration/real-storage.test.js';
 import './integration/telegram-auth.test.js';
