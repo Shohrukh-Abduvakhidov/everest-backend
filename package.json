@@ -15,6 +15,7 @@
     "migrate:down": "node src/configs/migrate.js down",
     "migrate:create": "node-pg-migrate create -m src/migrations -j js",
     "bootstrap:owner": "node scripts/bootstrap-owner.js",
+    "storage:configure": "node scripts/configure-storage-bucket.js",
     "test:sources": "node scripts/verify-migration-sources.js",
     "test:integrity": "node scripts/test-schema-integrity.js",
     "test:server": "node scripts/test-server.js",
@@ -24,6 +25,8 @@
     "test": "npm run test:sources && npm run test:integrity && npm run test:auth && npm run test:server"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1159.0",
+    "@aws-sdk/s3-request-presigner": "^3.1159.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",

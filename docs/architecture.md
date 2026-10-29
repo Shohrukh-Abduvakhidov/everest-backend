@@ -398,6 +398,33 @@ M06 implements this flow.
 - **Protected-content guard.** `requireModuleAccessService` is the single API-side entry to the `can_access_module` predicate (active account, completed onboarding, published course and module, both grants current) and throws `403 MODULE_ACCESS_DENIED`. Authentication middleware supplies the live-session check. M07 lesson, asset and test routes must call it; none exists yet.
 - Group membership, course teaching assignment and administrator role grant no learner content access.
 
+### 13a. Media storage (M07-A)
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant A as API (asset-upload-service)
+    participant S as S3-compatible storage
+    participant D as PostgreSQL
+    B->>A: POST /assets/uploads (courseId, kind, name, type, size)
+    A->>S: CreateMultipartUpload (server-generated key)
+    A->>D: assets(pending) + asset_uploads(initiated) + audit
+    B->>A: POST /uploads/:id/parts [n…]
+    A-->>B: presigned UploadPart URLs (S3_PUBLIC_ENDPOINT)
+    B->>S: PUT parts directly (resume via GET /uploads/:id → ListParts)
+    B->>A: POST /uploads/:id/complete
+    A->>D: lock asset_uploads row
+    A->>S: ListParts → verify → CompleteMultipartUpload → HEAD → ranged GETs
+    A->>D: assets ready / quarantined, optional background_jobs remux, audit
+```
+
+- **Provider boundary.** `src/providers/storage/s3-storage-provider.js` is the only code that talks to storage. It exposes `createMultipartUpload`, `presignUploadPart`, `listParts` (returns null when the upload is gone), `completeMultipartUpload`, `abortMultipartUpload` (ignores missing uploads), `headObject`, `readRange`, `deleteObject` and `presignDownload` (a GET URL with Range support, for M07-B). `src/providers/storage/index.js` builds it lazily from env, so importing the app needs no storage credentials. Tests inject `tests/helpers/memory-storage-provider.js` through `createApp({ assets: { storage, config } })`.
+- **Persistence.** `asset-upload-repository` owns `assets` and `asset_uploads` SQL and the course-teacher scope check. `background-job-repository.enqueueJob` inserts into `background_jobs` idempotently through `dedupe_key`. The migration `20261030010000000_add-asset-uploads.js` adds `assets.kind`, `assets.processing_status` and `assets.processing_error`, the `asset_uploads` table, and the `assets.upload`/`assets.manage` permissions (owner/admin).
+- **Inspection.** `src/utils/media-inspection.js` reads stored bytes by range. It recognizes PDF, PNG, JPEG and OOXML (from central-directory entries) by magic bytes. For video it walks ISO-BMFF boxes (ftyp brand, moov/mdat order, `mvhd` duration, `tkhd` dimensions, `hdlr`/`stsd` codecs) or WebM EBML (DocType, Tracks, CodecID, Info duration). Nothing is decoded.
+- **Configuration.** `S3_ENDPOINT`, `S3_PUBLIC_ENDPOINT`, `S3_REGION` (us-east-1), `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE` (true), `STORAGE_PART_SIZE_BYTES` (32 MiB), `STORAGE_PRESIGN_TTL_SECONDS` (900), `STORAGE_UPLOAD_TTL_HOURS` (144, maximum 166). Moving to production changes only these variables.
+- **Local storage.** `docker-compose.yml` runs MinIO on 127.0.0.1:9000 and 9001, plus a one-shot `minio-init` container that runs `scripts/configure-storage-bucket.js` (`npm run storage:configure`). It creates the bucket, a 7-day abort-incomplete-multipart lifecycle rule and CORS that exposes ETag. Production uses the same script against Garage or SeaweedFS.
+- **Not in M07-A.** Lessons, chapters, materials, notes, playback/download endpoints, offline licences, favourites, progress, the remux worker (M19), and any multi-quality video or HLS (excluded by product decision).
+
 ## 14. Group architecture
 
 The planned group model is `groups` → `group_members`/`group_teachers`/`group_announcements`; announcements may attach assets. Teachers have explicit booleans for announcements, test assignment, and result visibility. Users may be members or teachers independently.
@@ -491,8 +518,8 @@ Actual response envelopes:
 | Area | Status | Current reality |
 |---|---|---|
 | Project foundation | Done | ESM Express app/server, config, Pool, errors, tests |
-| Database schema | Done | 85-table, 20-migration current catalog; numeric baseline and incremental migrations verified |
-| Numeric identifiers (M01R) | Done | 65 identity columns; internal IDs/FKs are `BIGINT`; decimal-string API/JWT contract |
+| Database schema | Done | 86-table, 21-migration current catalog; numeric baseline and incremental migrations verified |
+| Numeric identifiers (M01R) | Done | 66 identity columns; internal IDs/FKs are `BIGINT`; decimal-string API/JWT contract |
 | Telegram OIDC | Done | Login/link/unlink/session/test-message routes and tests |
 | Phone/password authentication | Done | Pending registration, salted `scrypt`, active-only login, shared session, audit, tests |
 | Account approval | Done | Pending list, locked transitions, audit, session revocation, initial-owner bootstrap |
@@ -501,7 +528,8 @@ Actual response envelopes:
 | Roles and permissions | Partial | Database-backed action permissions enforce account administration; domain/resource rules remain planned |
 | Profiles | Done | Authenticated own-profile read/update and onboarding state/completion |
 | Groups | Partial | M04-A reads and M04-B administration/text announcements done; assets deferred to M07 |
-| Courses/access | Partial | M05-A catalog/lifecycle/teachers, M05-B modules/preview/copy and M06 enrollments/module grants/learner locks done; protected content is M07 |
+| Courses/access | Partial | M05-A catalog/lifecycle/teachers, M05-B modules/preview/copy and M06 enrollments/module grants/learner locks done; protected content is M07-B |
+| Media storage | Partial | M07-A S3 multipart uploads, content/codec verification and remux-job hook done against a storage double; real MinIO/S3 verification pending |
 | Question bank | Planned | Schema/DB guards only |
 | Test engine | Planned | Schema/DB constraints only |
 | Progress | Planned | Schema only |

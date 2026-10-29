@@ -75,6 +75,21 @@ const env = Object.freeze({
   recoveryMaxAttempts: readInteger('RECOVERY_MAX_ATTEMPTS', 5, { max: 20 }),
   recoveryMaxRequestsPerHour: readInteger('RECOVERY_MAX_REQUESTS_PER_HOUR', 5, { max: 100 }),
   telegramOidcStateTtlSeconds: readInteger('TELEGRAM_OIDC_STATE_TTL_SECONDS', 600),
+  storage: Object.freeze({
+    endpoint: readString('S3_ENDPOINT'),
+    publicEndpoint: readString('S3_PUBLIC_ENDPOINT'),
+    region: readString('S3_REGION', 'us-east-1'),
+    bucket: readString('S3_BUCKET'),
+    accessKeyId: readString('S3_ACCESS_KEY_ID'),
+    secretAccessKey: readString('S3_SECRET_ACCESS_KEY'),
+    forcePathStyle: readBoolean('S3_FORCE_PATH_STYLE', true),
+    partSizeBytes: readInteger('STORAGE_PART_SIZE_BYTES', 32 * 1024 * 1024, {
+      min: 5 * 1024 * 1024,
+      max: 5 * 1024 * 1024 * 1024,
+    }),
+    presignTtlSeconds: readInteger('STORAGE_PRESIGN_TTL_SECONDS', 900, { min: 60, max: 3600 }),
+    uploadTtlHours: readInteger('STORAGE_UPLOAD_TTL_HOURS', 144, { max: 166 }),
+  }),
   telegram: Object.freeze({
     discoveryUrl: 'https://oauth.telegram.org/.well-known/openid-configuration',
     clientId: readString('TELEGRAM_CLIENT_ID'),
