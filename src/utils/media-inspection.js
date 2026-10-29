@@ -8,6 +8,7 @@ const maxMoovBytes = 64 * mib
 const maxTopLevelBoxes = 4096
 const webmProbeBytes = 4 * mib
 const zipTailBytes = 256 * 1024
+const seekMessage = 'Export as MP4 with fast start (web optimized)'
 
 const mimeTypes = Object.freeze({
    mp4: 'video/mp4',
@@ -149,6 +150,9 @@ async function inspectIsoMedia(read, size) {
       const brand = (await read(ftyp.start + 8, ftyp.start + 11)).toString('latin1')
       container = brand === 'qt  ' ? 'mov' : 'mp4'
    }
+   if (container === 'mov') {
+      reject('MEDIA_TYPE_MISMATCH', `QuickTime files are not accepted. ${seekMessage}`)
+   }
    const moov = await read(moovBox.start, moovBox.start + moovBox.size - 1)
    const root = { start: 0, headerSize: moovBox.headerSize, end: moov.length }
    const children = childBoxes(moov, root.headerSize, root.end)
@@ -169,6 +173,9 @@ async function inspectIsoMedia(read, size) {
          reject('MEDIA_UNSUPPORTED_CODEC', `Audio codec ${track.codec || 'unknown'} is not supported`)
       }
    }
+   // Seek-ready only: the moov index must precede the media data so a player can
+   // seek through Range requests without first downloading the whole file.
+   if (moovBox.start > mdat.start) reject('VIDEO_NOT_SEEKABLE', seekMessage)
    return {
       mimeType: mimeTypes[container],
       container,
@@ -177,7 +184,6 @@ async function inspectIsoMedia(read, size) {
       durationSeconds: parseDuration(moov, children.find((box) => box.type === 'mvhd')),
       widthPx: video[0].width || null,
       heightPx: video[0].height || null,
-      faststart: moovBox.start < mdat.start,
    }
 }
 
@@ -223,6 +229,7 @@ const ebml = Object.freeze({
    pixelWidth: 0xb0,
    pixelHeight: 0xba,
    cluster: 0x1f43b675,
+   cues: 0x1c53bb6b,
 })
 
 function children(buffer, start, end, visit) {
@@ -267,8 +274,10 @@ async function inspectWebm(read, size) {
    const tracks = []
    let timecodeScale = 1000000
    let duration = null
+   let cuesBeforeClusters = false
    children(buffer, segment.dataStart, segment.dataEnd, (element) => {
       if (element.id === ebml.cluster) return false
+      if (element.id === ebml.cues) cuesBeforeClusters = true
       if (element.id === ebml.info) {
          children(buffer, element.dataStart, element.dataEnd, (field) => {
             if (field.id === ebml.timecodeScale) timecodeScale = readUnsigned(buffer, field)
@@ -309,6 +318,8 @@ async function inspectWebm(read, size) {
          reject('MEDIA_UNSUPPORTED_CODEC', `Audio codec ${track.codec || 'unknown'} is not supported`)
       }
    }
+   // Cues (the seek index) must be written before the first cluster.
+   if (!cuesBeforeClusters) reject('VIDEO_NOT_SEEKABLE', 'Export as WebM with cues at the start, or as MP4 with fast start (web optimized)')
    return {
       mimeType: mimeTypes.webm,
       container: 'webm',
@@ -317,7 +328,6 @@ async function inspectWebm(read, size) {
       durationSeconds: duration === null ? null : Math.round(duration * timecodeScale / 1e9),
       widthPx: video[0].width || null,
       heightPx: video[0].height || null,
-      faststart: true,
    }
 }
 

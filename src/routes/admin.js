@@ -21,11 +21,33 @@ import {
    manageCourseAccessAuthorizationMiddleware,
    manageCourseModulesAuthorizationMiddleware,
    manageCourseTeachersAuthorizationMiddleware,
+   manageLessonsAuthorizationMiddleware,
+   manageOfflineLicensesAuthorizationMiddleware,
    publishCourseAuthorizationMiddleware,
    readCourseAccessAuthorizationMiddleware,
    readCoursesAuthorizationMiddleware,
+   readLessonsAuthorizationMiddleware,
    updateCourseAuthorizationMiddleware,
 } from '../middleware/course-admin-middleware.js'
+import {
+   archiveLessonController,
+   createLessonController,
+   deleteLessonController,
+   getLessonController,
+   listModuleLessonsController,
+   previewLessonPlaybackController,
+   previewLessonResourceController,
+   publishLessonController,
+   reorderLessonsController,
+   replaceLessonChaptersController,
+   replaceLessonResourcesController,
+   restoreLessonController,
+   updateLessonController,
+} from '../controllers/lesson-controller.js'
+import {
+   listUserOfflineLicensesController,
+   revokeOfflineLicenseController,
+} from '../controllers/offline-license-controller.js'
 import {
    extendCourseEnrollmentController,
    extendModuleAccessController,
@@ -249,6 +271,101 @@ adminRouter.post(
    authenticatedCsrfMiddleware,
    adminMutationRateMiddleware,
    revokeModuleAccessController,
+)
+adminRouter.get(
+   '/courses/:courseId/modules/:moduleId/lessons',
+   readLessonsAuthorizationMiddleware,
+   listModuleLessonsController,
+)
+adminRouter.post(
+   '/courses/:courseId/modules/:moduleId/lessons',
+   manageLessonsAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   createLessonController,
+)
+adminRouter.put(
+   '/courses/:courseId/modules/:moduleId/lessons/order',
+   manageLessonsAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   reorderLessonsController,
+)
+adminRouter.get(
+   '/courses/:courseId/lessons/:lessonId',
+   readLessonsAuthorizationMiddleware,
+   getLessonController,
+)
+adminRouter.patch(
+   '/courses/:courseId/lessons/:lessonId',
+   manageLessonsAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   updateLessonController,
+)
+adminRouter.post(
+   '/courses/:courseId/lessons/:lessonId/publish',
+   manageLessonsAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   publishLessonController,
+)
+adminRouter.post(
+   '/courses/:courseId/lessons/:lessonId/archive',
+   manageLessonsAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   archiveLessonController,
+)
+adminRouter.post(
+   '/courses/:courseId/lessons/:lessonId/restore',
+   manageLessonsAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   restoreLessonController,
+)
+adminRouter.delete(
+   '/courses/:courseId/lessons/:lessonId',
+   manageLessonsAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   deleteLessonController,
+)
+adminRouter.put(
+   '/courses/:courseId/lessons/:lessonId/chapters',
+   manageLessonsAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   replaceLessonChaptersController,
+)
+adminRouter.put(
+   '/courses/:courseId/lessons/:lessonId/resources',
+   manageLessonsAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   replaceLessonResourcesController,
+)
+adminRouter.get(
+   '/courses/:courseId/lessons/:lessonId/playback',
+   readLessonsAuthorizationMiddleware,
+   previewLessonPlaybackController,
+)
+adminRouter.get(
+   '/courses/:courseId/lessons/:lessonId/resources/:resourceId/download',
+   readLessonsAuthorizationMiddleware,
+   previewLessonResourceController,
+)
+adminRouter.get(
+   '/users/:userId/offline-licenses',
+   manageOfflineLicensesAuthorizationMiddleware,
+   listUserOfflineLicensesController,
+)
+adminRouter.post(
+   '/offline-licenses/:licenseId/revoke',
+   manageOfflineLicensesAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   revokeOfflineLicenseController,
 )
 adminRouter.post(
    '/groups',

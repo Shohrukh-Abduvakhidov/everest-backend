@@ -13,6 +13,10 @@ import {
 } from '../utils/auth-cookies.js'
 
 async function limit(req, scope, limitName) {
+   await limitKey(req, scope, req.ip, limitName)
+}
+
+async function limitKey(req, scope, key, limitName) {
    const overrides = req.app.locals.serviceDependencies.authProtection || {
       config:
          req.app.locals.serviceDependencies.passwordAuth?.config
@@ -23,7 +27,7 @@ async function limit(req, scope, limitName) {
    await consumeRateLimitService(
       {
          scope,
-         key: req.ip,
+         key,
          limit: config[limitName],
          windowSeconds: config.authRateWindowSeconds,
          blockSeconds: config.authRateBlockSeconds,
@@ -114,9 +118,21 @@ async function adminMutationRateMiddleware(req, res, next) {
    }
 }
 
+// Per-user limit for signed media URL issuance (playback, materials, offline).
+async function learnerMediaRateMiddleware(req, res, next) {
+   try {
+      void res
+      await limitKey(req, 'learner.media', `user:${req.auth.userId}`, 'playbackRateLimit')
+      next()
+   } catch (error) {
+      next(error)
+   }
+}
+
 export {
    adminMutationRateMiddleware,
    authenticatedCsrfMiddleware,
+   learnerMediaRateMiddleware,
    publicRateMiddleware,
    logoutCsrfMiddleware,
    refreshCsrfMiddleware,

@@ -87,8 +87,9 @@ function createMemoryStorageProvider() {
          objects.delete(key)
       },
 
-      async presignDownload({ key, expiresIn }) {
-         return `memory://${key}?expires=${expiresIn}`
+      async presignDownload({ key, expiresIn, contentType, disposition = 'inline' }) {
+         record('presignDownload', { key, expiresIn, contentType, disposition })
+         return `https://storage.test/signed/${encodeURIComponent(key)}?expires=${expiresIn}&disposition=${disposition}`
       },
    }
 }

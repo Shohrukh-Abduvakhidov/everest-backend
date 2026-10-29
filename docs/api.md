@@ -1,12 +1,88 @@
 # Implemented API
 
+## Lesson authoring APIs (M07-B)
+
+All routes are under `/api/v1/admin/courses/:courseId`. They need a live session plus `lessons.read` (reads) or `lessons.manage` (writes), and the repository limits each actor to their scope:
+
+- Owner/admin: every course.
+- Teachers: courses they are assigned to; managing also needs `canManageLessons`.
+- A course outside the actor's scope returns the same `404 COURSE_NOT_FOUND` as a missing course.
+
+Mutations use the CSRF check and the administrative mutation rate limit, and are audited atomically (`lesson.*`).
+
+- `GET /modules/:moduleId/lessons` → `{ lessons: [summary] }`, in order.
+- `POST /modules/:moduleId/lessons` → `201` detail of a new draft appended at the end.
+   - Body: `{ title, lessonType: video|text|test|mixed, content?, translations?, videoAssetId?, allowOffline? }`.
+- `PUT /modules/:moduleId/lessons/order` → `{ lessonIds }`. Every lesson of the module must be listed exactly once, otherwise `409 LESSON_ORDER_MISMATCH`.
+- `GET /lessons/:lessonId` → detail plus `relationship.canManage`.
+- `PATCH /lessons/:lessonId` → partial update, drafts only (`409 LESSON_NOT_EDITABLE`).
+- `POST /lessons/:lessonId/publish`, `/archive`, `/restore` → `draft → published → archived → draft`. Other transitions return `409 INVALID_LESSON_TRANSITION`. Publication can also return `409 LESSON_VIDEO_REQUIRED`, `LESSON_TYPE_NOT_PUBLISHABLE` (test lessons) or `VIDEO_NOT_PLAYABLE`.
+- `DELETE /lessons/:lessonId` → empty drafts only (`409 LESSON_NOT_DELETABLE`).
+- `PUT /lessons/:lessonId/chapters` → atomically replaces `{ chapters: [{ startSeconds, title, translations? }] }`, drafts only.
+   - `startSeconds` must be strictly increasing and below the video duration. There are at most 100 chapters, and a video is required (`409 LESSON_HAS_NO_VIDEO`).
+- `PUT /lessons/:lessonId/resources` → atomically replaces `{ resources: [{ assetId, title? }] }`, drafts only, at most 50. Each item must be a ready material asset of the course.
+- `GET /lessons/:lessonId/playback` → staff preview `{ playback, chapters }`, for any status.
+- `GET /lessons/:lessonId/resources/:resourceId/download` → staff material URL.
+- `GET /api/v1/admin/users/:userId/offline-licenses` and `POST /api/v1/admin/offline-licenses/:licenseId/revoke` (`lessons.offline.manage`, owner/admin) list a user's licenses and revoke one (idempotent, `admin_revoked`).
+
+Field rules:
+
+- `content` = `{ blocks: [...] }`. Allowed blocks: `heading{text,level}`, `paragraph{text}`, `list{items,ordered}`, `quote{text}`, `code{text,language}`, `callout{text,tone}`, `divider`.
+- `translations` = `{ tg|ru|en: { title } }`.
+- `videoAssetId` is allowed only for `video` and `mixed` lessons. It must be a ready, seek-ready video of the same course; the asset already on the lesson also qualifies.
+
+Detail = `{ id, moduleId, courseId, title, position, lessonType, translations, content, videoAssetId, video: { assetId, mimeType, durationSeconds, widthPx, heightPx, sizeBytes, playable }|null, allowOffline, status, chapters: [{ id, startSeconds, title, translations, position }], resources: [{ id, assetId, title, position, fileName, mimeType, sizeBytes }], createdAt, updatedAt }`.
+
+Course copy (`POST /api/v1/admin/courses/:courseId/copy`) now also copies lessons as drafts with their chapters and materials. The response is `copied: { modules, lessons, chapters, resources }`. Assets are referenced; learner data is never copied.
+
+## Learner lesson APIs (M07-B)
+
+All routes are under `/api/v1/courses`. They need a live session.
+
+Visibility:
+
+- Lessons are visible only within a course where the learner has a non-revoked enrollment, and only when the course, module and lesson are all published. Otherwise the API returns `404 LESSON_NOT_FOUND` / `COURSE_NOT_FOUND`.
+- Protected routes call `requireModuleAccessService` on every request and return `403 MODULE_ACCESS_DENIED` without access.
+
+Routes:
+
+- `GET /:courseId/modules/:moduleId/lessons` → `{ lessons: [{ id, moduleId, title, position, lessonType, translations, access: { granted } }] }`.
+- `GET /:courseId/lessons/:lessonId`:
+   - Without access: summary only.
+   - With access: also `content`, `allowOffline`, `video: { durationSeconds, playable }`, `chapters`, `resources: [{ id, title, position, fileName, mimeType, sizeBytes }]` and `progress`.
+- `GET /:courseId/lessons/:lessonId/playback` (per-user rate limit) → `{ playback: { url, expiresAt, mimeType, durationSeconds }, chapters }`.
+   - The URL is signed for 30 minutes with inline disposition and supports Range requests. Call the endpoint again before `expiresAt` to refresh.
+   - Errors: `403 MODULE_ACCESS_DENIED` (audited), `409 VIDEO_NOT_PLAYABLE`, `429`.
+- `GET /:courseId/lessons/:lessonId/resources/:resourceId/download` (rate limited) → `{ download: { url, expiresAt, fileName, mimeType } }`, valid 5 minutes, attachment disposition.
+- `GET|POST /:courseId/lessons/:lessonId/notes` and `PATCH|DELETE /:courseId/lessons/:lessonId/notes/:noteId` work on the caller's own notes only, with body `{ body, playbackSeconds? }`.
+   - Another user's note returns `404 NOTE_NOT_FOUND`. A full lesson returns `409 NOTE_LIMIT_REACHED` (500).
+- `GET|PUT /:courseId/lessons/:lessonId/progress`:
+   - Video lessons take `{ revision, playbackSeconds, watchedSeconds }`. Values are clamped to the duration, watched time never decreases, and the lesson completes at 90%.
+   - Other lessons take `{ revision, completed: true }`.
+   - A stale revision returns `409 PROGRESS_REVISION_CONFLICT` with `details[0].revision`.
+   - Progress = `{ status, playbackSeconds, watchedSeconds, completedAt, revision, updatedAt }`.
+- `GET /favorites`, `PUT /:courseId/favorite` and `DELETE /:courseId/favorite` manage course bookmarks (idempotent). Favorites never grant access.
+- `POST /:courseId/lessons/:lessonId/offline-license` (CSRF, rate limited), body `{ deviceLabel? }`, creates or renews the license for the current session. Returns `{ license, download: { url, expiresAt, mimeType, sizeBytes } }`; the download URL is valid 15 minutes with attachment disposition.
+   - The lease is at most 3 days and never beyond the enrollment or module grant expiry. A learner can use at most 2 devices (`409 OFFLINE_DEVICE_LIMIT`).
+   - When access is gone, the API returns `403 OFFLINE_ACCESS_DENIED` with `details[0].reason` set to `module_access`, `offline_not_allowed`, `video_unavailable`, `lesson_unavailable`, `license_revoked` or `license_expired`. The PWA must then delete its files.
+
+Offline licenses of the current session are under `/api/v1/offline-licenses`:
+
+- `GET /` → the session's active licenses.
+- `GET /:licenseId/download` (rate limited) → a new 15-minute URL after re-checking access. On failure the license is revoked with `access_lost` and the API returns `403 OFFLINE_ACCESS_DENIED`.
+- `DELETE /:licenseId` → idempotent self-revocation (`user_deleted`).
+
+A license held by another session returns `404 OFFLINE_LICENSE_NOT_FOUND`.
+
+License = `{ id, courseId, lessonId, status: active|expired|revoked, grantedAt, renewedAt, lastCheckedAt, leaseExpiresAt, deviceLabel, revokeReason }`.
+
 ## Asset upload APIs (M07-A)
 
 Resumable direct-to-storage multipart uploads. The browser sends file bytes straight to the S3-compatible server through presigned part URLs. The API handles only metadata, authorization and verification. Every route needs a live session for an active account. Mutations need CSRF/origin protection when the client authenticates with cookies. Returns `503 STORAGE_NOT_CONFIGURED` when the `S3_*` settings are missing.
 
 Who can upload: users with `assets.upload` (owner/admin) for any non-archived course, and users with the `teacher` role who are assigned to that course with `canManageLessons`. Existing uploads are visible only to `assets.manage` holders and to their creator while the creator still has upload rights. Everyone else gets `404 UPLOAD_NOT_FOUND`.
 
-- `POST /api/v1/assets/uploads` — body `{ courseId, kind: 'video'|'material', fileName, mimeType, sizeBytes }`. Video types are `.mp4` `video/mp4`, `.mov` `video/quicktime` and `.webm` `video/webm`. Material types are `.pdf`, `.docx`, `.pptx`, `.jpg`/`.jpeg` and `.png` with their standard MIME types. The maximum size is 20 GiB (21474836480 bytes). Returns `201 { data: upload }`, where the server chooses `partSizeBytes` and `partCount`. Errors: `400 VALIDATION_ERROR` (field detail), `403 ACTION_FORBIDDEN`, `404 COURSE_NOT_FOUND` (only for actors with `assets.upload`), `409 COURSE_ARCHIVED`.
+- `POST /api/v1/assets/uploads` — body `{ courseId, kind: 'video'|'material', fileName, mimeType, sizeBytes }`. Video types are `.mp4` `video/mp4` and `.webm` `video/webm`; QuickTime `.mov` is refused (M07-B). Material types are `.pdf`, `.docx`, `.pptx`, `.jpg`/`.jpeg` and `.png` with their standard MIME types. The maximum size is 20 GiB (21474836480 bytes). Returns `201 { data: upload }`, where the server chooses `partSizeBytes` and `partCount`. Errors: `400 VALIDATION_ERROR` (field detail), `403 ACTION_FORBIDDEN`, `404 COURSE_NOT_FOUND` (only for actors with `assets.upload`), `409 COURSE_ARCHIVED`.
 - `GET /api/v1/assets/uploads/:uploadId` — returns `{ upload, uploadedParts: [{ partNumber, size }] }`. The part list comes from the storage server, so a client resumes by uploading only the missing parts.
 - `POST /api/v1/assets/uploads/:uploadId/parts` — body `{ partNumbers: [1..partCount] }` (1–100 unique numbers). Returns `{ parts: [{ partNumber, sizeBytes, url, expiresAt }] }`. The client sends `PUT` with exactly `sizeBytes` bytes to `url`. It does not need to keep the returned ETags.
 - `POST /api/v1/assets/uploads/:uploadId/complete` — idempotent. It assembles the object from the storage server's own part list, checks part count and sizes, and then checks the real content (magic bytes; for video also container, codecs, duration and dimensions). Returns `{ asset }`. Repeated or concurrent calls return the same asset. Errors:
@@ -17,9 +93,9 @@ Who can upload: users with `assets.upload` (owner/admin) for any non-archived co
 
 `upload` = `{ id, assetId, courseId, kind, fileName, mimeType, sizeBytes, partSizeBytes, partCount, status: initiated|completed|aborted|rejected|expired, rejectionCode, createdAt, expiresAt, completedAt, abortedAt }`.
 
-`asset` = `{ id, kind, mimeType, fileName, sizeBytes, widthPx, heightPx, durationSeconds, status, processingStatus: none|pending|processing|completed|failed, processingError, createdAt }`.
+`asset` = `{ id, kind, mimeType, fileName, sizeBytes, widthPx, heightPx, durationSeconds, status, processingStatus: none|not_required|pending|processing|completed|failed, processingError, createdAt }`.
 
-Storage keys and storage upload IDs are never returned. `processingStatus: 'pending'` means a remux job (MP4 with faststart, no re-encode) is queued for `mov` files and for `mp4` files without faststart.
+Storage keys and storage upload IDs are never returned. Since M07-B only seek-ready video is stored: an MP4 must have `moov` before `mdat`, and a WebM must have `Cues` before its clusters. Anything else is rejected with `422 VIDEO_NOT_SEEKABLE` ("Export as MP4 with fast start (web optimized)"), and the object is deleted. New videos get `processingStatus: 'not_required'`; materials keep `'none'`. No remux jobs are created.
 
 ## Course administration APIs
 

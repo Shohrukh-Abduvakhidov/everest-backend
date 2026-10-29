@@ -1,7 +1,7 @@
 ---
 project: EVEREST Backend
 roadmap_version: 1
-current_milestone: M07-A
+current_milestone: M07-B
 current_status: in_progress
 updated_at: 2026-10-29
 architecture: docs/architecture.md
@@ -196,25 +196,31 @@ This roadmap orders implementation; it does not replace the [current architectur
    - `assets.upload`/`assets.manage` permissions; teachers with `canManageLessons` are scoped to their course.
    - Initiate, status/resume, part presign, idempotent complete from the storage server's part list, and idempotent abort.
    - Content verification by magic bytes plus ffprobe-style container and codec checks.
-   - A `asset.video.remux` job enqueued for `mov` files and for `mp4` files without faststart.
+   - Seek-ready video only (superseded the remux hook in M07-B): MP4 with fast start, WebM with Cues first, QuickTime refused, `422 VIDEO_NOT_SEEKABLE`, no background jobs.
    - Local MinIO `docker-compose.yml` and the bucket configuration script.
-- **Verification:** Unit inspection tests and the PostgreSQL integration test `tests/integration/asset-uploads.test.js` (12 subtests) pass against the storage double. The optional real-storage test is skipped automatically when storage is unreachable.
+- **Verification:** Unit inspection tests and the PostgreSQL integration test `tests/integration/asset-uploads.test.js` (14 subtests after M07-B) pass against the storage double. The optional real-storage test is skipped automatically when storage is unreachable.
 - **Pending:** Real MinIO/S3 verification pending: install Docker Desktop (or the MinIO Windows binary), run docker-compose up, and run the optional real-storage test, including a 3 GB upload with a network interruption and resume.
-- **Exclusions:** No multi-quality video, HLS, `asset_variants` or transcoding. M07-B features are excluded. The remux worker itself belongs to M19.
+- **Exclusions:** No multi-quality video, HLS, `asset_variants`, transcoding or remux worker.
 
 ## M07-B — Lessons and protected delivery
 
-- **Status:** Planned
+- **Status:** In progress. The implementation and the tests that use a storage double are complete; the real-storage verifications below are pending.
 - **Goal:** Deliver lessons and assets through access-aware contracts.
 - **Dependencies:** M07-A.
 - **Deliverables:**
-   - Lessons, chapters, materials and notes.
-   - Playback and offline download through short-lived signed URLs to the single original file (Range support).
-   - Offline licences, favourites and progress.
-   - Copy steps for lessons.
-- **Verification:** Access expiry, range/metadata behavior, ownership, progress, and protected-asset tests.
-- **Documentation updates:** API, architecture, decisions, progress, roadmap.
-- **Exclusions:** Multi-quality video and HLS.
+   - Seek-ready video policy and `scripts/remux-faststart.js`.
+   - Lesson authoring: CRUD, lifecycle, ordering, content blocks and translations.
+   - `lesson_video_chapters` and lesson materials.
+   - Learner reads with locked metadata, and signed playback (30 min) and material (5 min) URLs that re-check access on every request, with a per-user rate limit.
+   - Owner-only notes, revisioned progress, and course favorites.
+   - Session-bound offline licenses: 3-day bounded lease, 2 devices, renew/list/delete, admin revoke, 15-minute download URLs.
+   - Lesson copy steps.
+   - Migration `20261030020000000_add-lesson-playback.js` with the `lessons.*` permissions.
+- **Verification:** `tests/integration/lessons.test.js` (13 subtests) passes against the storage double, together with the updated unit inspection and upload tests. `npm test` reports 173 tests (172 passed, 1 skipped); the disposable migration cycle passed 22/22/21/22.
+- **Pending:**
+   - Real MinIO/S3 verification pending: install Docker Desktop (or the MinIO Windows binary), run docker-compose up, and run the optional real-storage test, including a 3 GB upload with a network interruption and resume.
+   - Verify Range seeking of a real faststart mp4 through a signed URL against real storage.
+- **Exclusions:** Multi-quality video, HLS, `asset_variants`, workers and lesson favorites.
 
 ## M08 — Taxonomy and question bank
 

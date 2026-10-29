@@ -26,7 +26,7 @@ async function rejects(promise, code) {
 }
 
 test('media inspection identifies videos by structure, not declared type', async (t) => {
-   await t.test('faststart H.264/AAC mp4 with duration and dimensions', async () => {
+   await t.test('faststart H.264/AAC mp4 is seek-ready with duration and dimensions', async () => {
       const result = await inspectMedia(input(isoMedia(), 'video', mimeTypes.mp4))
       assert.equal(result.container, 'mp4')
       assert.equal(result.videoCodec, 'avc1')
@@ -34,18 +34,18 @@ test('media inspection identifies videos by structure, not declared type', async
       assert.equal(result.durationSeconds, 90)
       assert.equal(result.widthPx, 1920)
       assert.equal(result.heightPx, 1080)
-      assert.equal(result.faststart, true)
    })
 
-   await t.test('moov after mdat is detected as non-faststart', async () => {
-      const result = await inspectMedia(input(isoMedia({ faststart: false }), 'video', mimeTypes.mp4))
-      assert.equal(result.faststart, false)
+   await t.test('mp4 with moov after mdat is not seekable', async () => {
+      await rejects(
+         inspectMedia(input(isoMedia({ faststart: false }), 'video', mimeTypes.mp4)),
+         'VIDEO_NOT_SEEKABLE',
+      )
    })
 
-   await t.test('QuickTime brand is mov and must be declared as mov', async () => {
+   await t.test('QuickTime files are rejected whatever they are declared as', async () => {
       const mov = isoMedia({ brand: 'qt  ', videoCodec: 'hvc1' })
-      const result = await inspectMedia(input(mov, 'video', mimeTypes.mov))
-      assert.equal(result.container, 'mov')
+      await rejects(inspectMedia(input(mov, 'video', mimeTypes.mov)), 'MEDIA_TYPE_MISMATCH')
       await rejects(inspectMedia(input(mov, 'video', mimeTypes.mp4)), 'MEDIA_TYPE_MISMATCH')
    })
 
@@ -60,12 +60,17 @@ test('media inspection identifies videos by structure, not declared type', async
       )
    })
 
-   await t.test('VP9/Opus webm', async () => {
+   await t.test('VP9/Opus webm with cues before clusters', async () => {
       const result = await inspectMedia(input(webmMedia(), 'video', mimeTypes.webm))
       assert.equal(result.videoCodec, 'V_VP9')
       assert.equal(result.audioCodec, 'A_OPUS')
       assert.equal(result.durationSeconds, 12)
       assert.equal(result.widthPx, 1280)
+   })
+
+   await t.test('webm without cues, or with cues only after clusters, is not seekable', async () => {
+      await rejects(inspectMedia(input(webmMedia({ cues: 'none' }), 'video', mimeTypes.webm)), 'VIDEO_NOT_SEEKABLE')
+      await rejects(inspectMedia(input(webmMedia({ cues: 'end' }), 'video', mimeTypes.webm)), 'VIDEO_NOT_SEEKABLE')
    })
 
    await t.test('Matroska docType and unsupported webm codec are rejected', async () => {

@@ -99,14 +99,47 @@ async function manageCourseAccessAuthorizationMiddleware(req, res, next) {
    }
 }
 
+async function readLessonsAuthorizationMiddleware(req, res, next) {
+   try {
+      void res
+      await authorize(req, 'lessons.read')
+      next()
+   } catch (error) {
+      next(error)
+   }
+}
+
+async function manageLessonsAuthorizationMiddleware(req, res, next) {
+   try {
+      void res
+      await authorize(req, 'lessons.manage')
+      next()
+   } catch (error) {
+      next(error)
+   }
+}
+
+async function manageOfflineLicensesAuthorizationMiddleware(req, res, next) {
+   try {
+      void res
+      await authorize(req, 'lessons.offline.manage')
+      next()
+   } catch (error) {
+      next(error)
+   }
+}
+
 export {
    copyCourseAuthorizationMiddleware,
    createCourseAuthorizationMiddleware,
    manageCourseAccessAuthorizationMiddleware,
    manageCourseModulesAuthorizationMiddleware,
    manageCourseTeachersAuthorizationMiddleware,
+   manageLessonsAuthorizationMiddleware,
+   manageOfflineLicensesAuthorizationMiddleware,
    publishCourseAuthorizationMiddleware,
    readCourseAccessAuthorizationMiddleware,
    readCoursesAuthorizationMiddleware,
+   readLessonsAuthorizationMiddleware,
    updateCourseAuthorizationMiddleware,
 }

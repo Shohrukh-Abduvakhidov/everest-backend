@@ -356,7 +356,7 @@ The initial permission set exactly preserves account administration: `accounts.p
 | Authentication | `users`, profiles/phones/passwords, identities, sessions, refresh tokens, challenges, roles | Telegram OIDC plus phone/password registration/login | Partial |
 | Profiles | `users`, `user_profiles`, `user_phones`, `roles`, `assets` | Five authenticated own-profile/onboarding routes | Done for M03 self-service scope |
 | Groups | `groups`, `group_members`, `group_teachers`, announcements/assets | Read, administration, assignment, and text-announcement APIs | Partial: M04-A/M04-B done; assets deferred |
-| Courses/access | `courses`, teachers, enrollments, modules, module grants | Administrative catalog/lifecycle/teacher, module/order/preview/copy, enrollment and module-grant APIs; learner course/module-lock reads | Done for M05-A/M05-B/M06; protected content delivery is M07 |
+| Courses/access | `courses`, teachers, enrollments, modules, module grants | Administrative catalog/lifecycle/teacher, module/order/preview/copy, enrollment and module-grant APIs; learner course/module-lock reads | Done for M05-A/M05-B/M06; lessons and protected delivery done in M07-B |
 | Lessons/progress | `lessons`, resources, progress, notes, favorites, offline downloads | None | Planned (schema only) |
 | Assets/video | `assets`, `asset_aliases`, lesson asset FKs | None | Planned (schema only) |
 | Taxonomy | subjects/sections/topics and translations | None | Planned (schema only) |
@@ -395,7 +395,7 @@ M06 implements this flow.
 
 - **Administration.** `course-access-service` (permissions `courses.access.read`/`courses.access.manage`, owner/admin only) grants, extends, revokes and re-grants `course_enrollments` and `module_access_grants` through `course-access-repository`. Every mutation locks course, module, user and grant rows in a fixed order, is audited in the same transaction, and never touches progress. Revoking an enrollment revokes its module grants; expiry is passive and is evaluated by the database.
 - **Learner.** `GET /api/v1/courses` and `GET /api/v1/courses/:courseId/modules` (`learner-course-service`) return the learner's own non-revoked enrollments and the published modules of a published course with `access: { granted, lockReason }`. Locked modules carry only title, description, position and translations.
-- **Protected-content guard.** `requireModuleAccessService` is the single API-side entry to the `can_access_module` predicate (active account, completed onboarding, published course and module, both grants current) and throws `403 MODULE_ACCESS_DENIED`. Authentication middleware supplies the live-session check. M07 lesson, asset and test routes must call it; none exists yet.
+- **Protected-content guard.** `requireModuleAccessService` is the single API-side entry to the `can_access_module` predicate (active account, completed onboarding, published course and module, both grants current) and throws `403 MODULE_ACCESS_DENIED`. Authentication middleware supplies the live-session check. Every M07-B learner content route (lesson detail content, playback, materials, notes, progress, offline licenses) calls it on each request; future test routes must too.
 - Group membership, course teaching assignment and administrator role grant no learner content access.
 
 ### 13a. Media storage (M07-A)
@@ -415,15 +415,45 @@ sequenceDiagram
     B->>A: POST /uploads/:id/complete
     A->>D: lock asset_uploads row
     A->>S: ListParts → verify → CompleteMultipartUpload → HEAD → ranged GETs
-    A->>D: assets ready / quarantined, optional background_jobs remux, audit
+    A->>D: assets ready / quarantined, audit
 ```
 
 - **Provider boundary.** `src/providers/storage/s3-storage-provider.js` is the only code that talks to storage. It exposes `createMultipartUpload`, `presignUploadPart`, `listParts` (returns null when the upload is gone), `completeMultipartUpload`, `abortMultipartUpload` (ignores missing uploads), `headObject`, `readRange`, `deleteObject` and `presignDownload` (a GET URL with Range support, for M07-B). `src/providers/storage/index.js` builds it lazily from env, so importing the app needs no storage credentials. Tests inject `tests/helpers/memory-storage-provider.js` through `createApp({ assets: { storage, config } })`.
-- **Persistence.** `asset-upload-repository` owns `assets` and `asset_uploads` SQL and the course-teacher scope check. `background-job-repository.enqueueJob` inserts into `background_jobs` idempotently through `dedupe_key`. The migration `20261030010000000_add-asset-uploads.js` adds `assets.kind`, `assets.processing_status` and `assets.processing_error`, the `asset_uploads` table, and the `assets.upload`/`assets.manage` permissions (owner/admin).
+- **Persistence.** `asset-upload-repository` owns `assets` and `asset_uploads` SQL and the course-teacher scope check. The migration `20261030010000000_add-asset-uploads.js` adds `assets.kind`, `assets.processing_status` and `assets.processing_error`, the `asset_uploads` table, and the `assets.upload`/`assets.manage` permissions (owner/admin).
 - **Inspection.** `src/utils/media-inspection.js` reads stored bytes by range. It recognizes PDF, PNG, JPEG and OOXML (from central-directory entries) by magic bytes. For video it walks ISO-BMFF boxes (ftyp brand, moov/mdat order, `mvhd` duration, `tkhd` dimensions, `hdlr`/`stsd` codecs) or WebM EBML (DocType, Tracks, CodecID, Info duration). Nothing is decoded.
-- **Configuration.** `S3_ENDPOINT`, `S3_PUBLIC_ENDPOINT`, `S3_REGION` (us-east-1), `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE` (true), `STORAGE_PART_SIZE_BYTES` (32 MiB), `STORAGE_PRESIGN_TTL_SECONDS` (900), `STORAGE_UPLOAD_TTL_HOURS` (144, maximum 166). Moving to production changes only these variables.
+- **Configuration.** `S3_ENDPOINT`, `S3_PUBLIC_ENDPOINT`, `S3_REGION` (us-east-1), `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE` (true), `STORAGE_PART_SIZE_BYTES` (32 MiB), `STORAGE_PRESIGN_TTL_SECONDS` (900), `STORAGE_UPLOAD_TTL_HOURS` (144, maximum 166), `PLAYBACK_RATE_LIMIT` (120 per rate window, M07-B). Moving to production changes only these variables.
 - **Local storage.** `docker-compose.yml` runs MinIO on 127.0.0.1:9000 and 9001, plus a one-shot `minio-init` container that runs `scripts/configure-storage-bucket.js` (`npm run storage:configure`). It creates the bucket, a 7-day abort-incomplete-multipart lifecycle rule and CORS that exposes ETag. Production uses the same script against Garage or SeaweedFS.
-- **Not in M07-A.** Lessons, chapters, materials, notes, playback/download endpoints, offline licences, favourites, progress, the remux worker (M19), and any multi-quality video or HLS (excluded by product decision).
+- **Seek-ready policy (M07-B, replaces the remux hook).** MP4 needs `moov` before `mdat`, WebM needs `Cues` before clusters, and QuickTime is refused. Anything else is rejected with `422 VIDEO_NOT_SEEKABLE`. New videos get `processing_status = 'not_required'`, and playback requires `ready` plus `not_required`. No background jobs are created. Staff fix files with `npm run video:faststart`, which wraps a local ffmpeg; the API has no ffmpeg.
+- **Excluded by product decision.** Multi-quality video, HLS, `asset_variants` and transcoding.
+
+### 13b. Lessons, playback and offline licenses (M07-B)
+
+```mermaid
+flowchart TD
+    L[Learner request] --> V{Non-revoked enrollment and published course/module/lesson?}
+    V -- No --> N404[404]
+    V -- Yes --> G{requireModuleAccessService}
+    G -- Denied --> D403[403 MODULE_ACCESS_DENIED / audited for media]
+    G -- Allowed --> P{Video ready and not_required?}
+    P -- No --> C409[409 VIDEO_NOT_PLAYABLE]
+    P -- Yes --> U[Signed GET URL via S3_PUBLIC_ENDPOINT: playback 30 min inline, material 5 min / offline 15 min attachment]
+```
+
+- **Layers.**
+   - Authoring: `lesson-service` → `lesson-repository` (staff scope SQL, lessons, `lesson_video_chapters`, `lesson_resources`, copy SQL), behind `lessons.read` and `lessons.manage`.
+   - Learner: `learner-lesson-service` → `learner-lesson-repository` (visibility, notes, progress, favorites), plus `lesson-repository` for assets, chapters and materials.
+   - Offline: `offline-license-service` → `offline-license-repository`.
+   - Routes: `routes/admin.js`, `routes/courses.js`, `routes/offline-licenses.js`. Tests inject the storage double through `createApp({ lessons: { storage } })`.
+- **Migration `20261030020000000_add-lesson-playback.js`.**
+   - Adds `'not_required'` to `assets.processing_status`.
+   - Creates `lesson_video_chapters` with unique `(lesson_id, start_seconds)` and `(lesson_id, position)`.
+   - Adds `offline_downloads.revoked_by`, `revoke_reason` (`user_deleted`/`admin_revoked`/`access_lost`), `renewed_at` and `device_label`, with a revocation consistency check.
+   - Adds the permissions `lessons.read` and `lessons.manage` (owner, admin, teacher) and `lessons.offline.manage` (owner, admin).
+- **Ordering and lifecycle.** Lessons use the same `draft → published → archived → draft` lifecycle and two-pass full-list ordering as modules. Content edits are draft-only.
+- **Progress.** Writes use optimistic concurrency: the update succeeds only when `revision` equals the client's value, and `INSERT … ON CONFLICT DO NOTHING` handles revision 0. Watched time is monotonic and clamped to the duration; completion is set at 90%. Rows are never deleted.
+- **Offline licenses.** One row per (session, lesson, asset). Issuance locks the user row so the 2-device count (live sessions with active licenses) cannot race. The lease is the minimum of 3 days, the enrollment expiry and the module grant expiry. Renewal and download re-run every check, and a lost check revokes the license as `access_lost`. All license events are audited.
+- **Copy.** `courseCopySteps` adds `lessonCopySteps`: lessons become drafts through `moduleIdMap`, then chapters and materials are copied through `lessonIdMap`. Assets are referenced, and learner data is never copied.
+- **Rate limit.** `learnerMediaRateMiddleware` limits signed media issuance per user (scope `learner.media`, `PLAYBACK_RATE_LIMIT`).
 
 ## 14. Group architecture
 
@@ -518,8 +548,8 @@ Actual response envelopes:
 | Area | Status | Current reality |
 |---|---|---|
 | Project foundation | Done | ESM Express app/server, config, Pool, errors, tests |
-| Database schema | Done | 86-table, 21-migration current catalog; numeric baseline and incremental migrations verified |
-| Numeric identifiers (M01R) | Done | 66 identity columns; internal IDs/FKs are `BIGINT`; decimal-string API/JWT contract |
+| Database schema | Done | 87-table, 22-migration current catalog; numeric baseline and incremental migrations verified |
+| Numeric identifiers (M01R) | Done | 67 identity columns; internal IDs/FKs are `BIGINT`; decimal-string API/JWT contract |
 | Telegram OIDC | Done | Login/link/unlink/session/test-message routes and tests |
 | Phone/password authentication | Done | Pending registration, salted `scrypt`, active-only login, shared session, audit, tests |
 | Account approval | Done | Pending list, locked transitions, audit, session revocation, initial-owner bootstrap |
@@ -528,8 +558,8 @@ Actual response envelopes:
 | Roles and permissions | Partial | Database-backed action permissions enforce account administration; domain/resource rules remain planned |
 | Profiles | Done | Authenticated own-profile read/update and onboarding state/completion |
 | Groups | Partial | M04-A reads and M04-B administration/text announcements done; assets deferred to M07 |
-| Courses/access | Partial | M05-A catalog/lifecycle/teachers, M05-B modules/preview/copy and M06 enrollments/module grants/learner locks done; protected content is M07-B |
-| Media storage | Partial | M07-A S3 multipart uploads, content/codec verification and remux-job hook done against a storage double; real MinIO/S3 verification pending |
+| Courses/access | Partial | M05-A catalog/lifecycle/teachers, M05-B modules/preview/copy and M06 enrollments/module grants/learner locks and M07-B lessons/playback/offline done against a storage double |
+| Media storage | Partial | M07-A S3 multipart uploads and content/codec/seek-ready verification done against a storage double; real MinIO/S3 and Range-seek verification pending |
 | Question bank | Planned | Schema/DB guards only |
 | Test engine | Planned | Schema/DB constraints only |
 | Progress | Planned | Schema only |
