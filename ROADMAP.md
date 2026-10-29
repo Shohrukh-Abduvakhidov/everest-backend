@@ -1,8 +1,8 @@
 ---
 project: EVEREST Backend
 roadmap_version: 1
-current_milestone: M07
-current_status: planned
+current_milestone: M07-A
+current_status: in_progress
 updated_at: 2026-10-29
 architecture: docs/architecture.md
 ---
@@ -185,21 +185,42 @@ This roadmap orders implementation; it does not replace the [current architectur
 - **Documentation updates:** API, decisions (15 recorded assumptions made without user input), architecture, progress, roadmap, handoff.
 - **Exclusions:** No `group_courses`; group membership grants nothing; course and module grants remain separate. Teacher and administrator access to protected content is left to M07.
 
-## M07 — Lessons and protected assets
+## M07-A — Media storage and resumable uploads
+
+- **Status:** In progress. The implementation and the tests that use a storage double are complete; the real-storage verification below is pending.
+- **Goal:** Store original-quality videos and materials in S3-compatible storage through resumable, verified multipart uploads.
+- **Dependencies:** M05–M06; approved storage decisions (2026-10-29).
+- **Deliverables:**
+   - Provider-neutral S3 adapter (`src/providers/storage/`), switched only through environment variables.
+   - `asset_uploads` table; `assets.kind`, `processing_status` and `processing_error`.
+   - `assets.upload`/`assets.manage` permissions; teachers with `canManageLessons` are scoped to their course.
+   - Initiate, status/resume, part presign, idempotent complete from the storage server's part list, and idempotent abort.
+   - Content verification by magic bytes plus ffprobe-style container and codec checks.
+   - A `asset.video.remux` job enqueued for `mov` files and for `mp4` files without faststart.
+   - Local MinIO `docker-compose.yml` and the bucket configuration script.
+- **Verification:** Unit inspection tests and the PostgreSQL integration test `tests/integration/asset-uploads.test.js` (12 subtests) pass against the storage double. The optional real-storage test is skipped automatically when storage is unreachable.
+- **Pending:** Real MinIO/S3 verification pending: install Docker Desktop (or the MinIO Windows binary), run docker-compose up, and run the optional real-storage test, including a 3 GB upload with a network interruption and resume.
+- **Exclusions:** No multi-quality video, HLS, `asset_variants` or transcoding. M07-B features are excluded. The remux worker itself belongs to M19.
+
+## M07-B — Lessons and protected delivery
 
 - **Status:** Planned
 - **Goal:** Deliver lessons and assets through access-aware contracts.
-- **Dependencies:** M05–M06.
-- **Deliverables:** Text/video lessons, resources, protected delivery, storage metadata, position/completion, notes, favorites, and offline permission contracts.
+- **Dependencies:** M07-A.
+- **Deliverables:**
+   - Lessons, chapters, materials and notes.
+   - Playback and offline download through short-lived signed URLs to the single original file (Range support).
+   - Offline licences, favourites and progress.
+   - Copy steps for lessons.
 - **Verification:** Access expiry, range/metadata behavior, ownership, progress, and protected-asset tests.
 - **Documentation updates:** API, architecture, decisions, progress, roadmap.
-- **Exclusions:** Storage/provider selection without approval.
+- **Exclusions:** Multi-quality video and HLS.
 
 ## M08 — Taxonomy and question bank
 
 - **Status:** Planned
 - **Goal:** Manage reviewed, publishable assessment content.
-- **Dependencies:** M02F, M07 asset contracts.
+- **Dependencies:** M02F, M07-A asset contracts.
 - **Deliverables:** Subjects, sections, topics/translations, banks, questions/options/matching, answer keys, topics/assets/sources, review, and publication.
 - **Verification:** Correctness, subject consistency, review/publication guards, immutability, and safe-response tests.
 - **Documentation updates:** API, decisions, architecture, progress, roadmap.

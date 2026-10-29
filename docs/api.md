@@ -1,5 +1,26 @@
 # Implemented API
 
+## Asset upload APIs (M07-A)
+
+Resumable direct-to-storage multipart uploads. The browser sends file bytes straight to the S3-compatible server through presigned part URLs. The API handles only metadata, authorization and verification. Every route needs a live session for an active account. Mutations need CSRF/origin protection when the client authenticates with cookies. Returns `503 STORAGE_NOT_CONFIGURED` when the `S3_*` settings are missing.
+
+Who can upload: users with `assets.upload` (owner/admin) for any non-archived course, and users with the `teacher` role who are assigned to that course with `canManageLessons`. Existing uploads are visible only to `assets.manage` holders and to their creator while the creator still has upload rights. Everyone else gets `404 UPLOAD_NOT_FOUND`.
+
+- `POST /api/v1/assets/uploads` — body `{ courseId, kind: 'video'|'material', fileName, mimeType, sizeBytes }`. Video types are `.mp4` `video/mp4`, `.mov` `video/quicktime` and `.webm` `video/webm`. Material types are `.pdf`, `.docx`, `.pptx`, `.jpg`/`.jpeg` and `.png` with their standard MIME types. The maximum size is 20 GiB (21474836480 bytes). Returns `201 { data: upload }`, where the server chooses `partSizeBytes` and `partCount`. Errors: `400 VALIDATION_ERROR` (field detail), `403 ACTION_FORBIDDEN`, `404 COURSE_NOT_FOUND` (only for actors with `assets.upload`), `409 COURSE_ARCHIVED`.
+- `GET /api/v1/assets/uploads/:uploadId` — returns `{ upload, uploadedParts: [{ partNumber, size }] }`. The part list comes from the storage server, so a client resumes by uploading only the missing parts.
+- `POST /api/v1/assets/uploads/:uploadId/parts` — body `{ partNumbers: [1..partCount] }` (1–100 unique numbers). Returns `{ parts: [{ partNumber, sizeBytes, url, expiresAt }] }`. The client sends `PUT` with exactly `sizeBytes` bytes to `url`. It does not need to keep the returned ETags.
+- `POST /api/v1/assets/uploads/:uploadId/complete` — idempotent. It assembles the object from the storage server's own part list, checks part count and sizes, and then checks the real content (magic bytes; for video also container, codecs, duration and dimensions). Returns `{ asset }`. Repeated or concurrent calls return the same asset. Errors:
+   - `409 UPLOAD_INCOMPLETE` with `details[0]` = `{ missingParts, wrongSizeParts, extraParts }`.
+   - `409 UPLOAD_ABORTED`, `UPLOAD_REJECTED`, `UPLOAD_EXPIRED`, `UPLOAD_PARTS_MISSING`.
+   - `422 UNSUPPORTED_MEDIA` with `details[0].code` set to one of `MEDIA_TYPE_MISMATCH`, `MEDIA_UNSUPPORTED_CODEC`, `MEDIA_NO_VIDEO_TRACK`, `MEDIA_MALFORMED`, `MEDIA_SIZE_MISMATCH` or `MEDIA_EMPTY`. A rejected object is deleted, and the upload cannot be retried.
+- `POST /api/v1/assets/uploads/:uploadId/abort` — idempotent. Returns `{ upload }` with status `aborted`. Returns `409 UPLOAD_ALREADY_COMPLETED` for a completed upload.
+
+`upload` = `{ id, assetId, courseId, kind, fileName, mimeType, sizeBytes, partSizeBytes, partCount, status: initiated|completed|aborted|rejected|expired, rejectionCode, createdAt, expiresAt, completedAt, abortedAt }`.
+
+`asset` = `{ id, kind, mimeType, fileName, sizeBytes, widthPx, heightPx, durationSeconds, status, processingStatus: none|pending|processing|completed|failed, processingError, createdAt }`.
+
+Storage keys and storage upload IDs are never returned. `processingStatus: 'pending'` means a remux job (MP4 with faststart, no re-encode) is queued for `mov` files and for `mp4` files without faststart.
+
 ## Course administration APIs
 
 All course-administration routes require a live active-account session and current database permissions.

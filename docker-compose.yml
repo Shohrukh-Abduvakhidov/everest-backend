@@ -1,0 +1,61 @@
+# Local development object storage only. Never used in production.
+#
+# MinIO Community Edition was archived upstream in February 2026 and receives no
+# routine security fixes (see docs/decisions.md). It is acceptable only bound to
+# localhost for development. Production uses another S3-compatible server
+# (Garage or SeaweedFS) selected purely through S3_* environment variables.
+#
+# The image is pinned to the last official container release. If anonymous pulls of
+# the official image are refused, set MINIO_IMAGE to a pinned community rebuild of
+# the same release.
+#
+#   docker compose up -d
+#   npm run storage:configure     (creates the bucket, lifecycle and CORS where supported)
+
+services:
+  minio:
+    image: ${MINIO_IMAGE:-minio/minio:RELEASE.2025-09-07T16-13-09Z}
+    command: server /data --console-address :9001
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-everest-local}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:-everest-local-secret}
+      # MinIO CE has no bucket CORS API; CORS is server-wide. Browsers can read ETag.
+      MINIO_API_CORS_ALLOW_ORIGIN: ${STORAGE_CORS_ORIGINS:-http://localhost:3000}
+      # Guaranteed 7-day cleanup of abandoned multipart uploads, independent of
+      # whether this release honours the lifecycle AbortIncompleteMultipartUpload rule.
+      MINIO_API_STALE_UPLOADS_EXPIRY: 168h
+      MINIO_API_STALE_UPLOADS_CLEANUP_INTERVAL: 6h
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  minio-init:
+    image: node:22.11.0-alpine
+    depends_on:
+      minio:
+        condition: service_healthy
+    working_dir: /app
+    volumes:
+      - ./:/app:ro
+    environment:
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: ${S3_BUCKET:-everest-media}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-everest-local}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-everest-local-secret}
+      STORAGE_CORS_ORIGINS: ${STORAGE_CORS_ORIGINS:-http://localhost:3000}
+      DB_HOST: unused
+      DB_NAME: unused
+      DB_USER: unused
+      DB_PASSWORD: unused
+    command: ["node", "scripts/configure-storage-bucket.js"]
+    restart: "no"
+
+volumes:
+  minio-data:

@@ -4,7 +4,22 @@ Updated: 2026-10-29.
 
 ## Current increment
 
-Milestone M06 (course enrollments and module access grants) is implemented on `feat/m06-course-access`. M07 lessons and protected assets is next. Production SMS remains unavailable pending provider approval.
+M06 is merged into `main` (PR #17). M07-A (media storage and resumable uploads) is implemented on `feat/m07-a-media-storage` and tested against a storage double. Real MinIO/S3 verification is pending because Docker is not installed. M07-B is next. Production SMS remains unavailable pending provider approval.
+
+## 2026-10-29 — M07-A media storage and resumable uploads
+
+- Added the provider-neutral S3 adapter `src/providers/storage/` (`@aws-sdk/client-s3` and `@aws-sdk/s3-request-presigner`, both approved) with separate `S3_ENDPOINT` and `S3_PUBLIC_ENDPOINT` settings.
+- Added the reversible migration `20261030010000000_add-asset-uploads.js`. It creates the `asset_uploads` table, adds `assets.kind`, `processing_status` and `processing_error`, and grants `assets.upload`/`assets.manage` to owner/admin.
+- Added `asset-upload-repository`, `background-job-repository`, `asset-upload-service`, the controller and `routes/assets.js` (`/api/v1/assets/uploads…`), plus the pure-JS inspector `utils/media-inspection.js` (magic bytes, ISO-BMFF and WebM container/codec parsing).
+- Added `docker-compose.yml` (local MinIO only, pinned), `scripts/configure-storage-bucket.js` (`npm run storage:configure`) and the optional `tests/integration/real-storage.test.js`, which skips itself when storage is not configured or not reachable.
+- MinIO CE status was checked: it was archived upstream in February 2026 and has unpatched CVEs, so it is used for development only. See [decisions](decisions.md), including 16 assumptions made without the user.
+- Updated `verify-database.js` (86 tables, 687 columns, 162 FKs, 306 indexes, 66 identity columns, 21 migrations, 21 permissions, 46 role grants) and `test-migration-cycle.js` (21/21/20/21).
+- Commands run on 2026-10-29:
+   - Baseline on `main` after the pull: `migrate:up` was a no-op; `npm test` passed 130 tests.
+   - `npm run migrate:up` applied the new migration. `node scripts/verify-database.js` reported `valid: true`.
+   - `npm test`: 156 tests, 155 passed, 0 failed, 1 skipped (the real-storage test, because `S3_*` is not configured). Source integrity, schema integrity and the server lifecycle check also passed.
+   - `npm run test:migrations`: the disposable cycle passed 21/21/20/21 and its database was dropped. No rollback ran against `everest_db`.
+- Not run: any test against real MinIO/S3, the 3 GB interrupted/resumed upload, `docker compose up` and `npm run storage:configure`, because Docker is not installed. `.env.example` was not updated because file access was denied.
 
 ## 2026-10-29 — M06 course enrollments and module access grants
 
