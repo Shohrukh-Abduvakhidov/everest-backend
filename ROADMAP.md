@@ -224,18 +224,20 @@ This roadmap orders implementation; it does not replace the [current architectur
 
 ## M07-C — Learner catalog enrichment
 
-- **Status:** Planned (approved by the user on 2026-10-30; scheduled after M08).
+- **Status:** Done (implemented and verified on `feat/m07-c-learner-catalog`; awaiting PR review).
 - **Goal:** Give the learner catalog what the frontend needs to render course cards.
 - **Dependencies:** M06, M07-B, M08.
 - **Deliverables:**
    - `subjects.color` limited to the palette keys `green|blue|orange|purple|neutral` (CHECK constraint, default `neutral`), managed through the M08 subject API.
    - `subject { id, title, translations, color }` in `GET /courses` and the learner course card.
    - `moduleCount` and `lessonCount`, counting only published items visible to the learner.
+   - `telegramLinked` in `GET /profile` (added by the user).
+- **Verified:** `tests/integration/learner-catalog.test.js` (3 subtests). `npm test`: 193 tests, 192 passed, 1 skipped. Migration cycle: 24/24/23/24.
 - **Exclusions:** `testCount` (after M10) and course slugs (not needed; decimal-string IDs are enough).
 
 ## M08 — Taxonomy and question bank
 
-- **Status:** Done (implemented and verified on `feat/m08-taxonomy-question-bank`; awaiting PR review).
+- **Status:** Done (merged in PR #20).
 - **Implemented:**
    - Admin APIs for subjects, sections and topics (translations, cycle-safe hierarchy) and for question banks (owner/staff visibility).
    - Draft questions with options, matching items, topics, sources and images.

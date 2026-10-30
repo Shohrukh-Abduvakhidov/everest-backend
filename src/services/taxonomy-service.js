@@ -6,6 +6,8 @@ import { normalizeInternalId } from '../utils/internal-id.js'
 
 const languages = ['tg', 'ru', 'en']
 const codePattern = /^[a-z0-9][a-z0-9_-]{0,49}$/
+// Palette keys only; the frontend maps each key to its design tokens.
+const subjectColors = ['green', 'blue', 'orange', 'purple', 'neutral']
 const labels = Object.freeze({
    subject: { name: 'Subject', code: 'SUBJECT' },
    section: { name: 'Section', code: 'SECTION' },
@@ -69,6 +71,7 @@ function parseTranslations(value) {
 function parseBody(kind, body, partial) {
    const allowed = ['code', 'primaryLanguage', 'translations']
    if (kind === 'topic') allowed.push('sectionId', 'parentId')
+   if (kind === 'subject') allowed.push('color')
    if (!body || typeof body !== 'object' || Array.isArray(body)) throw validationError('body')
    const unknown = Object.keys(body).find((field) => !allowed.includes(field))
    if (unknown) throw validationError(unknown, `${unknown} is not allowed`)
@@ -79,10 +82,12 @@ function parseBody(kind, body, partial) {
    if (body.primaryLanguage !== undefined && !languages.includes(body.primaryLanguage)) {
       throw validationError('primaryLanguage')
    }
+   if (body.color !== undefined && !subjectColors.includes(body.color)) throw validationError('color')
    if (!partial && body.translations === undefined) throw validationError('translations')
    return {
       code: body.code === undefined ? null : body.code,
       primaryLanguage: body.primaryLanguage === undefined ? (partial ? null : 'tg') : body.primaryLanguage,
+      color: body.color === undefined ? (partial ? null : 'neutral') : body.color,
       hasTranslations: body.translations !== undefined,
       translations: body.translations === undefined ? null : parseTranslations(body.translations),
       hasSectionId: body.sectionId !== undefined,
@@ -109,6 +114,7 @@ function safeEntity(kind, row) {
       primaryLanguage: row.primary_language,
       title,
       translations: row.translations,
+      ...(kind === 'subject' ? { color: row.color } : {}),
    }
 }
 

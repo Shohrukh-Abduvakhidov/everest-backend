@@ -4,7 +4,16 @@ Updated: 2026-10-30.
 
 ## Current increment
 
-M07-B is merged into `main` (PR #19). M08 (taxonomy and question bank) is implemented on `feat/m08-taxonomy-question-bank`. Real MinIO/S3 and Range-seek verification for M07-A/M07-B are still pending, because Docker is not installed. Production SMS remains unavailable pending provider approval. The next milestone is M07-C (learner catalog enrichment), approved by the user.
+M08 is merged into `main` (PR #20). M07-C (learner catalog enrichment and `telegramLinked`) is implemented on `feat/m07-c-learner-catalog`. Real MinIO/S3 and Range-seek verification for M07-A/M07-B are still pending, because Docker is not installed. Production SMS remains unavailable pending provider approval. The next ROADMAP milestone is M09 (indexed book import), which needs approved input formats.
+
+## 2026-10-30 — M07-C learner catalog enrichment
+
+- Added the reversible migration `20261031020000000_add-subject-color.js`: `subjects.color` with a palette CHECK and default `neutral`.
+- The M08 subject API accepts and returns `color`.
+- `course-access-repository` learner reads add `subject`, `module_count` and `lesson_count`. `learner-course-service` exposes `subject`, `moduleCount` and `lessonCount` in `GET /courses` and in the course card of `GET /courses/:courseId/modules`.
+- `profile-repository`/`profile-service` add `telegramLinked`.
+- Added `tests/integration/learner-catalog.test.js` (3 subtests): palette validation and the DB constraint, counts excluding draft/archived items, a `null` subject, and `telegramLinked` without identity leakage.
+- `npm test`: 193 tests, 192 passed, 0 failed, 1 skipped (real storage). `npm run test:migrations`: 24/24/23/24, disposable database dropped. `verify-database.js`: `valid: true` (698 columns).
 
 ## 2026-10-30 — M08 taxonomy and question bank
 

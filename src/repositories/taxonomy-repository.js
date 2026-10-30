@@ -9,7 +9,7 @@ const entities = Object.freeze({
 })
 
 const columns = Object.freeze({
-   subject: 'entity.id, entity.code, entity.primary_language',
+   subject: 'entity.id, entity.code, entity.primary_language, entity.color',
    section: 'entity.id, entity.subject_id, entity.code, entity.primary_language',
    topic: `entity.id, entity.subject_id, entity.section_id, entity.parent_id, entity.code,
       entity.primary_language`,
@@ -59,8 +59,8 @@ async function lockEntity(kind, id, client) {
 
 async function createSubject(subject, client) {
    const result = await client.query(
-      'INSERT INTO subjects (code, primary_language) VALUES ($1, $2) RETURNING id',
-      [subject.code, subject.primaryLanguage],
+      'INSERT INTO subjects (code, primary_language, color) VALUES ($1, $2, $3) RETURNING id',
+      [subject.code, subject.primaryLanguage, subject.color],
    )
    return result.rows[0].id
 }
@@ -90,19 +90,22 @@ async function createTopic(topic, client) {
 }
 
 async function updateEntity(kind, id, changes, client) {
-   const hierarchy = kind === 'topic'
-      ? `, section_id = CASE WHEN $4 THEN $5::bigint ELSE section_id END,
-         parent_id = CASE WHEN $6 THEN $7::bigint ELSE parent_id END`
-      : ''
+   let extra = ''
    const values = [normalizeInternalId(id), changes.code, changes.primaryLanguage]
    if (kind === 'topic') {
+      extra = `, section_id = CASE WHEN $4 THEN $5::bigint ELSE section_id END,
+         parent_id = CASE WHEN $6 THEN $7::bigint ELSE parent_id END`
       values.push(changes.hasSectionId, changes.sectionId, changes.hasParentId, changes.parentId)
+   }
+   if (kind === 'subject') {
+      extra = ', color = COALESCE($4, color)'
+      values.push(changes.color)
    }
    await client.query(
       `UPDATE ${entities[kind].table} SET
          code = COALESCE($2, code),
          primary_language = COALESCE($3, primary_language)
-         ${hierarchy}
+         ${extra}
        WHERE id = $1`,
       values,
    )

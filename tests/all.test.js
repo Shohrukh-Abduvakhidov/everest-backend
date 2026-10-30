@@ -22,5 +22,6 @@ import './integration/course-access.test.js';
 import './integration/asset-uploads.test.js';
 import './integration/lessons.test.js';
 import './integration/question-bank.test.js';
+import './integration/learner-catalog.test.js';
 import './integration/real-storage.test.js';
 import './integration/telegram-auth.test.js';

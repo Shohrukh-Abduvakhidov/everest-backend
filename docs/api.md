@@ -19,7 +19,29 @@ Shapes:
 
 Rules:
 
-- `code` matches `^[a-z0-9][a-z0-9_-]{0,49}$`. It is unique globally for subjects and within the subject for sections and topics (`409 SUBJECT|SECTION|TOPIC_CODE_CONFLICT`).
+- Subjects also accept `color`: `green|blue|orange|purple|neutral`, default `neutral`. Any other value returns `400 VALIDATION_ERROR`. The subject shape includes `color`.
+- `code` matches `^[a-z0-9][a-z0-9_-]{0,49}# Implemented API
+
+## Taxonomy APIs (M08)
+
+All routes are under `/api/v1/admin`, need a live session, and are staff-only. Reads need `taxonomy.read` (owner, admin, teacher). Writes need `taxonomy.manage` (owner, admin), the CSRF check and the administrative rate limit, and are audited atomically (`taxonomy.subject|section|topic.created|updated|deleted`).
+
+- `GET /subjects` → `{ subjects: [subject] }`, ordered by code.
+- `POST /subjects` → `201 subject`. Body: `{ code, primaryLanguage?: tg|ru|en (default tg), translations }`.
+- `PATCH /subjects/:subjectId` → `subject`. Partial body with the same fields. `translations` replaces the whole set.
+- `DELETE /subjects/:subjectId` → `{ id, status: 'deleted' }`. A subject that is still referenced (sections, topics, courses, banks, questions) returns `409 SUBJECT_IN_USE`.
+- `GET|POST /subjects/:subjectId/sections`, `PATCH|DELETE /sections/:sectionId`: same contract for sections.
+- `GET|POST /subjects/:subjectId/topics`, `PATCH|DELETE /topics/:topicId`: same contract for topics, plus `sectionId` and `parentId` (both nullable). The list is flat; build the tree from `parentId`.
+
+Shapes:
+
+- `subject` = `{ id, code, primaryLanguage, title, translations: { tg|ru|en: { title } } }`. `title` is the title in the primary language.
+- `section` = `subject` plus `subjectId`.
+- `topic` = `section` plus `sectionId` and `parentId`.
+
+Rules:
+
+. It is unique globally for subjects and within the subject for sections and topics (`409 SUBJECT|SECTION|TOPIC_CODE_CONFLICT`).
 - `translations` must contain the primary language. Titles are 1–200 characters.
 - A section or parent from another subject returns `422 TAXONOMY_SUBJECT_MISMATCH`. A parent that would create a cycle (including the topic itself) returns `409 TOPIC_CYCLE`.
 - Other errors: `400 INVALID_SUBJECT_ID|INVALID_SECTION_ID|INVALID_TOPIC_ID`, `404 SUBJECT|SECTION|TOPIC_NOT_FOUND`, `409 SECTION_IN_USE|TOPIC_IN_USE`.
@@ -266,8 +288,11 @@ Stable errors: `400 VALIDATION_ERROR`, `400 INVALID_COURSE_ID`/`INVALID_USER_ID`
 
 These routes need only a live active-account session and read the caller's own data.
 
-- `GET /api/v1/courses` returns `{ courses: [{ id, title, description, languageCode, translations, coverAssetId, enrollment: { state, beginsAt, expiresAt } }] }` for the caller's non-revoked enrollments in `published` courses. Group membership never adds a course.
-- `GET /api/v1/courses/:courseId/modules` returns `{ course, modules }` where each published module is `{ id, position, title, description, translations, access: { granted, lockReason } }`. `lockReason` is `null` when granted, otherwise `onboarding_required`, `not_started`, `expired`, `not_granted` or `unavailable`. Locked modules expose no lessons, assets, tests, counts or grant history. A course without a non-revoked enrollment, or an unpublished or unknown course, returns `404 COURSE_NOT_FOUND`.
+- `GET /api/v1/courses` returns `{ courses: [{ id, title, description, languageCode, translations, coverAssetId, subject, moduleCount, lessonCount, enrollment: { state, beginsAt, expiresAt } }] }` for the caller's non-revoked enrollments in `published` courses. Group membership never adds a course.
+   - `subject` = `{ id, title, translations: { tg|ru|en: { title } }, color: green|blue|orange|purple|neutral }`, or `null` when the course has no subject. `title` is the primary-language title. The frontend maps `color` to its design tokens.
+   - `moduleCount` counts published modules. `lessonCount` counts published lessons in published modules, whether or not the module is granted, matching the locked metadata learners already see. Draft and archived items are never counted. `testCount` will arrive after M10.
+   - The course card in `GET /api/v1/courses/:courseId/modules` (`course`) carries the same `subject`, `moduleCount` and `lessonCount`.
+- `GET /api/v1/courses/:courseId/modules` returns `{ course, modules }` where each published module is `{ id, position, title, description, translations, access: { granted, lockReason } }`. `lockReason` is `null` when granted, otherwise `onboarding_required`, `not_started`, `expired`, `not_granted` or `unavailable`. Locked modules expose no assets, tests, per-module counts or grant history. A course without a non-revoked enrollment, or an unpublished or unknown course, returns `404 COURSE_NOT_FOUND`.
 
 Protected content (M07 onward) must call `requireModuleAccessService(userId, moduleId)`, which throws `403 MODULE_ACCESS_DENIED` unless the database predicate `can_access_module` allows it. No protected-content route exists yet.
 
@@ -293,7 +318,7 @@ All mutations require live authentication, database-backed permission checks, co
 
 All profile routes require a valid active-account session. Identity comes only from the authenticated session; request bodies cannot select another user.
 
-- `GET /api/v1/profile` returns the authenticated user's decimal-string ID, names, derived display name, phone, read-only avatar asset reference, status, roles, preferred language, timezone, onboarding state, and timestamps.
+- `GET /api/v1/profile` returns the authenticated user's decimal-string ID, names, derived display name, phone, `telegramLinked` (boolean: a Telegram identity is linked; no Telegram identifiers are exposed), read-only avatar asset reference, status, roles, preferred language, timezone, onboarding state, and timestamps. `PATCH` responses include the same field.
 - `PATCH /api/v1/profile` partially updates `firstName`, `lastName`, `preferredLanguage`, and `timezone`. Names may be explicitly cleared with `null`; omitted fields remain unchanged. Phone, status, roles, permissions, identifiers, and avatar are read-only.
 - `GET /api/v1/profile/onboarding` returns `state`, `completedSteps`, `missingRequiredFields`, `canComplete`, and `completedAt`.
 - `PATCH /api/v1/profile/onboarding` updates the same supported profile fields without completing onboarding.

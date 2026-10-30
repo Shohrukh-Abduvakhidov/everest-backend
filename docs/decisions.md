@@ -1,5 +1,21 @@
 # Decisions
 
+## 2026-10-30 — Learner catalog enrichment (M07-C)
+
+User decisions:
+
+- `subjects.color` is a fixed palette key `green|blue|orange|purple|neutral` (CHECK constraint, default `neutral`), not hex. It is managed through the M08 subject API.
+- Learner cards carry `subject { id, title, translations, color }`, `moduleCount` and `lessonCount`.
+- No `testCount` until M10 and no slugs.
+- `GET /profile` gains `telegramLinked`.
+
+Assumptions made without the user (please review):
+
+1. Counts cover published lessons in published modules, including modules the learner has not been granted. M07-B already shows locked module and lesson titles, so the count discloses nothing new. The old "locked modules expose no counts" note now means per-module counts only.
+2. `subject` is `null` for a course without a subject (draft courses can have none; published courses require one since M05-A, so this covers legacy rows only).
+3. `telegramLinked` is a boolean derived from `auth_identities`. No Telegram ID, username or profile data is returned.
+4. The favorites list (`GET /courses/favorites`) is unchanged; it was not requested.
+
 ## 2026-10-30 — Taxonomy and question bank (M08)
 
 User decisions: the milestone order is M08, then M07-C (learner catalog enrichment); M08 follows ROADMAP exactly.

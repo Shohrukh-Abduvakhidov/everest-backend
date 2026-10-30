@@ -267,13 +267,35 @@ async function listModuleGrants(courseId, userId, db = pool) {
 
 // The learner-facing reads below return only published structure and the learner's own
 // grants. Whether protected content is granted is decided by the database predicate.
+// Card metadata counts published modules and published lessons inside published modules,
+// the same structure a learner already sees in locked module and lesson metadata.
+const learnerCardColumns = `
+   CASE WHEN subject.id IS NULL THEN NULL ELSE jsonb_build_object(
+      'id', subject.id::text,
+      'color', subject.color,
+      'title', (SELECT title FROM subject_translations
+         WHERE subject_id = subject.id AND language_code = subject.primary_language),
+      'translations', COALESCE((
+         SELECT jsonb_object_agg(language_code, jsonb_build_object('title', title))
+         FROM subject_translations WHERE subject_id = subject.id
+      ), '{}'::jsonb)
+   ) END AS subject,
+   (SELECT count(*)::integer FROM course_modules AS counted_module
+      WHERE counted_module.course_id = course.id AND counted_module.status = 'published')
+      AS module_count,
+   (SELECT count(*)::integer FROM lessons AS counted_lesson
+      JOIN course_modules AS lesson_module ON lesson_module.id = counted_lesson.module_id
+      WHERE counted_lesson.course_id = course.id AND counted_lesson.status = 'published'
+         AND lesson_module.status = 'published')
+      AS lesson_count`
 async function listLearnerCourses(userId, db = pool) {
    const result = await db.query(
       `SELECT course.title, course.description, course.language_code,
          course.translations, course.cover_asset_id,
-         ${enrollmentColumns}
+         ${enrollmentColumns}, ${learnerCardColumns}
        FROM course_enrollments AS grant_row
        JOIN courses AS course ON course.id = grant_row.course_id
+       LEFT JOIN subjects AS subject ON subject.id = course.subject_id
        WHERE grant_row.user_id = $1 AND grant_row.revoked_at IS NULL
          AND course.status = 'published'
        ORDER BY course.title, course.id`,
@@ -284,9 +306,10 @@ async function listLearnerCourses(userId, db = pool) {
 
 async function findLearnerCourse(userId, courseId, db = pool) {
    const result = await db.query(
-      `SELECT course.title, ${enrollmentColumns}
+      `SELECT course.title, ${enrollmentColumns}, ${learnerCardColumns}
        FROM course_enrollments AS grant_row
        JOIN courses AS course ON course.id = grant_row.course_id
+       LEFT JOIN subjects AS subject ON subject.id = course.subject_id
        WHERE grant_row.user_id = $1 AND grant_row.course_id = $2
          AND grant_row.revoked_at IS NULL AND course.status = 'published'`,
       [normalizeInternalId(userId), normalizeInternalId(courseId)],

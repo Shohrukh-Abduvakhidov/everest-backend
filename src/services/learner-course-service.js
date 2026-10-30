@@ -12,6 +12,14 @@ function iso(value) {
    return value === null ? null : new Date(value).toISOString()
 }
 
+function safeCardMetadata(row) {
+   return {
+      subject: row.subject,
+      moduleCount: row.module_count,
+      lessonCount: row.lesson_count,
+   }
+}
+
 function safeEnrollmentWindow(row) {
    return {
       state: row.state,
@@ -57,6 +65,7 @@ async function listLearnerCoursesService(userId, overrides) {
          languageCode: row.language_code,
          translations: row.translations,
          coverAssetId: row.cover_asset_id,
+         ...safeCardMetadata(row),
          enrollment: safeEnrollmentWindow(row),
       })),
    }
@@ -70,7 +79,12 @@ async function listLearnerCourseModulesService(userId, courseIdValue, overrides)
    if (!enrollment) throw new AppError(404, 'COURSE_NOT_FOUND', 'Course was not found')
    const modules = await repository.listLearnerModules(actorId, courseId)
    return {
-      course: { id: courseId, title: enrollment.title, enrollment: safeEnrollmentWindow(enrollment) },
+      course: {
+         id: courseId,
+         title: enrollment.title,
+         ...safeCardMetadata(enrollment),
+         enrollment: safeEnrollmentWindow(enrollment),
+      },
       modules: modules.map((module) => safeLearnerModule(enrollment, module)),
    }
 }

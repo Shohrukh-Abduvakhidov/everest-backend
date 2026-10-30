@@ -104,6 +104,7 @@ function safeProfile(row) {
       lastName: row.last_name,
       displayName: names.length ? names.join(' ') : null,
       phone: row.phone_e164,
+      telegramLinked: row.telegram_linked,
       avatarAssetId: row.avatar_asset_id,
       status: row.status,
       roles: row.roles,
