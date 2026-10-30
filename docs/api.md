@@ -1,5 +1,118 @@
 # Implemented API
 
+## Taxonomy APIs (M08)
+
+All routes are under `/api/v1/admin`, need a live session, and are staff-only. Reads need `taxonomy.read` (owner, admin, teacher). Writes need `taxonomy.manage` (owner, admin), the CSRF check and the administrative rate limit, and are audited atomically (`taxonomy.subject|section|topic.created|updated|deleted`).
+
+- `GET /subjects` → `{ subjects: [subject] }`, ordered by code.
+- `POST /subjects` → `201 subject`. Body: `{ code, primaryLanguage?: tg|ru|en (default tg), translations }`.
+- `PATCH /subjects/:subjectId` → `subject`. Partial body with the same fields. `translations` replaces the whole set.
+- `DELETE /subjects/:subjectId` → `{ id, status: 'deleted' }`. A subject that is still referenced (sections, topics, courses, banks, questions) returns `409 SUBJECT_IN_USE`.
+- `GET|POST /subjects/:subjectId/sections`, `PATCH|DELETE /sections/:sectionId`: same contract for sections.
+- `GET|POST /subjects/:subjectId/topics`, `PATCH|DELETE /topics/:topicId`: same contract for topics, plus `sectionId` and `parentId` (both nullable). The list is flat; build the tree from `parentId`.
+
+Shapes:
+
+- `subject` = `{ id, code, primaryLanguage, title, translations: { tg|ru|en: { title } } }`. `title` is the title in the primary language.
+- `section` = `subject` plus `subjectId`.
+- `topic` = `section` plus `sectionId` and `parentId`.
+
+Rules:
+
+- `code` matches `^[a-z0-9][a-z0-9_-]{0,49}$`. It is unique globally for subjects and within the subject for sections and topics (`409 SUBJECT|SECTION|TOPIC_CODE_CONFLICT`).
+- `translations` must contain the primary language. Titles are 1–200 characters.
+- A section or parent from another subject returns `422 TAXONOMY_SUBJECT_MISMATCH`. A parent that would create a cycle (including the topic itself) returns `409 TOPIC_CYCLE`.
+- Other errors: `400 INVALID_SUBJECT_ID|INVALID_SECTION_ID|INVALID_TOPIC_ID`, `404 SUBJECT|SECTION|TOPIC_NOT_FOUND`, `409 SECTION_IN_USE|TOPIC_IN_USE`.
+
+## Question bank APIs (M08)
+
+All routes are under `/api/v1/admin` and are staff-only. Students have none of these permissions.
+
+| Permission | Roles | Purpose |
+|---|---|---|
+| `questions.read` | owner, admin, teacher | List and read readable banks and questions |
+| `questions.manage` | owner, admin, teacher | Create banks; author drafts and answer keys in banks the actor manages |
+| `questions.review` | owner, admin | Verify answer keys, publish, archive |
+
+Bank scope:
+
+- Readable: administrator (owner/admin role), bank owner, or `visibility = 'staff'`.
+- Manageable: administrator or bank owner.
+- An unreadable bank or question returns `404 QUESTION_BANK_NOT_FOUND` / `QUESTION_NOT_FOUND`.
+- A readable bank the actor cannot manage returns `403 QUESTION_BANK_READ_ONLY` for writes.
+
+Mutations use the CSRF check and the administrative rate limit, and are audited atomically (`question_bank.*`, `question.*`, `question.answer_key.*`). Audit metadata never contains answer data.
+
+Banks:
+
+- `GET /question-banks?subjectId&limit&offset` → `{ banks: [bank], pagination }`.
+- `POST /question-banks` → `201 bank`. Body: `{ code, title, subjectId, visibility?: private|staff (default private), sourceMetadata? }`. The creator becomes the owner.
+- `GET /question-banks/:bankId` → `bank`.
+- `PATCH /question-banks/:bankId` → `bank`. Body: `{ code?, title?, visibility?, sourceMetadata? }`. `subjectId` cannot change.
+- `bank` = `{ id, code, title, subjectId, ownerId, visibility, sourceMetadata, questionCount, permissions: { manage }, createdAt }`. A duplicate code returns `409 QUESTION_BANK_CODE_CONFLICT`.
+
+Questions:
+
+- `GET /question-banks/:bankId/questions?status&questionType&languageCode&keyStatus&topicId&limit&offset` → `{ questions: [summary], pagination }`.
+   - `summary` = `{ id, externalId, questionType, languageCode, difficulty, difficultySource, status, keyStatus, content, updatedAt }`.
+- `POST /question-banks/:bankId/questions` → `201 detail` of a new draft (manage).
+- `GET /questions/:questionId` → `detail`.
+- `PATCH /questions/:questionId` → `detail`. Drafts only, partial; `questionType` cannot change. `options`, `matching` and `topicIds` replace the whole list.
+- `DELETE /questions/:questionId` → drafts only. A draft referenced by a copy, a test or a duplicate link returns `409 QUESTION_IN_USE`.
+- `POST /questions/:questionId/copy` → `201 detail` of a new draft in the same bank: `sourceQuestionId` is set, `externalId` is `null`, and the content, items, topics and assets are copied. A copied key becomes `proposed` (or stays `unknown`) and must be verified again.
+- Writes to a published or archived question return `409 QUESTION_IMMUTABLE`. Use copy instead.
+
+Question body:
+
+- `questionType`: `single_choice|multiple_choice|matching|numeric|short_text` (create only).
+- `languageCode`: `tg|ru|en`, default `tg`.
+- `externalId`: optional, unique within the bank (`409 QUESTION_EXTERNAL_ID_CONFLICT`).
+- `difficulty` (1–5) and `difficultySource` (`ai|expert|official`): both or neither.
+- `content`: rich content (below), at least one block.
+- `sourceMetadata`: `{ book?, edition?, page? (positive integer), number?, note? }`.
+- `topicIds`: up to 20 distinct topics of the bank's subject (`422 TAXONOMY_SUBJECT_MISMATCH`).
+- Choice questions require `options: [{ key, content, sourceLabel? }]` (2–10 items).
+- Matching questions require:
+   - `matching: { left: [item], right: [item] }` (1–20 items per side);
+   - `interactionSettings: { requireAllLeft: boolean, allowRightReuse: boolean }`.
+- Other types must not send `options`, `matching`, or a non-empty `interactionSettings`.
+- Item keys match `^[A-Za-z0-9_-]{1,20}$` and are unique per list. Positions follow array order. Options have no correctness field: unknown fields such as `isCorrect` return `400`.
+
+Rich content is `{ blocks: [...] }`, with at most 100 blocks and 64 KB of JSON. Allowed blocks:
+
+- `text{text, marks?: bold|italic|underline|subscript|superscript}`
+- `verse{lines}`
+- `formula{latex, display?}`
+- `chemistry{formula}`
+- `table{rows: string[][]}`
+- `image{assetId, alt?}`
+
+An image must be a `ready` PNG/JPEG asset that the actor uploaded, that is already used in the same bank, or, for administrators, any such asset. Otherwise the request returns `422 QUESTION_ASSET_NOT_USABLE`. `assetIds` in the detail is kept in sync automatically.
+
+`detail` = `{ id, bankId, subjectId, externalId, questionType, languageCode, difficulty, difficultySource, status, content, interactionSettings, sourceMetadata, sourceQuestionId, importId, createdBy, createdAt, updatedAt, options: [{ key, position, sourceLabel, content }], matching: { left, right }|null, topicIds, assetIds, keyStatus, answerKey? }`. `answerKey` = `{ status, source, answerData, explanation, verifiedBy, verifiedAt }` and is present only for actors who can manage the bank. Read-only staff see `keyStatus` only.
+
+Answer keys and review:
+
+- `PUT /questions/:questionId/answer-key` (manage, drafts only) → `detail`. Body: `{ answerData, source, explanation? }`.
+   - `answerData: null` stores `unknown`; `source` must then be omitted or `none`.
+   - Otherwise the key becomes `proposed`, and `source` must be `official_key|expert_review|ai_inference`.
+   - `answerData` per type references item **keys**:
+      - `single_choice`: `{ optionKey }`
+      - `multiple_choice`: `{ optionKeys: [...] }` (distinct, non-empty)
+      - `matching`: `{ pairs: [{ left, right }] }` (each left item at most once; all left items when `requireAllLeft`; distinct right items unless `allowRightReuse`)
+      - `numeric`: `{ value: number }`
+      - `short_text`: `{ acceptedAnswers: [...] }` (1–20 distinct)
+   - Invalid references return `400 ANSWER_KEY_INVALID`.
+- `POST /questions/:questionId/answer-key/verify` (review) → `detail`. Body: `{ source: official_key|expert_review }`. Only a `proposed` key can be verified (`409 ANSWER_KEY_NOT_PROPOSED`). AI inference is never a verified source.
+- Any draft `PATCH` returns a `verified` key to `proposed`. If the key no longer matches the items, it is reset to `unknown`. The audit event records `keyChange`.
+- `POST /questions/:questionId/publish` (review) → `draft → published`.
+   - Fails with `409 QUESTION_NOT_PUBLISHABLE`, where `details[0].message` is one of `ANSWER_KEY_NOT_VERIFIED`, `ANSWER_KEY_INVALID` or `ASSET_NOT_READY`.
+   - Database triggers enforce the same guards and immutability independently.
+- `POST /questions/:questionId/archive` (review) → `published → archived`, irreversible.
+- Other transitions return `409 INVALID_QUESTION_TRANSITION`.
+
+Other errors: `400 INVALID_QUESTION_BANK_ID|INVALID_QUESTION_ID|VALIDATION_ERROR`.
+
 ## Lesson authoring APIs (M07-B)
 
 All routes are under `/api/v1/admin/courses/:courseId`. They need a live session plus `lessons.read` (reads) or `lessons.manage` (writes), and the repository limits each actor to their scope:

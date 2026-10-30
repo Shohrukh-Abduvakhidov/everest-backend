@@ -99,6 +99,43 @@ import {
    adminMutationRateMiddleware,
    authenticatedCsrfMiddleware,
 } from '../middleware/auth-protection-middleware.js'
+import {
+   manageQuestionsAuthorizationMiddleware,
+   manageTaxonomyAuthorizationMiddleware,
+   readQuestionsAuthorizationMiddleware,
+   readTaxonomyAuthorizationMiddleware,
+   reviewQuestionsAuthorizationMiddleware,
+} from '../middleware/question-admin-middleware.js'
+import {
+   createSectionController,
+   createSubjectController,
+   createTopicController,
+   deleteSectionController,
+   deleteSubjectController,
+   deleteTopicController,
+   listSectionsController,
+   listSubjectsController,
+   listTopicsController,
+   updateSectionController,
+   updateSubjectController,
+   updateTopicController,
+} from '../controllers/taxonomy-controller.js'
+import {
+   archiveQuestionController,
+   copyQuestionController,
+   createQuestionBankController,
+   createQuestionController,
+   deleteQuestionController,
+   getQuestionBankController,
+   getQuestionController,
+   listBankQuestionsController,
+   listQuestionBanksController,
+   publishQuestionController,
+   replaceAnswerKeyController,
+   updateQuestionBankController,
+   updateQuestionController,
+   verifyAnswerKeyController,
+} from '../controllers/question-bank-controller.js'
 
 const adminRouter = express.Router()
 
@@ -408,6 +445,162 @@ adminRouter.delete(
    authenticatedCsrfMiddleware,
    adminMutationRateMiddleware,
    removeGroupTeacherController,
+)
+adminRouter.get('/subjects', readTaxonomyAuthorizationMiddleware, listSubjectsController)
+adminRouter.post(
+   '/subjects',
+   manageTaxonomyAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   createSubjectController,
+)
+adminRouter.patch(
+   '/subjects/:subjectId',
+   manageTaxonomyAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   updateSubjectController,
+)
+adminRouter.delete(
+   '/subjects/:subjectId',
+   manageTaxonomyAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   deleteSubjectController,
+)
+adminRouter.get(
+   '/subjects/:subjectId/sections',
+   readTaxonomyAuthorizationMiddleware,
+   listSectionsController,
+)
+adminRouter.post(
+   '/subjects/:subjectId/sections',
+   manageTaxonomyAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   createSectionController,
+)
+adminRouter.patch(
+   '/sections/:sectionId',
+   manageTaxonomyAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   updateSectionController,
+)
+adminRouter.delete(
+   '/sections/:sectionId',
+   manageTaxonomyAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   deleteSectionController,
+)
+adminRouter.get(
+   '/subjects/:subjectId/topics',
+   readTaxonomyAuthorizationMiddleware,
+   listTopicsController,
+)
+adminRouter.post(
+   '/subjects/:subjectId/topics',
+   manageTaxonomyAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   createTopicController,
+)
+adminRouter.patch(
+   '/topics/:topicId',
+   manageTaxonomyAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   updateTopicController,
+)
+adminRouter.delete(
+   '/topics/:topicId',
+   manageTaxonomyAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   deleteTopicController,
+)
+adminRouter.get('/question-banks', readQuestionsAuthorizationMiddleware, listQuestionBanksController)
+adminRouter.post(
+   '/question-banks',
+   manageQuestionsAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   createQuestionBankController,
+)
+adminRouter.get(
+   '/question-banks/:bankId',
+   readQuestionsAuthorizationMiddleware,
+   getQuestionBankController,
+)
+adminRouter.patch(
+   '/question-banks/:bankId',
+   manageQuestionsAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   updateQuestionBankController,
+)
+adminRouter.get(
+   '/question-banks/:bankId/questions',
+   readQuestionsAuthorizationMiddleware,
+   listBankQuestionsController,
+)
+adminRouter.post(
+   '/question-banks/:bankId/questions',
+   manageQuestionsAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   createQuestionController,
+)
+adminRouter.get('/questions/:questionId', readQuestionsAuthorizationMiddleware, getQuestionController)
+adminRouter.patch(
+   '/questions/:questionId',
+   manageQuestionsAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   updateQuestionController,
+)
+adminRouter.delete(
+   '/questions/:questionId',
+   manageQuestionsAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   deleteQuestionController,
+)
+adminRouter.post(
+   '/questions/:questionId/copy',
+   manageQuestionsAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   copyQuestionController,
+)
+adminRouter.put(
+   '/questions/:questionId/answer-key',
+   manageQuestionsAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   replaceAnswerKeyController,
+)
+adminRouter.post(
+   '/questions/:questionId/answer-key/verify',
+   reviewQuestionsAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   verifyAnswerKeyController,
+)
+adminRouter.post(
+   '/questions/:questionId/publish',
+   reviewQuestionsAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   publishQuestionController,
+)
+adminRouter.post(
+   '/questions/:questionId/archive',
+   reviewQuestionsAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   archiveQuestionController,
 )
 adminRouter.get(
    '/users/pending',

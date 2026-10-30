@@ -222,9 +222,26 @@ This roadmap orders implementation; it does not replace the [current architectur
    - Verify Range seeking of a real faststart mp4 through a signed URL against real storage.
 - **Exclusions:** Multi-quality video, HLS, `asset_variants`, workers and lesson favorites.
 
+## M07-C — Learner catalog enrichment
+
+- **Status:** Planned (approved by the user on 2026-10-30; scheduled after M08).
+- **Goal:** Give the learner catalog what the frontend needs to render course cards.
+- **Dependencies:** M06, M07-B, M08.
+- **Deliverables:**
+   - `subjects.color` limited to the palette keys `green|blue|orange|purple|neutral` (CHECK constraint, default `neutral`), managed through the M08 subject API.
+   - `subject { id, title, translations, color }` in `GET /courses` and the learner course card.
+   - `moduleCount` and `lessonCount`, counting only published items visible to the learner.
+- **Exclusions:** `testCount` (after M10) and course slugs (not needed; decimal-string IDs are enough).
+
 ## M08 — Taxonomy and question bank
 
-- **Status:** Planned
+- **Status:** Done (implemented and verified on `feat/m08-taxonomy-question-bank`; awaiting PR review).
+- **Implemented:**
+   - Admin APIs for subjects, sections and topics (translations, cycle-safe hierarchy) and for question banks (owner/staff visibility).
+   - Draft questions with options, matching items, topics, sources and images.
+   - Answer keys (unknown → proposed → reviewer-verified), publication, archive and copy.
+   - Migration `20261031010000000_add-question-bank-permissions.js`.
+- **Verified:** `tests/unit/question-content.test.js` and `tests/integration/question-bank.test.js` (9 subtests). `npm test`: 189 tests, 188 passed, 1 skipped. Migration cycle: 23/23/22/23.
 - **Goal:** Manage reviewed, publishable assessment content.
 - **Dependencies:** M02F, M07-A asset contracts.
 - **Deliverables:** Subjects, sections, topics/translations, banks, questions/options/matching, answer keys, topics/assets/sources, review, and publication.

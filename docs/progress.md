@@ -1,10 +1,29 @@
 # EVEREST backend progress
 
-Updated: 2026-10-29.
+Updated: 2026-10-30.
 
 ## Current increment
 
-M07-A is merged into `main` (PR #18). M07-B (lessons, playback, notes, progress, offline licenses) is implemented on `feat/m07-b-lessons-playback` and tested against a storage double. Real MinIO/S3 verification and real Range-seek verification are still pending, because Docker is not installed. Production SMS remains unavailable pending provider approval.
+M07-B is merged into `main` (PR #19). M08 (taxonomy and question bank) is implemented on `feat/m08-taxonomy-question-bank`. Real MinIO/S3 and Range-seek verification for M07-A/M07-B are still pending, because Docker is not installed. Production SMS remains unavailable pending provider approval. The next milestone is M07-C (learner catalog enrichment), approved by the user.
+
+## 2026-10-30 — M08 taxonomy and question bank
+
+- Added the reversible migration `20261031010000000_add-question-bank-permissions.js`:
+   - `taxonomy.read`/`taxonomy.manage` and `questions.read`/`questions.manage`/`questions.review`;
+   - CHECK `question_answer_keys_verified_source_check` (a verified key must come from `official_key` or `expert_review`).
+   - No tables: the baseline schema and triggers already existed.
+- Added `taxonomy-repository`/`service`/`controller`: subjects, sections and topics with translations, a cycle-safe topic hierarchy, subject consistency, and `*_IN_USE` deletion guards.
+- Added `question-bank-repository`/`service`/`controller`:
+   - banks with owner/staff visibility;
+   - draft question CRUD with options, matching items, topics, source metadata and images;
+   - answer keys (unknown → proposed → verified);
+   - publication, archive and copy.
+- Added `utils/question-content.js` (rich content blocks and per-type `answer_data` validation) and `middleware/question-admin-middleware.js`. Routes are under `/api/v1/admin`.
+- Tests:
+   - `tests/unit/question-content.test.js` (5 tests).
+   - `tests/integration/question-bank.test.js` (9 subtests): taxonomy ACL/cycles/mismatch/in-use, bank privacy, structure validation, no `is_correct`, key confidentiality, reviewer-only verification, the verified-source DB constraint, publication guards, API and trigger immutability, audit without answer data, copy/delete-in-use, matching rules and key reset, and image asset rules.
+- `npm test`: 189 tests, 188 passed, 0 failed, 1 skipped (real storage). `npm run test:migrations`: 23/23/22/23, disposable database dropped. `verify-database.js`: `valid: true` (29 permissions, 67 role grants).
+- Not done (per ROADMAP/decisions): imports, duplicate detection and bank-bound image uploads (M09); grading tolerances (M10/M11).
 
 ## 2026-10-29 — M07-B follow-up: direct editing of published lessons
 

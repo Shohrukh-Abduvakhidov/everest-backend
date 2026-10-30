@@ -465,7 +465,15 @@ M04-A implements group list/detail and paginated member/teacher reads. M04-B add
 
 Questions belong to banks and subjects and may reference an import/source question. Options and matching items hold presentation content. `question_answer_keys` is the only source of authored correctness; options have no `is_correct`. Topic links preserve subject consistency; assets are separate; tests compose questions through `test_questions`.
 
-Database triggers prevent publishing without a verified answer key and prevent modification of published questions and their protected children. Unreviewed imports must remain draft, unknown answers must remain unknown, and corrections require copied content rather than mutation. `attempt_questions.grading_snapshot` and revision snapshots are private historical grading evidence and must never be returned to students. Import, review, publication, and query APIs are all planned.
+Database triggers prevent publishing without a verified answer key and prevent modification of published questions and their protected children. Unreviewed imports must remain draft, unknown answers must remain unknown, and corrections require copied content rather than mutation. `attempt_questions.grading_snapshot` and revision snapshots are private historical grading evidence and must never be returned to students.
+
+M08 implementation:
+
+- `taxonomy-service` → `taxonomy-repository` manages subjects, sections and topics. The repository uses one fixed identifier map for the three entity/translation table pairs, never request input. Topic re-parenting locks the subject's topic rows and checks the ancestor chain in the same transaction.
+- `question-bank-service` → `question-bank-repository` owns banks, questions, items, topics, `question_assets` and answer keys. Each write locks the question (`FOR UPDATE`) and then the readable bank, checks the manage/draft rules, and writes children and the audit event on the same client.
+- `utils/question-content.js` is pure validation: it rebuilds rich blocks from an allowlist and validates `answer_data` against item keys. The service runs it again before verification and publication. Triggers stay the last line of defence (immutability, verified key, minimum structure), and the new CHECK forbids unattested verified keys.
+- Keys are serialized only for bank managers. Learner-facing question delivery does not exist until M10/M11.
+- Imports (`question_imports`/`question_import_errors`) and duplicate links remain M09.
 
 ## 16. Test attempt architecture
 
@@ -548,7 +556,7 @@ Actual response envelopes:
 | Area | Status | Current reality |
 |---|---|---|
 | Project foundation | Done | ESM Express app/server, config, Pool, errors, tests |
-| Database schema | Done | 87-table, 22-migration current catalog; numeric baseline and incremental migrations verified |
+| Database schema | Done | 87-table, 23-migration current catalog; numeric baseline and incremental migrations verified |
 | Numeric identifiers (M01R) | Done | 67 identity columns; internal IDs/FKs are `BIGINT`; decimal-string API/JWT contract |
 | Telegram OIDC | Done | Login/link/unlink/session/test-message routes and tests |
 | Phone/password authentication | Done | Pending registration, salted `scrypt`, active-only login, shared session, audit, tests |
@@ -560,7 +568,7 @@ Actual response envelopes:
 | Groups | Partial | M04-A reads and M04-B administration/text announcements done; assets deferred to M07 |
 | Courses/access | Partial | M05-A catalog/lifecycle/teachers, M05-B modules/preview/copy and M06 enrollments/module grants/learner locks and M07-B lessons/playback/offline done against a storage double |
 | Media storage | Partial | M07-A S3 multipart uploads and content/codec/seek-ready verification done against a storage double; real MinIO/S3 and Range-seek verification pending |
-| Question bank | Planned | Schema/DB guards only |
+| Question bank | Partial | M08 taxonomy, banks, draft authoring, answer keys, review, publication and copy done; imports/duplicates in M09 |
 | Test engine | Planned | Schema/DB constraints only |
 | Progress | Planned | Schema only |
 | Notifications | Partial | Telegram connection/test only |

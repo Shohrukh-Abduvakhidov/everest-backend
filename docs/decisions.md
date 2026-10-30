@@ -1,5 +1,47 @@
 # Decisions
 
+## 2026-10-30 — Taxonomy and question bank (M08)
+
+User decisions: the milestone order is M08, then M07-C (learner catalog enrichment); M08 follows ROADMAP exactly.
+
+The baseline schema already had every M08 table and trigger, so M08 adds APIs, validation and permissions. Migration `20261031010000000_add-question-bank-permissions.js` adds the five permissions and one CHECK constraint, and no tables.
+
+### Assumptions made without the user (deny-by-default; please review)
+
+1. **Permissions:**
+   - `taxonomy.read` (owner, admin, teacher) and `taxonomy.manage` (owner, admin).
+   - `questions.read` and `questions.manage` (owner, admin, teacher).
+   - `questions.review` (owner, admin).
+   - Students get none. Taxonomy is staff-only until M07-C exposes subjects in the learner catalog.
+2. **Bank scope:**
+   - Banks are not tied to courses, so `course_teachers.can_manage_questions` is not used yet (it becomes relevant with tests in M10).
+   - Readable: administrators, the bank owner, and every staff member when `visibility = 'staff'`. Manageable: administrators and the owner only.
+   - An unreadable bank returns `404`, never `403`.
+   - `subjectId` of a bank is immutable, because questions reference `(bank_id, subject_id)`.
+3. **Key confidentiality among staff:** `answerKey` (answer data and explanation) is returned only to actors who can manage the bank. Read-only staff see `keyStatus`. Audit metadata never contains answer data.
+4. **`answer_data` references item keys, not row IDs.** This keeps keys valid across copies and item replacement. Formats per type are in `docs/api.md`. Numeric tolerance, short-text normalization and partial credit are grading policy and are deferred to M10/M11: a numeric key is one exact `value`.
+5. **Verification:**
+   - Only `questions.review` can verify, and only a `proposed` key.
+   - The reviewer must attest `official_key` or `expert_review`. A new CHECK constraint makes `verified` + `ai_inference`/`none` impossible in the database too.
+   - An administrator may verify a key they authored themselves. A four-eyes rule would block a small center; `verified_by` records who verified.
+6. **Edits invalidate review:** any draft `PATCH` returns a `verified` key to `proposed`. If the edit removes items the key references, the key is reset to `unknown` (the explanation is kept) instead of the edit being blocked.
+7. **Publication** (`questions.review`) requires a verified key that still validates against the current items, and every embedded asset still ready.
+   - Topics are not required for publication; ROADMAP does not require them.
+   - Archive is one-way (`published → archived`). Corrections use `copy`, which creates a draft with `source_question_id`. A copied key must be verified again.
+8. **Deletion:** only drafts can be deleted, and only when no copy, test question or duplicate link references them. Taxonomy deletion relies on `RESTRICT` foreign keys and returns `*_IN_USE`.
+9. **Rich question content** is a closed set of blocks: `text` with marks, `verse`, `formula` (LaTeX), `chemistry`, `table` and `image`.
+   - Every block is rebuilt from an allowlist, so unknown properties are dropped by rejection, not stored.
+   - Limits: 100 blocks and 64 KB per content value.
+   - This differs from lesson blocks on purpose: question content needs formulas, chemistry, verse lines and images (documentation.md §13).
+10. **Question images:** the image must be a ready PNG/JPEG that the author uploaded, that is already used in the same bank, or, for administrators, any such image.
+   - Uploads are still course-bound (M07-A). A bank-bound upload path is left to M09, where book pages and assets are imported.
+   - `question_assets` is recomputed from all content (question, items, explanation) on every write.
+11. **Taxonomy:**
+   - Titles live only in `*_translations`, and the primary-language title is mandatory.
+   - Topic re-parenting locks the subject's topic rows and walks the ancestor chain in the same transaction (baseline note 18), so concurrent edits cannot create a cycle.
+   - A section and a parent must belong to the same subject (`422 TAXONOMY_SUBJECT_MISMATCH`).
+12. **Imports and duplicates:** imports, dry runs and duplicate detection stay in M09. `question_imports`, `question_import_errors` and `question_duplicate_links` have no API in M08.
+
 ## 2026-10-29 — Lessons, playback and offline licenses (M07-B)
 
 ### Seek-ready video policy (supersedes the M07-A remux decision)
