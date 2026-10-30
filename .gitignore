@@ -7,3 +7,6 @@ coverage/
 *.log
 uploads/*
 !uploads/.gitkeep
+
+# Local agent settings
+.claude/settings.json

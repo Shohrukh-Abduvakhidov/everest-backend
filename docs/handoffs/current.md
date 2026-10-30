@@ -1,92 +1,74 @@
 ---
 project: EVEREST Backend
-current_milestone: M07-B
-status: in_progress
-branch: feat/m07-b-lessons-playback
-base_commit: 68e4fab
-updated_at: 2026-10-29
+current_milestone: M08
+status: awaiting_review
+branch: feat/m08-taxonomy-question-bank
+base_commit: 0bf88ae
+updated_at: 2026-10-30
 ---
 
 # Current handoff
 
-## Pending (blocks marking M07-A and M07-B Done)
+## State
 
-- **Real MinIO/S3 verification pending:** install Docker Desktop (or the MinIO Windows binary), run `docker-compose up`, and run the optional real-storage test, including a 3 GB upload with a network interruption and resume.
-   1. In `.env`, set `S3_ENDPOINT=http://127.0.0.1:9000`, `S3_PUBLIC_ENDPOINT=http://127.0.0.1:9000`, `S3_BUCKET=everest-media` and the compose credentials (`everest-local`/`everest-local-secret`).
-   2. Run `docker compose up -d`, or alternatively `npm run storage:configure`.
-   3. Run `npm test`. `real S3-compatible storage round trip` must pass, not be skipped.
-   4. Run a manual 3 GB upload with a network interruption, then resume through `GET /assets/uploads/:id`, presign the missing parts, and complete.
-- **Verify Range seeking of a real faststart mp4 through a signed URL against real storage.**
-   - Upload a real fast-start MP4 and attach it to a published lesson. Request `GET /api/v1/courses/:courseId/lessons/:lessonId/playback` as an entitled student.
-   - Check that `curl -r 1000000-1999999 "<url>"` returns `206` with the right `Content-Range`, `Content-Type: video/mp4` and inline disposition. Then seek with a browser `<video>` element and click a chapter.
-- If the pinned `minio/minio:RELEASE.2025-09-07T16-13-09Z` image cannot be pulled, set `MINIO_IMAGE` to a pinned community rebuild.
-- Add the `S3_*`, `STORAGE_*` and `PLAYBACK_RATE_LIMIT` variables to `.env.example` by hand. Env files are denied to this agent. The list is in `docs/architecture.md` §13a.
+- M07-B is merged (PR #19).
+- M08 (taxonomy and question bank) is implemented and verified on `feat/m08-taxonomy-question-bank`. The PR is open for review and must not be merged by the agent.
+- The next milestone after the merge is **M07-C (learner catalog enrichment)**. It is approved by the user and described in `ROADMAP.md`:
+   - `subjects.color` palette keys `green|blue|orange|purple|neutral` (CHECK, default `neutral`);
+   - `subject { id, title, translations, color }` in `GET /courses` and the course card;
+   - `moduleCount` and `lessonCount` counting published, learner-visible items only;
+   - no `testCount` until M10, and no slugs.
+   - Use a separate branch and PR.
 
-## Completed work (M07-B, branch `feat/m07-b-lessons-playback`, PR #19)
+## Completed work (M08)
 
-- **Follow-up (2026-10-29): published lessons are edited directly**, with no archive → restore → edit → publish.
-   - Published lessons must stay publishable: `409 LESSON_VIDEO_REQUIRED` or `LESSON_TYPE_NOT_PUBLISHABLE`.
-   - A video change that would leave chapters beyond the new video fails with `409 CHAPTERS_EXCEED_VIDEO_DURATION` and changes nothing.
-   - A video change revokes the old video's offline licenses in the same transaction (`video_unavailable` for the PWA); progress is kept.
-
-- **Seek-ready video policy** (supersedes the M07-A remux decision):
-   - MP4 must be fast start and WebM must have Cues before clusters; QuickTime is refused. Anything else gets `422 VIDEO_NOT_SEEKABLE` and the object is deleted.
-   - No remux jobs; `background-job-repository` was removed.
-   - Videos are stored with `processing_status = 'not_required'`, and playback requires `ready` plus `not_required`.
-   - `scripts/remux-faststart.js` (`npm run video:faststart`) wraps a local ffmpeg for staff.
-- **Migration** `src/migrations/20261030020000000_add-lesson-playback.js` (22nd): `lesson_video_chapters`, the offline license columns, `not_required`, and the `lessons.read`, `lessons.manage` and `lessons.offline.manage` permissions.
+- **First commit:** `.claude/settings.json` was added to `.gitignore`. Do not commit that file.
+- **Migration:** `20261031010000000_add-question-bank-permissions.js` (23rd). It adds five permissions and the `question_answer_keys_verified_source_check` CHECK, and no tables.
 - **New code:**
-   - Repositories: `lesson-repository.js`, `learner-lesson-repository.js`, `offline-license-repository.js`.
-   - Services: `lesson-service.js`, `learner-lesson-service.js`, `offline-license-service.js`.
-   - Controllers: `lesson-controller.js`, `learner-lesson-controller.js`, `offline-license-controller.js`.
-   - Routes: `routes/offline-licenses.js`.
-   - Test: `tests/integration/lessons.test.js`.
-- **Changed code:**
-   - `media-inspection.js`, `asset-upload-service.js`, `s3-storage-provider.js` (disposition), `course-module-service.js` (lesson copy steps).
-   - `routes/admin.js`, `routes/courses.js`, `routes/index.js`, `course-admin-middleware.js`, `auth-protection-middleware.js` (`learnerMediaRateMiddleware`), `env.js` (`PLAYBACK_RATE_LIMIT`).
-   - Tests and helpers, `verify-database.js`, `test-migration-cycle.js`, `package.json`, and the docs.
-- The archive copy is `docs/handoffs/2026-10-29-m07-b-lessons-playback.md`.
+   - `repositories/taxonomy-repository.js`, `repositories/question-bank-repository.js`
+   - `services/taxonomy-service.js`, `services/question-bank-service.js`
+   - `controllers/taxonomy-controller.js`, `controllers/question-bank-controller.js`
+   - `middleware/question-admin-middleware.js`, `utils/question-content.js`
+   - Routes in `routes/admin.js`.
+- **Tests:** `tests/unit/question-content.test.js` and `tests/integration/question-bank.test.js`, both registered in `tests/all.test.js`. The integration cleanup disables the question triggers inside one transaction, as test-only maintenance SQL, because published questions are immutable.
+- **Updated:** `verify-database.js` (23 migrations, 29 permissions, 67 role grants, 9 teacher grants), `test-migration-cycle.js` (23/23/22/23), `docs/api.md`, `docs/decisions.md`, `docs/architecture.md`, `docs/progress.md` and `ROADMAP.md`.
 
 ## Decisions to review
 
-All are in `docs/decisions.md` under "Lessons, playback and offline licenses (M07-B)": 20 assumptions made without the user. The ones most worth a look:
+All 12 are in `docs/decisions.md` under "Taxonomy and question bank (M08)". The ones most worth a look:
 
-- `test` lessons cannot be published until M10.
-- Notes and progress reads also require current module access; rows are kept.
-- Lessons without a video are completed with `{ completed: true }`.
-- An offline license covers only the lesson video. Licenses are managed only from their own session; signing a session out frees its device slot.
-- A license revoked by an administrator cannot be renewed from the same session.
-- Video assets uploaded under M07-A keep `processing_status = 'none'`, so they are not playable. Re-upload them.
+- Teachers can create banks and author questions. Only owner/admin can verify keys, publish and archive.
+- Admins may verify their own keys; there is no four-eyes rule.
+- Read-only staff (shared bank) never see answer data.
+- Any edit of a draft returns a verified key to `proposed`. Removing a referenced item resets the key to `unknown`.
+- Archive is one-way; corrections go through copy.
+- Question images must be ready PNG/JPEG assets the author uploaded. Bank-bound uploads are deferred to M09.
 
-## Verification (2026-10-29)
+## Verification (2026-10-30)
 
-- Baseline on `main` (`68e4fab`): `migrate:up` was a no-op; 156 tests, 155 passed, 1 skipped.
+- Baseline on `main` (`0bf88ae`): `migrate:up` was a no-op. `npm test`: 174 tests, 173 passed, 1 skipped.
 - `npm run migrate:up` applied the migration. `verify-database.js` reported `valid: true`.
-- `npm test` (after the published-lesson editing follow-up): 174 tests, 173 passed, 0 failed, 1 skipped (real storage). Source integrity, schema integrity and the server lifecycle check passed.
-- `npm run test:migrations`: 22/22/21/22; the disposable database was dropped. No rollback ran against `everest_db`.
-- Not verified:
-   - any real S3/MinIO call, Range seeking, or browser playback;
-   - ffmpeg remux with a real file (ffmpeg is not installed; only the missing-ffmpeg path was exercised).
+- `npm test`: 189 tests, 188 passed, 0 failed, 1 skipped (real storage). Source integrity, schema integrity and the server lifecycle check passed.
+- `npm run test:migrations`: 23/23/22/23. The disposable database was dropped. No rollback ran against `everest_db`.
+- After the integration test, `everest_db` has no leftover questions, banks or subjects, and every question trigger is enabled.
 
-## Next concrete task
+## Still pending from M07-A/M07-B (external)
 
-1. Close the two real-storage pending items above.
-2. Then continue with M08 (taxonomy and question bank), or resolve the review items above first.
+- Real MinIO/S3 round trip, a 3 GB interrupted/resumed upload, and Range seeking of a real faststart MP4. All need Docker Desktop or the MinIO binary; see `docs/architecture.md` §13a.
+- Add the `S3_*`, `STORAGE_*` and `PLAYBACK_RATE_LIMIT` variables to `.env.example` by hand. M08 adds no environment variables.
 
 ## Constraints
 
 - Preserve route → middleware → controller → service → repository → PostgreSQL.
-- No HLS, multi-quality video, `asset_variants`, workers, or `group_courses`.
-- Do not edit the 22 published migrations. Never merge, force-push, or push to `main`.
+- Do not edit the 23 published migrations. Never merge, force-push, or push to `main`.
+- `question_answer_keys` is the only source of correctness; no `is_correct`. Imports stay draft.
 
 ## Safe startup commands
 
 ```powershell
+git checkout main; git pull
 git status --short
-git branch --show-current
 git log -5 --oneline
-Get-Content ROADMAP.md
-Get-Content docs/handoffs/current.md
 npm run migrate:up
 npm test
 ```
