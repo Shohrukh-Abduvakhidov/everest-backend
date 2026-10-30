@@ -7,6 +7,10 @@ async function findOwnProfile(userId, db = pool) {
          account.created_at, GREATEST(account.updated_at, profile.updated_at) AS updated_at,
          profile.first_name, profile.last_name, profile.language_code, profile.timezone,
          profile.avatar_asset_id, phone.phone_e164,
+         EXISTS (
+            SELECT 1 FROM auth_identities AS identity
+            WHERE identity.user_id = account.id AND identity.provider = 'telegram'
+         ) AS telegram_linked,
          COALESCE(
             array_agg(DISTINCT role.code ORDER BY role.code)
                FILTER (WHERE role.code IS NOT NULL),

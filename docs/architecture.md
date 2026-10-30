@@ -556,7 +556,7 @@ Actual response envelopes:
 | Area | Status | Current reality |
 |---|---|---|
 | Project foundation | Done | ESM Express app/server, config, Pool, errors, tests |
-| Database schema | Done | 87-table, 23-migration current catalog; numeric baseline and incremental migrations verified |
+| Database schema | Done | 87-table, 24-migration current catalog; numeric baseline and incremental migrations verified |
 | Numeric identifiers (M01R) | Done | 67 identity columns; internal IDs/FKs are `BIGINT`; decimal-string API/JWT contract |
 | Telegram OIDC | Done | Login/link/unlink/session/test-message routes and tests |
 | Phone/password authentication | Done | Pending registration, salted `scrypt`, active-only login, shared session, audit, tests |
