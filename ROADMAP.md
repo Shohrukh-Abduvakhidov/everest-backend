@@ -222,9 +222,22 @@ This roadmap orders implementation; it does not replace the [current architectur
    - Verify Range seeking of a real faststart mp4 through a signed URL against real storage.
 - **Exclusions:** Multi-quality video, HLS, `asset_variants`, workers and lesson favorites.
 
+## M-DOCS — OpenAPI specification and Swagger UI
+
+- **Status:** In progress (implemented and verified on `feat/m-docs-swagger`; awaiting PR review). Added by the user on 2026-10-30, outside the original plan.
+- **Goal:** Give frontend and staff an always-current, interactive description of every implemented `/api/v1` route.
+- **Deliverables:**
+   - OpenAPI 3.1 spec (`src/docs/openapi.js`) with cookie/Bearer security, the CSRF header, DTO schemas, error codes and pagination.
+   - Swagger UI at `/api/docs` and JSON at `/api/docs/openapi.json`. Off in production unless `SWAGGER_ENABLED=true`; on in development.
+   - Login from Swagger via cookies, with the CSRF header added automatically.
+   - Tests for spec validity, two-way route coverage and documented error codes.
+   - Owner bootstrap → login → approval walkthrough in `docs/api.md`.
+- **Verification:** `tests/unit/openapi.test.js` (6 tests). `npm test`: 199 tests, 198 passed, 1 skipped. `test:migrations` 24/24/23/24.
+- **Exclusions:** Generated clients, contract testing of response bodies, and production exposure by default.
+
 ## M07-C — Learner catalog enrichment
 
-- **Status:** Done (implemented and verified on `feat/m07-c-learner-catalog`; awaiting PR review).
+- **Status:** Done (merged in PR #21).
 - **Goal:** Give the learner catalog what the frontend needs to render course cards.
 - **Dependencies:** M06, M07-B, M08.
 - **Deliverables:**

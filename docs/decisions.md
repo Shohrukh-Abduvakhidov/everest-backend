@@ -1,5 +1,42 @@
 # Decisions
 
+## 2026-10-30 — OpenAPI 3.1 and Swagger UI (M-DOCS)
+
+User decisions:
+
+- Swagger UI is served at `/api/docs` and the JSON at `/api/docs/openapi.json`.
+- In production it is off by default and enabled with `SWAGGER_ENABLED=true`. In development it is on by default.
+- The supported sign-in flow is cookie login from Swagger. CSRF works through `X-CSRF-Token` + `Origin`.
+
+Assumptions made without the user (please review):
+
+1. **The spec is a JavaScript module** (`src/docs/openapi.js`), not hand-written YAML.
+   - One `operation()` builder derives path parameters, security, the CSRF header, rate-limit and error responses from flags.
+   - Repeated shapes are shared components, so ~133 operations are not duplicated by hand.
+   - Paths are kept in Express syntax so the coverage test compares them directly.
+2. **`swagger-ui-dist` 5.33.1 (exact pin), not `swagger-ui-express`.**
+   - It is static files only, with no Express wrapper or extra transitive code.
+   - A small controller serves an allowlist of three files (CSS, bundle, favicon) plus our own page and initializer. The package's demo `index.html`/petstore initializer is never exposed.
+   - 5.33.1 was chosen because the newest release (5.34.0) was under two weeks old.
+3. **`@seriousme/openapi-schema-validator` 2.11.0 (devDependency, exact pin)** validates against the official OpenAPI 3.1 JSON Schema. It is small (ajv-based) and supports 3.1 strictly.
+4. **Drift protection** in `tests/unit/openapi.test.js`:
+   - The spec is valid 3.1.
+   - Registered Express routes and documented routes must match **both ways**.
+   - Every documented error code must exist in `src/` (taxonomy codes built from a template are allowlisted).
+   - Every authenticated mutation documents `X-CSRF-Token`.
+   - `routes/index.js` exports `routeMounts` because Express 5 layers do not keep mount paths; the router and the test share that one table.
+5. **Docs page hardening:**
+   - Strict CSP (`script-src 'self'`, `frame-ancestors 'none'`, no inline scripts); the initializer is a separate same-origin script.
+   - `nosniff` and `no-referrer`; `persistAuthorization: false`.
+   - The page copies the readable `everest_csrf` cookie into `X-CSRF-Token` only for mutations on the same origin.
+   - CORS, CSRF and rate limits are unchanged: docs routes are read-only GETs outside `/api/v1`.
+6. **A disabled Swagger returns the generic `404 ROUTE_NOT_FOUND`**, so production does not reveal that docs exist.
+7. **Bearer is documented, but login never returns tokens in JSON.** Bearer stays for non-browser clients; the browser flow is cookie-based. No real token appears in examples.
+8. **`scripts/bootstrap-owner.js` was broken.** It imported a removed `accountAdminService` object (SyntaxError at start).
+   - It now imports `bootstrapOwnerService`; there is no other change.
+   - A unit test guards the import. The script was not run against `everest_db` because it would assign an owner.
+9. **Repair:** M07-C had accidentally duplicated the top of `docs/api.md`, because a `$\`` sequence was interpreted by `String.replace`. It is repaired here. Doc edits now avoid `String.replace` with literal text.
+
 ## 2026-10-30 — Learner catalog enrichment (M07-C)
 
 User decisions:
