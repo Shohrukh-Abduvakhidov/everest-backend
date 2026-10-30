@@ -8,6 +8,7 @@ import './unit/session-lifecycle.test.js';
 import './unit/password-recovery.test.js';
 import './unit/media-inspection.test.js';
 import './unit/question-content.test.js';
+import './unit/openapi.test.js';
 import './integration/password-auth.test.js';
 import './integration/auth-protection.test.js';
 import './integration/account-admin.test.js';

@@ -493,6 +493,17 @@ The database models general or course conversations, messages, scoped limit poli
 
 No AI route, service, repository, prompt, worker, model selection, or provider call exists. `AI_API_KEY` is unused. Reservation locking, calls, reconciliation of unknown outcomes, settlement/release, and safe context access are confirmed requirements but remain planned.
 
+## 18a. API documentation (M-DOCS)
+
+- `src/docs/openapi.js` builds the OpenAPI 3.1 document from a route table written in Express syntax, plus shared component schemas. `documentedRoutes` exposes the same table to the tests.
+- `routes/docs.js` → `controllers/docs-controller.js` serves:
+   - the page `/api/docs`, with a strict CSP;
+   - `/api/docs/openapi.json` (built once and cached in memory);
+   - `/api/docs/swagger-initializer.js`, which adds `X-CSRF-Token` from the `everest_csrf` cookie on mutations;
+   - three allowlisted files from `swagger-ui-dist` under `/api/docs/assets/`.
+- `app.js` mounts the docs router before `/api/v1` only when `serviceDependencies.docs.enabled ?? env.swaggerEnabled`. Otherwise the generic 404 handler answers. The docs have no database access and no write routes.
+- `routes/index.js` exports `routeMounts`, the single mount table used by the router and by the two-way coverage test in `tests/unit/openapi.test.js`.
+
 ## 19. Testing architecture
 
 | Script | Purpose |

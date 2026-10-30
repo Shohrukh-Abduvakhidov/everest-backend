@@ -4,7 +4,18 @@ Updated: 2026-10-30.
 
 ## Current increment
 
-M08 is merged into `main` (PR #20). M07-C (learner catalog enrichment and `telegramLinked`) is implemented on `feat/m07-c-learner-catalog`. Real MinIO/S3 and Range-seek verification for M07-A/M07-B are still pending, because Docker is not installed. Production SMS remains unavailable pending provider approval. The next ROADMAP milestone is M09 (indexed book import), which needs approved input formats.
+M07-C is merged into `main` (PR #21). M-DOCS (OpenAPI 3.1 + Swagger UI) is implemented on `feat/m-docs-swagger`. Real MinIO/S3 and Range-seek verification for M07-A/M07-B are still pending, because Docker is not installed. Production SMS remains unavailable pending provider approval. The next ROADMAP milestone is M09 (indexed book import), which needs approved input formats.
+
+## 2026-10-30 — M-DOCS OpenAPI and Swagger UI
+
+- Added `src/docs/openapi.js`: an OpenAPI 3.1 spec for all 133 `/api/v1` operations (103 paths) with cookie/Bearer security, the CSRF header, shared schemas, error codes and pagination.
+- Added `controllers/docs-controller.js` and `routes/docs.js`: `/api/docs` (page, CSP), `/api/docs/openapi.json`, `/api/docs/swagger-initializer.js` (CSRF auto-header) and allowlisted `swagger-ui-dist` assets. They are mounted in `app.js` only when `SWAGGER_ENABLED` (default `NODE_ENV !== 'production'`).
+- `routes/index.js` exports `routeMounts`; `configs/env.js` adds `swaggerEnabled`.
+- Dependencies: `swagger-ui-dist@5.33.1`; dev `@seriousme/openapi-schema-validator@2.11.0` (exact pins).
+- Fixed `scripts/bootstrap-owner.js` (broken import) and repaired the duplicated block at the top of `docs/api.md`.
+- `tests/unit/openapi.test.js` (6 tests): 3.1 validity, two-way route coverage, security/error envelope/CSRF parameter, documented codes exist, bootstrap import, served only when enabled with the asset allowlist.
+- `npm test`: 199 tests, 198 passed, 0 failed, 1 skipped (real storage). `npm run test:migrations`: 24/24/23/24, no migration added.
+- A manual check on a separate server (port 4999) served the page, JSON (103 paths, 133 operations) and CSS with 200, and returned 404 for the package's `index.html`. A browser click-through of the Swagger login was not done: the local `.env` still lacks `JWT_ACCESS_SECRET`/`OTP_HMAC_SECRET`.
 
 ## 2026-10-30 — M07-C learner catalog enrichment
 

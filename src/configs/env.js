@@ -48,8 +48,12 @@ export const databaseConfig = Object.freeze({
   ssl: readBoolean('DB_SSL') ? { rejectUnauthorized: true } : false,
 });
 
+const nodeEnv = readString('NODE_ENV', 'development');
+
 const env = Object.freeze({
-  nodeEnv: readString('NODE_ENV', 'development'),
+  nodeEnv,
+  // API docs are off in production unless explicitly enabled.
+  swaggerEnabled: readBoolean('SWAGGER_ENABLED', nodeEnv !== 'production'),
   port: readInteger('PORT', 4000, { max: 65535 }),
   corsOrigins: readString('CORS_ORIGINS', 'http://localhost:3000')
     .split(',')

@@ -13,12 +13,18 @@ const router = express.Router()
 
 router.get('/health', getLivenessController)
 router.get('/ready', getReadinessController)
-router.use('/auth', authRouter)
-router.use('/admin', adminRouter)
-router.use('/assets', assetsRouter)
-router.use('/courses', coursesRouter)
-router.use('/groups', groupsRouter)
-router.use('/offline-licenses', offlineLicensesRouter)
-router.use('/profile', profileRouter)
+// One mount table shared by the router and the OpenAPI coverage test.
+const routeMounts = Object.freeze([
+   ['/auth', authRouter],
+   ['/admin', adminRouter],
+   ['/assets', assetsRouter],
+   ['/courses', coursesRouter],
+   ['/groups', groupsRouter],
+   ['/offline-licenses', offlineLicensesRouter],
+   ['/profile', profileRouter],
+])
 
+for (const [mountPath, mountedRouter] of routeMounts) router.use(mountPath, mountedRouter)
+
+export { routeMounts }
 export default router

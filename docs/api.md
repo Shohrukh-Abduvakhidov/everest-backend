@@ -1,5 +1,42 @@
 # Implemented API
 
+## Swagger UI and OpenAPI (M-DOCS)
+
+- Swagger UI: `GET /api/docs`. OpenAPI 3.1 JSON: `GET /api/docs/openapi.json`.
+- Both are enabled by default when `NODE_ENV` is not `production`, and disabled in production unless `SWAGGER_ENABLED=true`. When disabled, both return the generic `404 ROUTE_NOT_FOUND`.
+- The spec source is `src/docs/openapi.js`. `tests/unit/openapi.test.js` fails when:
+   - the spec is not valid OpenAPI 3.1;
+   - a registered Express route is missing from the spec, or the spec lists a route Express does not register;
+   - a documented error code does not exist in the source.
+- When you add a route, add it to `src/docs/openapi.js` as well.
+
+### Signing in from Swagger UI
+
+Requirements in `.env`:
+
+- `JWT_ACCESS_SECRET` and `OTP_HMAC_SECRET`, each at least 32 characters. Without them every auth route returns `503`.
+- `CORS_ORIGINS` must include the origin that serves Swagger, for example `http://localhost:4000`. Otherwise cookie mutations return `403 CSRF_ORIGIN_REJECTED`.
+
+Steps:
+
+1. Open `http://localhost:4000/api/docs`.
+2. Run `POST /auth/login/password` with an **active** account. The browser stores `everest_access`, `everest_refresh` and `everest_csrf`.
+3. Every later request from the page sends the cookies (cookieAuth); the *Authorize* button is not needed. For mutations the page copies `everest_csrf` into `X-CSRF-Token`, and the browser sends `Origin` itself.
+4. Check the session with `GET /profile`. On `401`, call `POST /auth/refresh`. Finish with `POST /auth/logout`.
+5. Bearer: *Authorize → bearerAuth* accepts an access token; Bearer requests need no CSRF. Login never returns tokens in JSON, so Bearer is meant for non-browser clients. Do not paste production tokens into shared screenshots.
+
+### First owner and approving a student
+
+1. `npm run migrate:up`, then `npm start` (or `npm run dev`).
+2. In Swagger, run `POST /auth/register` with the future owner's phone, password, first and last name. The account is created as `pending`.
+3. In a terminal: `npm run bootstrap:owner -- --phone +992XXXXXXXXX`.
+   - It activates that registered account and assigns the `owner` role, with an audit event.
+   - It works only once: if an owner already exists it fails with `OWNER_ALREADY_CONFIGURED`. An unknown phone fails with `BOOTSTRAP_USER_NOT_FOUND`.
+4. In Swagger, run `POST /auth/login/password` as the owner, then `GET /profile`: `roles` contains `owner`.
+5. The student registers with `POST /auth/register` (any browser, or the same Swagger page), which creates a `pending` account.
+6. As the owner, run `GET /admin/users/pending`, copy the student's `id`, and run `POST /admin/users/{userId}/approve`. The student becomes `active`.
+7. The student can now log in. Course access is granted separately: `POST /admin/courses/{courseId}/enrollments` with `{ userId, expiresAt }`, then module grants.
+
 ## Taxonomy APIs (M08)
 
 All routes are under `/api/v1/admin`, need a live session, and are staff-only. Reads need `taxonomy.read` (owner, admin, teacher). Writes need `taxonomy.manage` (owner, admin), the CSRF check and the administrative rate limit, and are audited atomically (`taxonomy.subject|section|topic.created|updated|deleted`).
@@ -20,28 +57,7 @@ Shapes:
 Rules:
 
 - Subjects also accept `color`: `green|blue|orange|purple|neutral`, default `neutral`. Any other value returns `400 VALIDATION_ERROR`. The subject shape includes `color`.
-- `code` matches `^[a-z0-9][a-z0-9_-]{0,49}# Implemented API
-
-## Taxonomy APIs (M08)
-
-All routes are under `/api/v1/admin`, need a live session, and are staff-only. Reads need `taxonomy.read` (owner, admin, teacher). Writes need `taxonomy.manage` (owner, admin), the CSRF check and the administrative rate limit, and are audited atomically (`taxonomy.subject|section|topic.created|updated|deleted`).
-
-- `GET /subjects` → `{ subjects: [subject] }`, ordered by code.
-- `POST /subjects` → `201 subject`. Body: `{ code, primaryLanguage?: tg|ru|en (default tg), translations }`.
-- `PATCH /subjects/:subjectId` → `subject`. Partial body with the same fields. `translations` replaces the whole set.
-- `DELETE /subjects/:subjectId` → `{ id, status: 'deleted' }`. A subject that is still referenced (sections, topics, courses, banks, questions) returns `409 SUBJECT_IN_USE`.
-- `GET|POST /subjects/:subjectId/sections`, `PATCH|DELETE /sections/:sectionId`: same contract for sections.
-- `GET|POST /subjects/:subjectId/topics`, `PATCH|DELETE /topics/:topicId`: same contract for topics, plus `sectionId` and `parentId` (both nullable). The list is flat; build the tree from `parentId`.
-
-Shapes:
-
-- `subject` = `{ id, code, primaryLanguage, title, translations: { tg|ru|en: { title } } }`. `title` is the title in the primary language.
-- `section` = `subject` plus `subjectId`.
-- `topic` = `section` plus `sectionId` and `parentId`.
-
-Rules:
-
-. It is unique globally for subjects and within the subject for sections and topics (`409 SUBJECT|SECTION|TOPIC_CODE_CONFLICT`).
+- `code` matches `^[a-z0-9][a-z0-9_-]{0,49}$`. It is unique globally for subjects and within the subject for sections and topics (`409 SUBJECT|SECTION|TOPIC_CODE_CONFLICT`).
 - `translations` must contain the primary language. Titles are 1–200 characters.
 - A section or parent from another subject returns `422 TAXONOMY_SUBJECT_MISMATCH`. A parent that would create a cycle (including the topic itself) returns `409 TOPIC_CYCLE`.
 - Other errors: `400 INVALID_SUBJECT_ID|INVALID_SECTION_ID|INVALID_TOPIC_ID`, `404 SUBJECT|SECTION|TOPIC_NOT_FOUND`, `409 SECTION_IN_USE|TOPIC_IN_USE`.
