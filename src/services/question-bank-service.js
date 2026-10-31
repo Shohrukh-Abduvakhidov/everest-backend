@@ -5,6 +5,7 @@ import AppError from '../utils/app-error.js'
 import { normalizeInternalId } from '../utils/internal-id.js'
 import {
    choiceTypes,
+   hasCompleteInteractionSettings,
    isValidAnswerData,
    parseAnswerData,
    parseContent,
@@ -716,6 +717,9 @@ async function publishQuestionService(userId, questionIdValue, overrides) {
          { field: 'question', message: reason },
       ])
       if (parts.answerKey?.status !== 'verified') throw notReady('ANSWER_KEY_NOT_VERIFIED')
+      if (!hasCompleteInteractionSettings(question.question_type, question.interaction_settings)) {
+         throw notReady('INTERACTION_SETTINGS_INCOMPLETE')
+      }
       if (!isValidAnswerData(parts.answerKey.answer_data, keyShape(question, parts))) {
          throw notReady('ANSWER_KEY_INVALID')
       }

@@ -13,9 +13,16 @@ const sourceMetadataFields = {
    page: 'integer',
    number: 'text',
    note: 'text',
-   chapter: 'text',
-   variant: 'text',
+   // M09: provenance fields used by real book packages.
    year: 'year',
+   sourceFile: 'text',
+   printedPage: 'text',
+   sequence: 'integer',
+   bookSectionTitle: 'text',
+   bookRubric: 'text',
+   isSample: 'boolean',
+   reviewRequired: 'boolean',
+   examPart: 'labels',
 }
 
 function validationError(field, message = `${field} is invalid`) {
@@ -159,7 +166,9 @@ function parseInteractionSettings(value, questionType) {
       return {}
    }
    requireKeys(value, 'interactionSettings', ['requireAllLeft', 'allowRightReuse'])
-   if (typeof value.requireAllLeft !== 'boolean' || typeof value.allowRightReuse !== 'boolean') {
+   // null = not stated by the source yet. Drafts may keep it; publication requires booleans.
+   const isRule = (rule) => typeof rule === 'boolean' || rule === null
+   if (!isRule(value.requireAllLeft) || !isRule(value.allowRightReuse)) {
       throw validationError('interactionSettings')
    }
    return { requireAllLeft: value.requireAllLeft, allowRightReuse: value.allowRightReuse }
@@ -175,6 +184,16 @@ function parseSourceMetadata(value) {
             throw validationError('sourceMetadata')
          }
          parsed[field] = value[field]
+      } else if (kind === 'boolean') {
+         if (typeof value[field] !== 'boolean') throw validationError('sourceMetadata')
+         parsed[field] = value[field]
+      } else if (kind === 'labels') {
+         const labels = value[field]
+         if (!Array.isArray(labels) || !labels.length || labels.length > 10
+            || labels.some((label) => typeof label !== 'string' || !label.trim() || label.length > 20)) {
+            throw validationError('sourceMetadata')
+         }
+         parsed[field] = labels.map((label) => label.trim())
       } else if (kind === 'year') {
          if (!Number.isSafeInteger(value[field]) || value[field] < 1900 || value[field] > 2100) {
             throw validationError('sourceMetadata')
@@ -230,14 +249,15 @@ function parseAnswerData(value, question) {
                || !leftKeys.has(pair.left) || !rightKeys.has(pair.right) || usedLeft.has(pair.left)) {
                throw invalidKey('pairs must reference existing items with each left item once')
             }
-            if (!question.interactionSettings.allowRightReuse && usedRight.has(pair.right)) {
+            // An unstated reuse rule (null) is treated strictly: no reuse.
+            if (question.interactionSettings.allowRightReuse !== true && usedRight.has(pair.right)) {
                throw invalidKey('right items cannot be reused')
             }
             usedLeft.add(pair.left)
             usedRight.add(pair.right)
             return { left: pair.left, right: pair.right }
          })
-         if (question.interactionSettings.requireAllLeft && usedLeft.size !== leftKeys.size) {
+         if (question.interactionSettings.requireAllLeft === true && usedLeft.size !== leftKeys.size) {
             throw invalidKey('every left item must be paired')
          }
          return { pairs }
@@ -267,8 +287,14 @@ function isValidAnswerData(value, question) {
    }
 }
 
+function hasCompleteInteractionSettings(questionType, settings) {
+   return questionType !== 'matching'
+      || (typeof settings?.requireAllLeft === 'boolean' && typeof settings?.allowRightReuse === 'boolean')
+}
+
 export {
    choiceTypes,
+   hasCompleteInteractionSettings,
    isPlainObject,
    isValidAnswerData,
    parseAnswerData,

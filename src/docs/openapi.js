@@ -433,7 +433,9 @@ const schemas = {
    }),
    SourceMetadata: body({
       book: str(), edition: str(), page: int({ minimum: 1 }), number: str(), note: str(),
-      chapter: str(), variant: str(), year: int({ minimum: 1900, maximum: 2100 }),
+      year: int({ minimum: 1900, maximum: 2100 }), sourceFile: str(), printedPage: str(), sequence: int({ minimum: 1 }),
+      bookSectionTitle: str(), bookRubric: str(), isSample: bool(), reviewRequired: bool(),
+      examPart: arr(str({ maxLength: 20 }), { minItems: 1, maxItems: 10 }),
    }),
    QuestionBank: obj({
       id: id(),
@@ -568,7 +570,7 @@ const questionFields = {
    difficulty: nullable(int({ minimum: 1, maximum: 5 })),
    difficultySource: nullable(enumOf(['ai', 'expert', 'official'])),
    content: ref('RichContent'),
-   interactionSettings: anyObject('{} or, for matching, { requireAllLeft: boolean, allowRightReuse: boolean }'),
+   interactionSettings: anyObject('{} or, for matching, { requireAllLeft: boolean|null, allowRightReuse: boolean|null } (null = not stated; drafts only)'),
    sourceMetadata: ref('SourceMetadata'),
    options: arr(ref('QuestionItemInput'), { minItems: 2, maxItems: 10 }),
    matching: body({
