@@ -154,6 +154,7 @@ This roadmap orders implementation; it does not replace the [current architectur
 - **Verification:** Administrative permissions, atomic membership changes, announcement scope, and no implicit course-grant tests.
 - **Documentation updates:** API, decisions, architecture, progress, roadmap, handoff.
 - **Exclusions:** Announcement assets before M07; progress summaries before M12; ranking before M13 and an approved formula; `group_courses`.
+- **Follow-up (2026-10-31, PR open):** optional generated group codes, list filters with total, member/teacher edit endpoints, candidate filters on `/admin/users`, counts on writes, `GROUP_ARCHIVED`, announcement status filter. Verified by `npm test` (238 passed).
 
 ## M05-A — Course catalog, lifecycle and teacher assignments
 

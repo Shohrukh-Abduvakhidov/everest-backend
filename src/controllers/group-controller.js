@@ -12,7 +12,9 @@ import {
    removeGroupMemberService,
    removeGroupTeacherService,
    updateGroupAnnouncementService,
+   updateGroupMemberService,
    updateGroupService,
+   updateGroupTeacherService,
 } from '../services/group-service.js'
 
 async function listGroupsController(req, res, next) {
@@ -152,6 +154,36 @@ async function removeGroupTeacherController(req, res, next) {
    }
 }
 
+async function updateGroupMemberController(req, res, next) {
+   try {
+      const data = await updateGroupMemberService(
+         req.auth.userId,
+         req.params.groupId,
+         req.params.userId,
+         req.body,
+         req.app.locals.serviceDependencies.groups,
+      )
+      res.json({ data })
+   } catch (error) {
+      next(error)
+   }
+}
+
+async function updateGroupTeacherController(req, res, next) {
+   try {
+      const data = await updateGroupTeacherService(
+         req.auth.userId,
+         req.params.groupId,
+         req.params.userId,
+         req.body,
+         req.app.locals.serviceDependencies.groups,
+      )
+      res.json({ data })
+   } catch (error) {
+      next(error)
+   }
+}
+
 async function listGroupAnnouncementsController(req, res, next) {
    try {
       const data = await listGroupAnnouncementsService(
@@ -223,5 +255,7 @@ export {
    removeGroupMemberController,
    removeGroupTeacherController,
    updateGroupAnnouncementController,
+   updateGroupMemberController,
    updateGroupController,
+   updateGroupTeacherController,
 }

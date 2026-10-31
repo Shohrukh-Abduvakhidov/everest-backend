@@ -55,7 +55,7 @@ const schemas = {
       limit: int(),
       offset: int(),
       hasMore: bool(),
-      total: int({ description: 'Total matching items; present on lists that count (admin accounts)' }),
+      total: int({ description: 'Total matching items; present on lists that count (admin accounts, groups)' }),
    }, ['limit', 'offset', 'hasMore']),
    LanguageCode: enumOf(languages),
    TitleTranslations: {
@@ -896,14 +896,28 @@ const routes = [
    }],
 
    // Groups
-   ['get', '/groups', { tag: 'Groups', summary: 'Visible groups', query: limitQuery, response: page('groups', ref('Group')) }],
+   ['get', '/groups', {
+      tag: 'Groups', summary: 'Visible groups (filter, search, total)',
+      description: 'Ordered by name, then id. `q` (2–100 characters) matches the group name case-insensitively; LIKE wildcards are literal. Unknown query parameters are rejected.',
+      query: [
+         ...limitQuery,
+         { name: 'status', schema: enumOf(['active', 'archived']) },
+         { name: 'q', schema: str({ minLength: 2, maxLength: 100 }) },
+      ],
+      response: page('groups', ref('Group')),
+   }],
    ['get', '/groups/:groupId', { tag: 'Groups', summary: 'Group', response: ref('Group'), errors: { 404: ['GROUP_NOT_FOUND'] } }],
    ['get', '/groups/:groupId/members', { tag: 'Groups', summary: 'Members', query: limitQuery, response: page('members', ref('GroupMember')), errors: { 404: ['GROUP_NOT_FOUND'] } }],
    ['get', '/groups/:groupId/teachers', { tag: 'Groups', summary: 'Teachers', query: limitQuery, response: page('teachers', ref('GroupTeacher')), errors: { 404: ['GROUP_NOT_FOUND'] } }],
-   ['get', '/groups/:groupId/announcements', { tag: 'Groups', summary: 'Announcements', query: limitQuery, response: page('announcements', ref('Announcement')), errors: { 404: ['GROUP_NOT_FOUND'] } }],
+   ['get', '/groups/:groupId/announcements', {
+      tag: 'Groups', summary: 'Announcements',
+      description: 'Without `status`: published items, plus drafts for administrators and assigned teachers; archived items are hidden. With `status`: only that status; drafts and archived items are returned only to owners/admins and teachers allowed to publish announcements in the group, so students always get published items only.',
+      query: [...limitQuery, { name: 'status', schema: enumOf(['draft', 'published', 'archived']) }],
+      response: page('announcements', ref('Announcement')), errors: { 404: ['GROUP_NOT_FOUND'] },
+   }],
    ['post', '/groups/:groupId/announcements', {
       tag: 'Groups', created: true, permission: 'groups.announcements.manage', summary: 'Create an announcement',
-      body: body(announcementFields, ['title', 'content']), response: ref('Announcement'), errors: { 404: ['GROUP_NOT_FOUND'] },
+      body: body(announcementFields, ['title', 'content']), response: ref('Announcement'), errors: { 404: ['GROUP_NOT_FOUND'], 409: ['GROUP_ARCHIVED'] },
    }],
    ['patch', '/groups/:groupId/announcements/:announcementId', {
       tag: 'Groups', permission: 'groups.announcements.manage', summary: 'Update an announcement',
@@ -954,6 +968,8 @@ const routes = [
          { name: 'role', schema: enumOf(['owner', 'admin', 'teacher', 'student']) },
          { name: 'q', schema: str({ minLength: 2, maxLength: 100 }) },
          { name: 'sort', schema: enumOf(['-createdAt', 'createdAt'], { default: '-createdAt' }) },
+         { name: 'notInGroup', description: 'Exclude active members of this group', schema: id() },
+         { name: 'notTeacherOfGroup', description: 'Exclude teachers assigned to this group', schema: id() },
       ],
       response: page('users', ref('AdminAccount')),
    }],
@@ -1135,31 +1151,44 @@ const routes = [
    // Admin: groups
    ['post', '/admin/groups', {
       tag: 'Admin: groups', ...admin('groups.create'), created: true, summary: 'Create a group',
-      body: body({ code: str(), name: str(), description: nullable(str()), status: enumOf(['active', 'archived']) }, ['code', 'name']),
+      description: 'When `code` is omitted the server generates a unique one from the name (transliterated slug plus a random suffix). An explicit duplicate code returns GROUP_CODE_CONFLICT.',
+      body: body({ code: str({ maxLength: 80 }), name: str(), description: nullable(str()), status: enumOf(['active', 'archived']) }, ['name']),
       response: ref('Group'), errors: { 409: ['GROUP_CODE_CONFLICT'] },
    }],
    ['patch', '/admin/groups/:groupId', {
       tag: 'Admin: groups', ...admin('groups.update'), summary: 'Update a group',
-      body: body({ code: str(), name: str(), description: nullable(str()), status: enumOf(['active', 'archived']) }),
+      body: body({ code: str({ maxLength: 80 }), name: str(), description: nullable(str()), status: enumOf(['active', 'archived']) }),
       response: ref('Group'), errors: { 404: ['GROUP_NOT_FOUND'], 409: ['GROUP_CODE_CONFLICT'] },
    }],
    ['post', '/admin/groups/:groupId/members', {
       tag: 'Admin: groups', ...admin('groups.members.manage'), created: true, summary: 'Add a student member',
       body: body({ userId: id(), isRepresentative: bool() }, ['userId']),
-      response: obj({ userId: id(), status: str(), isRepresentative: bool(), joinedAt: dt() }), errors: { 404: ['GROUP_NOT_FOUND'] },
+      response: obj({ userId: id(), status: str(), isRepresentative: bool(), joinedAt: dt() }),
+      errors: { 404: ['GROUP_NOT_FOUND'], 409: ['GROUP_ARCHIVED', 'GROUP_MEMBER_INELIGIBLE', 'GROUP_MEMBER_ALREADY_ACTIVE'] },
+   }],
+   ['patch', '/admin/groups/:groupId/members/:userId', {
+      tag: 'Admin: groups', ...admin('groups.members.manage'), summary: 'Set the representative flag',
+      body: body({ isRepresentative: bool() }, ['isRepresentative']),
+      response: ref('GroupMember'), errors: { 404: ['GROUP_NOT_FOUND', 'GROUP_MEMBER_NOT_FOUND'], 409: ['GROUP_ARCHIVED'] },
    }],
    ['delete', '/admin/groups/:groupId/members/:userId', {
       tag: 'Admin: groups', ...admin('groups.members.manage'), summary: 'Remove a member (history kept)',
-      response: obj({ userId: id(), status: str(), leftAt: dt() }), errors: { 404: ['GROUP_NOT_FOUND', 'GROUP_MEMBER_NOT_FOUND'] },
+      response: obj({ userId: id(), status: str(), leftAt: dt() }), errors: { 404: ['GROUP_NOT_FOUND', 'GROUP_MEMBER_NOT_FOUND'], 409: ['GROUP_ARCHIVED'] },
    }],
    ['post', '/admin/groups/:groupId/teachers', {
       tag: 'Admin: groups', ...admin('groups.teachers.manage'), created: true, summary: 'Assign a teacher',
       body: body({ userId: id(), canPublishAnnouncements: bool(), canAssignTests: bool(), canViewResults: bool() }, ['userId']),
-      response: obj({ userId: id(), assignedAt: dt(), permissions: ref('GroupTeacherPermissions') }), errors: { 404: ['GROUP_NOT_FOUND'] },
+      response: obj({ userId: id(), assignedAt: dt(), permissions: ref('GroupTeacherPermissions') }),
+      errors: { 404: ['GROUP_NOT_FOUND'], 409: ['GROUP_ARCHIVED', 'GROUP_TEACHER_INELIGIBLE', 'GROUP_TEACHER_ALREADY_ASSIGNED'] },
+   }],
+   ['patch', '/admin/groups/:groupId/teachers/:userId', {
+      tag: 'Admin: groups', ...admin('groups.teachers.manage'), summary: 'Change teacher permissions',
+      body: body({ canPublishAnnouncements: bool(), canAssignTests: bool(), canViewResults: bool() }),
+      response: ref('GroupTeacher'), errors: { 404: ['GROUP_NOT_FOUND', 'GROUP_TEACHER_NOT_FOUND'], 409: ['GROUP_ARCHIVED'] },
    }],
    ['delete', '/admin/groups/:groupId/teachers/:userId', {
       tag: 'Admin: groups', ...admin('groups.teachers.manage'), summary: 'Remove a teacher',
-      response: obj({ userId: id(), status: str({ const: 'removed' }) }), errors: { 404: ['GROUP_NOT_FOUND', 'GROUP_TEACHER_NOT_FOUND'] },
+      response: obj({ userId: id(), status: str({ const: 'removed' }) }), errors: { 404: ['GROUP_NOT_FOUND', 'GROUP_TEACHER_NOT_FOUND'], 409: ['GROUP_ARCHIVED'] },
    }],
 
    // Admin: taxonomy

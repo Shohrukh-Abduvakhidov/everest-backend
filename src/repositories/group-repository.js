@@ -35,7 +35,11 @@ const visiblePredicateSql = `
       WHERE own_assignment.group_id = group_record.id AND own_assignment.user_id = $1
    )`
 
-async function listVisibleGroups(userId, { limit, offset }, db = pool) {
+// $2 status, $3 LIKE pattern (already escaped by the service).
+const groupFilterSql = `($2::text IS NULL OR group_record.status = $2)
+   AND ($3::text IS NULL OR group_record.title ILIKE $3 ESCAPE '\\')`
+
+async function listVisibleGroups(userId, { limit, offset, status, pattern }, db = pool) {
    const result = await db.query(
       `WITH actor AS (${actorAccessSql})
        SELECT group_record.id, group_record.code, group_record.title,
@@ -51,12 +55,35 @@ async function listVisibleGroups(userId, { limit, offset }, db = pool) {
          ) AS teacher_count
        FROM groups AS group_record
        CROSS JOIN actor
-       WHERE ${visiblePredicateSql}
+       WHERE (${visiblePredicateSql}) AND ${groupFilterSql}
        ORDER BY group_record.title, group_record.id
-       LIMIT $2 OFFSET $3`,
-      [normalizeInternalId(userId), limit + 1, offset],
+       LIMIT $4 OFFSET $5`,
+      [normalizeInternalId(userId), status, pattern, limit + 1, offset],
    )
    return result.rows
+}
+
+async function countVisibleGroups(userId, { status, pattern }, db = pool) {
+   const result = await db.query(
+      `WITH actor AS (${actorAccessSql})
+       SELECT count(*)::int AS total
+       FROM groups AS group_record
+       CROSS JOIN actor
+       WHERE (${visiblePredicateSql}) AND ${groupFilterSql}`,
+      [normalizeInternalId(userId), status, pattern],
+   )
+   return result.rows[0].total
+}
+
+async function countGroupPeople(groupId, client) {
+   const result = await client.query(
+      `SELECT
+         (SELECT count(*)::int FROM group_members
+          WHERE group_id = $1 AND status = 'active') AS member_count,
+         (SELECT count(*)::int FROM group_teachers WHERE group_id = $1) AS teacher_count`,
+      [normalizeInternalId(groupId)],
+   )
+   return result.rows[0]
 }
 
 async function findVisibleGroup(userId, groupId, db = pool) {
@@ -139,10 +166,12 @@ async function createGroup(group, client) {
    const result = await client.query(
       `INSERT INTO groups (code, title, description, status, created_by)
        VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (code) DO NOTHING
        RETURNING id, code, title, description, status, created_at, updated_at`,
       [group.code, group.title, group.description, group.status, normalizeInternalId(group.actorId)],
    )
-   return result.rows[0]
+   // A taken code returns null without aborting the caller's transaction.
+   return result.rows[0] || null
 }
 
 async function findGroupForUpdate(groupId, client) {
@@ -231,6 +260,62 @@ async function removeMembership(groupId, userId, client) {
    return result.rows[0] || null
 }
 
+async function updateMembershipRepresentative(groupId, userId, isRepresentative, client) {
+   const result = await client.query(
+      `UPDATE group_members SET is_representative = $3
+       WHERE group_id = $1 AND user_id = $2 AND status = 'active'
+       RETURNING id`,
+      [normalizeInternalId(groupId), normalizeInternalId(userId), isRepresentative],
+   )
+   return result.rowCount > 0
+}
+
+async function findMemberItem(groupId, userId, client) {
+   const result = await client.query(
+      `SELECT membership.id, membership.user_id, membership.status,
+         membership.is_representative, membership.joined_at,
+         profile.first_name, profile.last_name, profile.avatar_asset_id
+       FROM group_members AS membership
+       LEFT JOIN user_profiles AS profile ON profile.user_id = membership.user_id
+       WHERE membership.group_id = $1 AND membership.user_id = $2`,
+      [normalizeInternalId(groupId), normalizeInternalId(userId)],
+   )
+   return result.rows[0] || null
+}
+
+async function updateTeacherPermissions(groupId, userId, changes, client) {
+   const result = await client.query(
+      `UPDATE group_teachers SET
+         can_publish_announcements = COALESCE($3, can_publish_announcements),
+         can_assign_tests = COALESCE($4, can_assign_tests),
+         can_view_results = COALESCE($5, can_view_results)
+       WHERE group_id = $1 AND user_id = $2
+       RETURNING id`,
+      [
+         normalizeInternalId(groupId),
+         normalizeInternalId(userId),
+         changes.canPublishAnnouncements,
+         changes.canAssignTests,
+         changes.canViewResults,
+      ],
+   )
+   return result.rowCount > 0
+}
+
+async function findTeacherItem(groupId, userId, client) {
+   const result = await client.query(
+      `SELECT assignment.id, assignment.user_id, assignment.assigned_at,
+         assignment.can_publish_announcements, assignment.can_assign_tests,
+         assignment.can_view_results, profile.first_name, profile.last_name,
+         profile.avatar_asset_id
+       FROM group_teachers AS assignment
+       LEFT JOIN user_profiles AS profile ON profile.user_id = assignment.user_id
+       WHERE assignment.group_id = $1 AND assignment.user_id = $2`,
+      [normalizeInternalId(groupId), normalizeInternalId(userId)],
+   )
+   return result.rows[0] || null
+}
+
 async function findTeacherForUpdate(groupId, userId, client) {
    const result = await client.query(
       `SELECT id, user_id, can_publish_announcements, can_assign_tests,
@@ -271,7 +356,7 @@ async function removeTeacher(groupId, userId, client) {
 
 async function findAnnouncementManagerScope(userId, groupId, client) {
    const result = await client.query(
-      `SELECT group_record.id,
+      `SELECT group_record.id, group_record.status,
          EXISTS (
             SELECT 1 FROM user_roles AS membership
             JOIN roles AS role ON role.id = membership.role_id
@@ -288,7 +373,10 @@ async function findAnnouncementManagerScope(userId, groupId, client) {
    return result.rows[0] || null
 }
 
-async function listVisibleAnnouncements(userId, groupId, { limit, offset }, db = pool) {
+// Without $5 the default applies: no archived items, drafts only for administrators and
+// assigned teachers. With $5 only staff (administrator or a teacher allowed to publish)
+// see non-published items, so students never receive drafts or archived items.
+async function listVisibleAnnouncements(userId, groupId, { limit, offset, status = null }, db = pool) {
    const result = await db.query(
       `WITH actor AS (${actorAccessSql}),
        accessible_group AS (
@@ -297,7 +385,13 @@ async function listVisibleAnnouncements(userId, groupId, { limit, offset }, db =
                SELECT 1 FROM group_teachers AS own_assignment
                WHERE own_assignment.group_id = group_record.id
                  AND own_assignment.user_id = $1
-            ) AS is_teacher
+            ) AS is_teacher,
+            EXISTS (
+               SELECT 1 FROM group_teachers AS own_assignment
+               WHERE own_assignment.group_id = group_record.id
+                 AND own_assignment.user_id = $1
+                 AND own_assignment.can_publish_announcements
+            ) AS is_publishing_teacher
           FROM groups AS group_record CROSS JOIN actor
           WHERE group_record.id = $2 AND (${visiblePredicateSql})
        ), page AS (
@@ -307,11 +401,19 @@ async function listVisibleAnnouncements(userId, groupId, { limit, offset }, db =
             announcement.created_at, announcement.updated_at
           FROM group_announcements AS announcement
           JOIN accessible_group ON accessible_group.id = announcement.group_id
-          WHERE announcement.status <> 'archived'
-            AND (
-               announcement.status = 'published'
-               OR accessible_group.administrator OR accessible_group.is_teacher
-            )
+          WHERE CASE WHEN $5::text IS NULL THEN
+               announcement.status <> 'archived'
+               AND (
+                  announcement.status = 'published'
+                  OR accessible_group.administrator OR accessible_group.is_teacher
+               )
+            ELSE
+               announcement.status = $5
+               AND (
+                  announcement.status = 'published'
+                  OR accessible_group.administrator OR accessible_group.is_publishing_teacher
+               )
+            END
           ORDER BY announcement.is_pinned DESC,
             announcement.published_at DESC NULLS LAST,
             announcement.created_at DESC, announcement.id DESC
@@ -319,7 +421,7 @@ async function listVisibleAnnouncements(userId, groupId, { limit, offset }, db =
        )
        SELECT accessible_group.id AS accessible_group_id, page.*
        FROM accessible_group LEFT JOIN page ON TRUE`,
-      [normalizeInternalId(userId), normalizeInternalId(groupId), limit + 1, offset],
+      [normalizeInternalId(userId), normalizeInternalId(groupId), limit + 1, offset, status],
    )
    return result.rows
 }
@@ -397,6 +499,12 @@ async function archiveAnnouncement(announcementId, client) {
 
 export {
    archiveAnnouncement,
+   countGroupPeople,
+   countVisibleGroups,
+   findMemberItem,
+   findTeacherItem,
+   updateMembershipRepresentative,
+   updateTeacherPermissions,
    createAnnouncement,
    createGroup,
    createTeacher,

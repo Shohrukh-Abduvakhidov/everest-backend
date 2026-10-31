@@ -63,7 +63,7 @@ Validation errors are `400` with `code: "VALIDATION_ERROR"` and one entry in `de
 
 - **Query:** `limit` (integer 1–100, default 20) and `offset` (integer ≥ 0, default 0), both as decimal strings without leading zeros. Out-of-range values return `400 VALIDATION_ERROR`.
 - **Response:** `data: { <items>: [...], pagination: { limit, offset, hasMore } }`.
-- **`total`** exists **only** on `GET /admin/users` and `GET /admin/users/pending`. Other lists have `hasMore` only.
+- **`total`** exists **only** on `GET /admin/users`, `GET /admin/users/pending` and `GET /groups`. Other lists have `hasMore` only.
 - **Ordering** is deterministic per endpoint (always with an `id` tie-break); see `docs/api.md`.
 
 ---
@@ -156,12 +156,12 @@ Validation errors are `400` with `code: "VALIDATION_ERROR"` and one entry in `de
 
 | Method | Path | Access | Query | Body | Success `data` | Errors |
 |---|---|---|---|---|---|---|
-| GET | `/groups` | session | limit, offset | — | 200 { groups: Group[], pagination: Pagination } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED |
+| GET | `/groups` | session | limit, offset, status (active/archived), q (2–100, name) | — | 200 { groups: Group[], pagination: Pagination (with total) } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED |
 | GET | `/groups/{groupId}` | session | — | — | 200 Group | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 404: GROUP_NOT_FOUND |
 | GET | `/groups/{groupId}/members` | session | limit, offset | — | 200 { members: GroupMember[], pagination: Pagination } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 404: GROUP_NOT_FOUND |
 | GET | `/groups/{groupId}/teachers` | session | limit, offset | — | 200 { teachers: GroupTeacher[], pagination: Pagination } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 404: GROUP_NOT_FOUND |
-| GET | `/groups/{groupId}/announcements` | session | limit, offset | — | 200 { announcements: Announcement[], pagination: Pagination } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 404: GROUP_NOT_FOUND |
-| POST | `/groups/{groupId}/announcements` | `groups.announcements.manage` + CSRF | — | { title: string, content: string, isPinned?: boolean, status?: draft/published } | 201 Announcement | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: ACTION_FORBIDDEN, CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 404: GROUP_NOT_FOUND |
+| GET | `/groups/{groupId}/announcements` | session | limit, offset, status (draft/published/archived; drafts/archived only for owner/admin and publishing teachers) | — | 200 { announcements: Announcement[], pagination: Pagination } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 404: GROUP_NOT_FOUND |
+| POST | `/groups/{groupId}/announcements` | `groups.announcements.manage` + CSRF | — | { title: string, content: string, isPinned?: boolean, status?: draft/published } | 201 Announcement | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: ACTION_FORBIDDEN, CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 404: GROUP_NOT_FOUND; 409: GROUP_ARCHIVED |
 | PATCH | `/groups/{groupId}/announcements/{announcementId}` | `groups.announcements.manage` + CSRF | — | { title?: string, content?: string, isPinned?: boolean, status?: draft/published } | 200 Announcement | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: ACTION_FORBIDDEN, CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 404: GROUP_NOT_FOUND, ANNOUNCEMENT_NOT_FOUND |
 | DELETE | `/groups/{groupId}/announcements/{announcementId}` | `groups.announcements.manage` + CSRF | — | — | 200 Announcement | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: ACTION_FORBIDDEN, CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 404: GROUP_NOT_FOUND, ANNOUNCEMENT_NOT_FOUND |
 
@@ -179,7 +179,7 @@ Validation errors are `400` with `code: "VALIDATION_ERROR"` and one entry in `de
 
 | Method | Path | Access | Query | Body | Success `data` | Errors |
 |---|---|---|---|---|---|---|
-| GET | `/admin/users` | `accounts.pending.read` | limit, offset, status, role, q, sort | — | 200 { users: AdminAccount[], pagination: Pagination } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: ADMIN_ROLE_REQUIRED |
+| GET | `/admin/users` | `accounts.pending.read` | limit, offset, status, role, q, sort, notInGroup, notTeacherOfGroup | — | 200 { users: AdminAccount[], pagination: Pagination } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: ADMIN_ROLE_REQUIRED |
 | PUT | `/admin/users/{userId}/roles` | `accounts.approve` + CSRF | — | { roles: owner/admin/teacher/student[] } | 200 RoleChange | 400: VALIDATION_ERROR, INVALID_USER_ID, INVALID_ROLES; 401: AUTHENTICATION_REQUIRED; 403: ADMIN_ROLE_REQUIRED, ROLE_ASSIGNMENT_FORBIDDEN, OWNER_ACTION_FORBIDDEN, CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 404: USER_NOT_FOUND; 409: SELF_ROLE_CHANGE_FORBIDDEN, LAST_OWNER_PROTECTED; 422: STUDENT_ROLE_REQUIRED; 429: AUTH_RATE_LIMITED (Retry-After header) |
 | GET | `/admin/users/pending` | `accounts.pending.read` | limit, offset | — | 200 { users: PendingUser[], pagination: Pagination } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: ADMIN_ROLE_REQUIRED |
 | POST | `/admin/users/{userId}/approve` | `accounts.approve` + CSRF | — | — | 200 AccountTransition | 400: INVALID_USER_ID; 401: AUTHENTICATION_REQUIRED; 403: ADMIN_ROLE_REQUIRED, CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 404: USER_NOT_FOUND; 409: INVALID_ACCOUNT_TRANSITION, SELF_REJECTION_FORBIDDEN, SELF_BLOCK_FORBIDDEN; 429: AUTH_RATE_LIMITED (Retry-After header) |
@@ -253,12 +253,14 @@ Validation errors are `400` with `code: "VALIDATION_ERROR"` and one entry in `de
 
 | Method | Path | Access | Query | Body | Success `data` | Errors |
 |---|---|---|---|---|---|---|
-| POST | `/admin/groups` | `groups.create` + CSRF | — | { code: string, name: string, description?: string?, status?: active/archived } | 201 Group | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: ACTION_FORBIDDEN, CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 409: GROUP_CODE_CONFLICT; 429: AUTH_RATE_LIMITED (Retry-After header) |
-| PATCH | `/admin/groups/{groupId}` | `groups.update` + CSRF | — | { code?: string, name?: string, description?: string?, status?: active/archived } | 200 Group | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: ACTION_FORBIDDEN, CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 404: GROUP_NOT_FOUND; 409: GROUP_CODE_CONFLICT; 429: AUTH_RATE_LIMITED (Retry-After header) |
-| POST | `/admin/groups/{groupId}/members` | `groups.members.manage` + CSRF | — | { userId: Id, isRepresentative?: boolean } | 201 { userId?: Id, status?: string, isRepresentative?: boolean, joinedAt?: string } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: ACTION_FORBIDDEN, CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 404: GROUP_NOT_FOUND; 429: AUTH_RATE_LIMITED (Retry-After header) |
-| DELETE | `/admin/groups/{groupId}/members/{userId}` | `groups.members.manage` + CSRF | — | — | 200 { userId?: Id, status?: string, leftAt?: string } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: ACTION_FORBIDDEN, CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 404: GROUP_NOT_FOUND, GROUP_MEMBER_NOT_FOUND; 429: AUTH_RATE_LIMITED (Retry-After header) |
-| POST | `/admin/groups/{groupId}/teachers` | `groups.teachers.manage` + CSRF | — | { userId: Id, canPublishAnnouncements?: boolean, canAssignTests?: boolean, canViewResults?: boolean } | 201 { userId?: Id, assignedAt?: string, permissions?: GroupTeacherPermissions } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: ACTION_FORBIDDEN, CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 404: GROUP_NOT_FOUND; 429: AUTH_RATE_LIMITED (Retry-After header) |
-| DELETE | `/admin/groups/{groupId}/teachers/{userId}` | `groups.teachers.manage` + CSRF | — | — | 200 { userId?: Id, status?: "removed" } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: ACTION_FORBIDDEN, CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 404: GROUP_NOT_FOUND, GROUP_TEACHER_NOT_FOUND; 429: AUTH_RATE_LIMITED (Retry-After header) |
+| POST | `/admin/groups` | `groups.create` + CSRF | — | { code?: string (generated from name when omitted), name: string, description?: string?, status?: active/archived } | 201 Group (with memberCount, teacherCount; no relationship) | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: ACTION_FORBIDDEN, CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 409: GROUP_CODE_CONFLICT; 429: AUTH_RATE_LIMITED (Retry-After header) |
+| PATCH | `/admin/groups/{groupId}` | `groups.update` + CSRF | — | { code?: string, name?: string, description?: string?, status?: active/archived } | 200 Group (with memberCount, teacherCount; no relationship) | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: ACTION_FORBIDDEN, CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 404: GROUP_NOT_FOUND; 409: GROUP_CODE_CONFLICT; 429: AUTH_RATE_LIMITED (Retry-After header) |
+| POST | `/admin/groups/{groupId}/members` | `groups.members.manage` + CSRF | — | { userId: Id, isRepresentative?: boolean } | 201 { userId?: Id, status?: string, isRepresentative?: boolean, joinedAt?: string } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: ACTION_FORBIDDEN, CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 404: GROUP_NOT_FOUND; 409: GROUP_ARCHIVED, GROUP_MEMBER_INELIGIBLE, GROUP_MEMBER_ALREADY_ACTIVE; 429: AUTH_RATE_LIMITED (Retry-After header) |
+| DELETE | `/admin/groups/{groupId}/members/{userId}` | `groups.members.manage` + CSRF | — | — | 200 { userId?: Id, status?: string, leftAt?: string } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: ACTION_FORBIDDEN, CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 404: GROUP_NOT_FOUND, GROUP_MEMBER_NOT_FOUND; 409: GROUP_ARCHIVED; 429: AUTH_RATE_LIMITED (Retry-After header) |
+| PATCH | `/admin/groups/{groupId}/members/{userId}` | `groups.members.manage` + CSRF | — | { isRepresentative: boolean } | 200 GroupMember | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: ACTION_FORBIDDEN, CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 404: GROUP_NOT_FOUND, GROUP_MEMBER_NOT_FOUND; 409: GROUP_ARCHIVED; 429: AUTH_RATE_LIMITED (Retry-After header) |
+| POST | `/admin/groups/{groupId}/teachers` | `groups.teachers.manage` + CSRF | — | { userId: Id, canPublishAnnouncements?: boolean, canAssignTests?: boolean, canViewResults?: boolean } | 201 { userId?: Id, assignedAt?: string, permissions?: GroupTeacherPermissions } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: ACTION_FORBIDDEN, CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 404: GROUP_NOT_FOUND; 409: GROUP_ARCHIVED, GROUP_TEACHER_INELIGIBLE, GROUP_TEACHER_ALREADY_ASSIGNED; 429: AUTH_RATE_LIMITED (Retry-After header) |
+| DELETE | `/admin/groups/{groupId}/teachers/{userId}` | `groups.teachers.manage` + CSRF | — | — | 200 { userId?: Id, status?: "removed" } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: ACTION_FORBIDDEN, CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 404: GROUP_NOT_FOUND, GROUP_TEACHER_NOT_FOUND; 409: GROUP_ARCHIVED; 429: AUTH_RATE_LIMITED (Retry-After header) |
+| PATCH | `/admin/groups/{groupId}/teachers/{userId}` | `groups.teachers.manage` + CSRF | — | { canPublishAnnouncements?: boolean, canAssignTests?: boolean, canViewResults?: boolean } (at least one) | 200 GroupTeacher | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: ACTION_FORBIDDEN, CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 404: GROUP_NOT_FOUND, GROUP_TEACHER_NOT_FOUND; 409: GROUP_ARCHIVED; 429: AUTH_RATE_LIMITED (Retry-After header) |
 
 ### Admin: taxonomy
 
@@ -562,7 +564,7 @@ npm run storage:configure   # only with S3/MinIO: bucket CORS/settings
 ### API behaviour the UI must handle
 
 1. **Two different 403 codes for a missing permission:** account administration returns `ADMIN_ROLE_REQUIRED`; every other domain returns `ACTION_FORBIDDEN`.
-2. **`total` exists only on the two admin user lists**; every other list is `hasMore`-only. A "page X of Y" UI is only possible there.
+2. **`total` exists only on the two admin user lists and `GET /groups`**; every other list is `hasMore`-only. A "page X of Y" UI is only possible there.
 3. **Validation reports only the first error** (`details` has one entry), so forms cannot show all field errors from one response.
 4. **Language codes differ by endpoint:**
    - profile uses `preferredLanguage`: `ru|tj|en` (`tj` is stored as `tg`);
@@ -577,6 +579,9 @@ npm run storage:configure   # only with S3/MinIO: bucket CORS/settings
 12. **Asset uploads require a `courseId`.** There is no HTTP upload for question-bank images; book images arrive only through the CLI importer.
 13. **No API for duplicate links.** A draft with a duplicate link cannot be deleted (`409 QUESTION_IN_USE`).
 14. **Imports are CLI-only.** The admin UI can only read runs: `GET /admin/question-imports`, `/:id`, `/:id/errors`.
+14a. **Archived groups are read-only for composition** (`409 GROUP_ARCHIVED` on add/edit/remove of members and teachers and on new announcements). Restore with `PATCH /admin/groups/:id { status: "active" }`. Existing announcements can still be edited or archived.
+14b. **Group `code` is optional on create**; omit it and show the generated code from the response. Write responses (`POST`/`PATCH /admin/groups`) carry counts but not `relationship`.
+14c. **Candidate pickers:** use `GET /admin/users?role=student&status=active&notInGroup=:id` for members and `role=teacher&status=active&notTeacherOfGroup=:id` for teachers. Eligibility is still enforced on add (`GROUP_MEMBER_INELIGIBLE`, `GROUP_TEACHER_INELIGIBLE`).
 
 ### Not implemented (tables exist, no endpoints)
 

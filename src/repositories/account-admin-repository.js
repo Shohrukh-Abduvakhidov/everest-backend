@@ -43,7 +43,8 @@ const accountOrders = Object.freeze({
    createdAt: 'account.created_at ASC, account.id ASC',
 })
 
-// $1 status, $2 role, $3 LIKE pattern (already escaped by the service).
+// $1 status, $2 role, $3 LIKE pattern (already escaped by the service),
+// $4 group whose active members are excluded, $5 group whose teachers are excluded.
 const accountFilterSql = `($1::text IS NULL OR account.status = $1)
    AND ($2::text IS NULL OR EXISTS (
       SELECT 1 FROM user_roles AS membership
@@ -57,7 +58,16 @@ const accountFilterSql = `($1::text IS NULL OR account.status = $1)
       OR EXISTS (
          SELECT 1 FROM user_phones AS searched
          WHERE searched.user_id = account.id AND searched.phone_e164 LIKE $3 ESCAPE '\\'
-      ))`
+      ))
+   AND ($4::bigint IS NULL OR NOT EXISTS (
+      SELECT 1 FROM group_members AS excluded_member
+      WHERE excluded_member.group_id = $4 AND excluded_member.user_id = account.id
+        AND excluded_member.status = 'active'
+   ))
+   AND ($5::bigint IS NULL OR NOT EXISTS (
+      SELECT 1 FROM group_teachers AS excluded_teacher
+      WHERE excluded_teacher.group_id = $5 AND excluded_teacher.user_id = account.id
+   ))`
 
 const accountColumns = `account.id, account.status, account.created_at, account.updated_at,
    account.last_login_at, account.onboarding_completed_at, profile.first_name, profile.last_name,
@@ -87,8 +97,16 @@ async function listUsers(filters, db = pool) {
      ${primaryPhoneJoin}
      WHERE ${accountFilterSql}
      ORDER BY ${accountOrders[filters.sort]}
-     LIMIT $4 OFFSET $5`,
-      [filters.status, filters.role, filters.pattern, filters.limit, filters.offset],
+     LIMIT $6 OFFSET $7`,
+      [
+         filters.status,
+         filters.role,
+         filters.pattern,
+         filters.notInGroup ?? null,
+         filters.notTeacherOfGroup ?? null,
+         filters.limit,
+         filters.offset,
+      ],
    )
    return result.rows
 }
@@ -99,7 +117,13 @@ async function countUsers(filters, db = pool) {
      FROM users AS account
      LEFT JOIN user_profiles AS profile ON profile.user_id = account.id
      WHERE ${accountFilterSql}`,
-      [filters.status, filters.role, filters.pattern],
+      [
+         filters.status,
+         filters.role,
+         filters.pattern,
+         filters.notInGroup ?? null,
+         filters.notTeacherOfGroup ?? null,
+      ],
    )
    return result.rows[0].total
 }
