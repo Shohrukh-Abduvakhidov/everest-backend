@@ -482,6 +482,11 @@ M09 implementation (indexed book import):
    - `utils/zip-reader.js` supports stored and deflate entries, checks CRC, and rejects ZIP64, encrypted entries and unsafe paths;
    - it hashes the package, parses `manifest.json` and returns plain data;
    - it has no database access.
+- **Real package format.** `utils/question-package-adapter.js` (pure) converts the relational book format (`manifest.json` + `data/<entity>[.partNNN].json` envelopes) into the internal nested model before planning. It:
+   - verifies `manifest.files` hashes;
+   - resolves records by natural keys;
+   - maps paragraph/line-group/columnHeaders content and `answerDataExternal`;
+   - reports every dropped field or lossy mapping as a warning with the `data/<file>#records[i]` path.
 - **One planner.** `planImport` validates the whole package with read-only queries: actor, taxonomy by code, bank owner and subject, existing questions by `external_id`, asset aliases and sha256. Each question is converted to the M08 API body and checked by the shared `parseQuestionBody`/`parseAnswerData`/`parseContent`.
    - A dry run returns the report.
    - A real run refuses to write anything while the report has errors.
@@ -527,6 +532,9 @@ No AI route, service, repository, prompt, worker, model selection, or provider c
 - `routes/index.js` exports `routeMounts`, the single mount table used by the router and by the two-way coverage test in `tests/unit/openapi.test.js`.
 
 ## 19. Testing architecture
+
+`npm test` runs `scripts/test-disposable-database.js`. It creates `everest_test_<random>`, migrates it, runs `tests/all.test.js` with `DB_NAME` pointing at it, and drops it (M09 follow-up). Integration results therefore never depend on rows in the developer database. Schema verification (`test:integrity`, `verify-database.js`) still reads the configured database; the migration cycle uses its own disposable database.
+
 
 | Script | Purpose |
 |---|---|

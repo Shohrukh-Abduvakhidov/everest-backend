@@ -1,6 +1,6 @@
 # Question import runbook (M09)
 
-This runbook covers importing an `everest.question-import.v1` package (format: `docs/import-contract.md` §9) into the question bank. Imports create **draft** questions only. Review, key verification and publication stay manual in the admin API.
+This runbook covers importing an `everest.question-import.v1` book package (the ZIP produced by the indexing pipeline: `manifest.json` + `data/*.json` + `assets/`; format and mapping: `docs/import-contract.md` §9) into the question bank. Pass the ZIP itself; there is no need to unzip it. The package's own `scripts/validate_package.py` is never executed by the importer. Imports create **draft** questions only. Review, key verification and publication stay manual in the admin API.
 
 ## Before you start
 
@@ -14,7 +14,7 @@ This runbook covers importing an `everest.question-import.v1` package (format: `
 ## 1. Dry run (always first)
 
 ```bash
-npm run import:questions -- --package import-packages/tajik-9 --actor-phone +992XXXXXXXXX --dry-run --report import-packages/tajik-9.dry-run.json
+npm run import:questions -- --package import-packages/everest-tajik-indexed-v1.zip --actor-phone +992XXXXXXXXX --dry-run --report import-packages/tajik.dry-run.json
 ```
 
 - The dry run validates everything:
@@ -28,12 +28,23 @@ npm run import:questions -- --package import-packages/tajik-9 --actor-phone +992
 - stdout prints a summary: planned `counters`, `topErrorCodes`, `topWarningCodes` and the first 20 errors with their `path`. `--report` writes the full list of errors and warnings to a file. Keep that file out of git, because messages may contain identifiers from the book.
 - Exit code `0` = valid, `2` = invalid, `1` = could not run (bad arguments, unknown actor, unreadable package).
 
-Fix the package until the dry run reports `"status": "valid"`. Warnings do not block a run. Read them anyway; for example, `CONTENT_TABLE_HEADER_FLATTENED` means a table header lost its header styling.
+Fix the package until the dry run reports `"status": "valid"`. Warnings do not block a run, but read them: they list everything that was mapped lossily or not stored.
+
+| Warning | Meaning | Action |
+|---|---|---|
+| `CONTENT_INLINE_MARKS_FLATTENED` | a paragraph had mixed bold/italic/underline spans; only the marks shared by the whole paragraph are kept | check the question during review if emphasis matters |
+| `MATCHING_RULE_UNSPECIFIED` | the book does not say whether right items may be reused (`null` stored) | a reviewer sets `interactionSettings` before publication (publication is blocked until then) |
+| `SOURCE_FIELD_DROPPED` | a package field has no database column (bbox, positions, …); one entry per field | none; the package keeps it |
+| `SOURCE_REVIEW_NOTES_PRESENT` | the package lists transcription issues or review flags for the question | check `reports/review_required.json` in the package |
+| `IMAGE_BLOCK_APPENDED` | an image linked in `question_assets` had no image block; it was appended to the question content | check its position during review |
+| `QUESTION_TYPE_MAPPED` / `INTERACTION_SETTINGS_DROPPED` | an `open` question was imported as `short_text`/`numeric`; its input-cell settings are not stored | review the grading rule later (M10/M11) |
+| `MATCHING_COLUMN_HEADERS_AS_TABLE` | matching column headers were stored as a one-row table | none |
+| `PACKAGE_NOT_READY_FOR_IMPORT` / `PACKAGE_EXTRACTION_INCOMPLETE` | the package itself says it is a pilot or partial | import only if a draft review of a partial book is intended |
 
 ## 2. Real run
 
 ```bash
-npm run import:questions -- --package import-packages/tajik-9 --actor-phone +992XXXXXXXXX --idempotency-key tajik-9-2026-11-01
+npm run import:questions -- --package import-packages/everest-tajik-indexed-v1.zip --actor-phone +992XXXXXXXXX --idempotency-key tajik-2026-11-01
 ```
 
 - `--idempotency-key` is optional. The default is `package-<sha256 of the package>`.
@@ -77,7 +88,13 @@ Common codes:
 | `QUESTION_BANK_READ_ONLY` | the bank code belongs to another user |
 | `ASSET_FILE_MISSING` / `ASSET_TYPE_INVALID` / `ASSET_HASH_MISMATCH` / `ASSET_TOO_LARGE` | fix the file entry (PNG/JPEG only, ≤10 MiB) |
 | `ASSET_ALIAS_CONFLICT` | the same package asset ID was imported earlier with different bytes; give the new image a new `id` |
+| `PACKAGE_FILE_HASH_MISMATCH` / `PACKAGE_FILE_MISSING` | a `data/*.json` file differs from `manifest.files`; rebuild or re-download the package |
+| `PACKAGE_BANK_COUNT_UNSUPPORTED` | a package must contain exactly one `question_banks` record |
 | `IMPORT_BATCH_FAILED` | a batch hit a database error; see `recordPath` (`questions[a..b]`) and `externalId`, fix, then re-run with a new key |
+
+## 4a. Tests and local data
+
+`npm test` runs the integration suite in a temporary database (`everest_test_<random>`). The suite creates, migrates and drops that database itself, so your local `everest_db` data is never read or changed. Running a single test file directly (`node --test tests/integration/…`) still uses `DB_NAME` from `.env`.
 
 ## 5. After the import
 

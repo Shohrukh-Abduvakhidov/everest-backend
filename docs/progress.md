@@ -4,7 +4,29 @@ Updated: 2026-10-31.
 
 ## Current increment
 
-M09 (indexed book import) is implemented on `feat/m09-book-import` and is awaiting review. M-DOCS (PR #22) and the import contract (PR #23) are merged. Real-storage (MinIO/S3) import and a real book package are **not** verified.
+M09 (indexed book import) is implemented on `feat/m09-book-import` and is awaiting review. It reads the real book package format, and both real packages pass a dry run and a full disposable-database import. M-DOCS (PR #22) and the import contract (PR #23) are merged. Real-storage (MinIO/S3) import and a real book package are **not** verified.
+
+## 2026-10-31 — M09 follow-up: real package format and isolated tests
+
+- **Real format.** Read the real `import-packages/everest-tajik-indexed-v1.zip` and `everest-biology-tg-2026-pilot.zip` (git-ignored, unpacked only into a scratch folder outside the repo). Their relational entity-file format replaces the invented §9 format.
+   - Added `src/utils/question-package-adapter.js` and wired it into `question-import-service`. It adds record paths, asset size/dimension checks and provenance, declared duplicate links, and the `MATCHING_RULE_UNSPECIFIED` warning.
+   - The `source_metadata` allowlist now holds the real provenance fields (`chapter`/`variant` removed). Matching rules may be `null` in drafts; publication is blocked until a reviewer sets them (`INTERACTION_SETTINGS_INCOMPLETE`).
+   - `docs/import-contract.md` §9/§10 and `docs/import-runbook.md` were rewritten.
+- **Dry runs of the real packages** (temporary admin user, deleted afterwards; nothing written):
+   - Tajik: valid, 0 errors. 972 questions (789 single choice, 183 matching), 1 subject, 7 sections, 5 topics, 2 assets, 972 unknown keys, 5 declared duplicates. 773 warnings: `CONTENT_INLINE_MARKS_FLATTENED` 564, `MATCHING_RULE_UNSPECIFIED` 183, `SOURCE_FIELD_DROPPED` 23, `SOURCE_REVIEW_NOTES_PRESENT` 3.
+   - Biology pilot: valid, 0 errors. 20 questions, 5 sections, 50 topics, 6 assets. 51 warnings: `SOURCE_FIELD_DROPPED` 23, `SOURCE_REVIEW_NOTES_PRESENT` 8, `IMAGE_BLOCK_APPENDED` 6, `MATCHING_RULE_UNSPECIFIED` 4, `QUESTION_TYPE_MAPPED` 3, `INTERACTION_SETTINGS_DROPPED` 3, `MATCHING_COLUMN_HEADERS_AS_TABLE` 2, `PACKAGE_NOT_READY_FOR_IMPORT` 1, `PACKAGE_EXTRACTION_INCOMPLETE` 1.
+- **Full real import into a disposable database** (memory storage double; database dropped afterwards):
+   - Tajik: `completed` in about 40 s, 10 batches. 972 questions (all draft), 3,156 options, 1,647 matching items, 999 topic links, 2 asset links, 972 keys (0 verified), 7 duplicate links (5 declared + 2 suggested).
+   - The same key replayed. A re-import with a new key updated 972 and reused both assets by alias.
+   - Biology: `completed`, 20 questions, 52 options, 36 items, 6 asset links.
+- **Tests:**
+   - `npm test` now runs in a disposable database (`scripts/test-disposable-database.js`), so the existing owner and the manual group in `everest_db` no longer affect it, and no local data was deleted.
+   - Fixed a latent audit join in `password-auth.test.js` (scoped by `entity_type`).
+   - New `tests/unit/question-package-adapter.test.js` (3 tests), a real-format integration subtest, nullable-rule unit tests, and the synthetic entity-format fixture `tests/fixtures/question-import/sample/`.
+- **Results:**
+   - `npm test`: 220 tests, 219 passed, 0 failed, 1 skipped (real storage).
+   - `node scripts/verify-database.js`: valid. No migration was added in the follow-up.
+- **Not verified:** real S3/MinIO upload; an HTTP admin UI flow; the full biology book (only the 20-question pilot exists).
 
 ## 2026-10-31 — M09 indexed book import
 

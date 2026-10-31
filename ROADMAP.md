@@ -276,7 +276,8 @@ This roadmap orders implementation; it does not replace the [current architectur
    - A read-only run API.
    - Migration `20261031030000000_add-question-import-support.js`.
 - **Verified:** `tests/integration/question-import.test.js` (15 subtests) on real PostgreSQL with the storage double. Migration cycle 25/25/24/25. `verify-database.js` valid.
-- **Not verified:** real S3/MinIO storage, a real book package, very large packages. The format may need adjusting after the first real dry run.
+- **Real packages:** the Tajik (972 questions) and biology pilot (20 questions) packages pass a dry run with 0 errors and import fully into a disposable database.
+- **Not verified:** real S3/MinIO storage, very large packages. `npm test` runs in a disposable database: 220 tests, 219 passed, 1 skipped.
 - **Goal:** Import reviewable indexed question content safely and repeatably.
 - **Dependencies:** M07–M08 and approved input formats.
 - **Deliverables:** Tajik, mathematics, and biology importers; batch validation; assets/pages; duplicate detection; errors; review; dry run; idempotency; no automatic publication.

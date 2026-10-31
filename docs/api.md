@@ -107,12 +107,12 @@ Question body:
 - `externalId`: optional, unique within the bank (`409 QUESTION_EXTERNAL_ID_CONFLICT`).
 - `difficulty` (1–5) and `difficultySource` (`ai|expert|official`): both or neither.
 - `content`: rich content (below), at least one block.
-- `sourceMetadata`: `{ book?, edition?, page? (positive integer), number?, note?, chapter?, variant?, year? (integer 1900–2100) }`. Text fields are trimmed, 1–500 characters. Banks use the same allowlist. `chapter`, `variant` and `year` were added in M09.
+- `sourceMetadata`: `{ book?, edition?, page? (positive integer), number?, note?, year? (integer 1900–2100), sourceFile?, printedPage?, sequence? (positive integer), bookSectionTitle?, bookRubric?, isSample? (boolean), reviewRequired? (boolean), examPart? (1–10 labels of ≤20 characters) }`. Text fields are trimmed, 1–500 characters. Banks use the same allowlist. Every field after `note` was added in M09 for book provenance.
 - `topicIds`: up to 20 distinct topics of the bank's subject (`422 TAXONOMY_SUBJECT_MISMATCH`).
 - Choice questions require `options: [{ key, content, sourceLabel? }]` (2–10 items).
 - Matching questions require:
    - `matching: { left: [item], right: [item] }` (1–20 items per side);
-   - `interactionSettings: { requireAllLeft: boolean, allowRightReuse: boolean }`.
+   - `interactionSettings: { requireAllLeft: boolean|null, allowRightReuse: boolean|null }`. `null` means the source does not state the rule (M09). A draft may keep it, a proposed key then may not reuse right items, and publication returns `409 QUESTION_NOT_PUBLISHABLE` with `INTERACTION_SETTINGS_INCOMPLETE` until both are booleans.
 - Other types must not send `options`, `matching`, or a non-empty `interactionSettings`.
 - Item keys match `^[A-Za-z0-9_-]{1,20}$` and are unique per list. Positions follow array order. Options have no correctness field: unknown fields such as `isCorrect` return `400`.
 

@@ -15,7 +15,23 @@ User decisions (from the M09 brief):
 - Do not fix in M09: per-question translations, inline markup, table headers/merged cells, grading tolerances, a `ready` status, book page tables.
 - Read-only run API with `questions.manage`/`questions.review`.
 
-Assumptions made without the user (please review):
+Follow-up (2026-10-31, real packages `everest-tajik-indexed-v1.zip` and `everest-biology-tg-2026-pilot.zip`). Assumptions made without the user (please review):
+
+- **F1. The real relational format replaces the invented one.** `manifest.json` + `data/<entity>[.partNNN].json` envelopes are read by `utils/question-package-adapter.js` and converted to the internal nested model, which is still accepted for tests and hand-written packages (contract §9.9). Nothing subject-specific is hard-coded.
+- **F2. Not silently dropped.**
+   - Fields without a column are reported once per entity and field (`SOURCE_FIELD_DROPPED`): bbox, sourceSpans, positions, topic metadata, `difficultyReason`, question `sectionCode`, topic-link classification, and several bank provenance fields.
+   - Lossy content mappings are reported once per question and code: inline marks are reduced to the shared marks, `line_group` becomes `verse`, matching `columnHeaders` become a one-row table, inline formulas are split.
+   - The package itself remains the full record.
+- **F3. `open` questions** with `answerFormat: short_text|numeric` become that type. Their input-cell settings are reported, not stored (M10/M11 grading).
+- **F4. `source_metadata` allowlist** = the provenance fields the packages really use: `year` (also from `examYear`), `sourceFile`, `printedPage`, `sequence`, `bookSectionTitle`, `bookRubric`, `isSample`, `reviewRequired`, `examPart`. `page` comes from `page`, then a numeric `printedPage`, then `pageIndex1Based`; `number` comes from `number`, then `sourceNumber`.
+- **F5. Unstated matching rules stay `null`.** Both packages use `allowRightReuse: null`. The M08 parser now accepts `null` in drafts. Keys are validated strictly (no reuse; all-left not required), and publication is refused (`INTERACTION_SETTINGS_INCOMPLETE`). The DB trigger already required booleans only at publication, so no migration was needed. The importer never guesses `false`.
+- **F6. `question_assets` links without an image block** (biology) become image blocks appended to the question content (`IMAGE_BLOCK_APPENDED`), because EVEREST derives `question_assets` from blocks.
+- **F7. Asset provenance** (`extractionMethod`, page, bbox, `embeddedSha256`, …) is kept in `assets.source_metadata.package` (≤16 KiB), which is not exposed to students. Declared `sizeBytes` must match the bytes; declared dimensions are compared with the PNG header (warning only).
+- **F8. Declared duplicate links** are imported with the package `reason` and `marked_by` = actor. They are counted separately (`duplicates.declared`) from the importer's own exact-match suggestions.
+- **F9. `readyForImport: false`** (biology pilot) is a warning, not a block, because a draft-only import is the review step. **More than one bank** per package is rejected.
+- **F10. Test isolation.** `npm test` (`test:auth`) now runs the node:test suite in a freshly migrated disposable database (`scripts/test-disposable-database.js`, the same approach as `test-migration-cycle.js`). The developer database is never read or changed by the suite. This also exposed a latent bug in `password-auth.test.js`: an audit join was not scoped by `entity_type` and passed only because the identity sequences in `everest_db` had drifted apart.
+
+Original assumptions:
 
 1. **Package format.** No package schema existed in the repository, and no sample package was available (`import-packages/` is absent). The implemented format is the camelCase proposal in `docs/import-contract.md` §7, fixed in §9, with three concrete choices:
    - image blocks use `{ "type": "image", "asset": "<package id>" }`, and a raw DB `assetId` is rejected;
@@ -38,7 +54,7 @@ Assumptions made without the user (please review):
 12. **Migration** `20261031030000000_add-question-import-support.js` (reversible):
    - a partial unique index `assets_sha256_key` on `assets (sha256) WHERE sha256 IS NOT NULL`, for race-safe content dedup. `sha256` was never filled before, so the index cannot conflict with existing rows;
    - an index `question_import_errors (import_id, id)` for paginated reports.
-13. **`source_metadata` allowlist** adds `chapter` (text), `variant` (text) and `year` (integer 1900–2100), for banks and questions, in the API too. No sample package was available to confirm the field names; `section_title` was not added.
+13. **`source_metadata` allowlist** (superseded by follow-up assumption F4 below): the first version added `chapter`, `variant` and `year` without a real package; `chapter` and `variant` were removed again because the real packages do not use them.
 14. **Duplicate signature.** Same bank + same type + equal normalized content text (NFKC, lower case, whitespace collapsed; formulas, tables and images included by value) + equal unordered set of normalized option/matching texts. The new question links to the earliest matching question (`reason = 'import: same normalized text and options'`). A link in either direction prevents a second one. Note: a linked draft cannot be deleted through the API (`QUESTION_IN_USE`), and no API exists yet to remove links.
 15. **Errors are per question, first error only**, the same as the M08 API. Messages contain codes, field names and identifiers (topic codes, asset IDs), never question text or answers. Plain database errors in a batch are reported as `database error <sqlstate>` without the driver message.
 16. **Run scope for the read API:** administrators see all runs; others see runs of banks they own and runs they started. Out-of-scope runs return `404`. Dry runs are not stored, so they never appear in the API.
