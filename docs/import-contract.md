@@ -1,11 +1,14 @@
 # Question import contract (input for M09)
 
-Status: reference document, 2026-10-30. It describes what the backend **implements today** (schema plus M08/M07-C code) and what an `everest.question-import.v1` package can and cannot map to.
+Status: reference document, written 2026-10-30, **updated 2026-10-31 for M09**.
 
-Nothing here is implemented as an import pipeline yet:
+- §1–§8 describe the schema and the M08 rules that the importer is bound by. Where M09 changed a statement, it is marked *(M09)*.
+- §9 is the **implemented** package format `everest.question-import.v1`.
+- §10 lists which §8 gaps M09 closed and which remain.
 
-- `question_imports` and `question_import_errors` exist in the schema but have no repository, service or route.
-- Every statement is taken from `src/migrations/*`, `src/repositories/{taxonomy,question-bank}-repository.js`, `src/services/{taxonomy,question-bank,asset-upload}-service.js`, `src/utils/question-content.js`, `docs/api.md` and `docs/decisions.md`.
+The pipeline is implemented in M09: `scripts/import-question-package.js` → `src/services/question-import-service.js` → repositories. Operating instructions are in `docs/import-runbook.md`.
+
+The original sources of §1–§8 are `src/migrations/*`, `src/repositories/{taxonomy,question-bank}-repository.js`, `src/services/{taxonomy,question-bank,asset-upload}-service.js`, `src/utils/question-content.js`, `docs/api.md` and `docs/decisions.md`.
 
 Two kinds of limit appear below:
 
@@ -95,7 +98,7 @@ API rules for topics:
 | `interaction_settings` | JSONB | no | `'{}'` | CHECK object | see §3 |
 | `source_metadata` | JSONB | no | `'{}'` | — | allowlist, see §1.4 |
 | `source_question_id` | BIGINT | yes | — | FK → questions; CHECK ≠ `id` | set only by copy |
-| `import_id` | BIGINT | yes | — | FK → question_imports | **not set by any current code** |
+| `import_id` | BIGINT | yes | — | FK → question_imports | *(M09)* set by the importer to the run that last created or updated the draft |
 | `created_by` | BIGINT | no | — | FK → users | — |
 | `created_at`, `updated_at` | TIMESTAMPTZ | no | now | — | — |
 
@@ -149,9 +152,9 @@ Additional CHECKs:
 
 - Columns: `question_id`, `duplicate_of_id` (FK → questions), `reason` TEXT NULL, `marked_by` BIGINT NOT NULL (FK → users).
 - PK (`question_id`, `duplicate_of_id`); CHECK `question_id <> duplicate_of_id`.
-- **No API.** Its only current use: an M08 draft referenced here cannot be deleted (`409 QUESTION_IN_USE`).
+- **No API.** *(M09)* The importer writes conservative duplicate suggestions here. An M08 draft referenced here cannot be deleted (`409 QUESTION_IN_USE`).
 
-**Import bookkeeping (schema only, no code):**
+**Import bookkeeping** *(M09: implemented; index `question_import_errors (import_id, id)` added)*:
 
 - `question_imports`:
    - `bank_id` NOT NULL, `initiated_by` NOT NULL;
@@ -175,7 +178,7 @@ All question child tables have guard triggers: inserts, updates and deletes are 
 | `mime_type` | TEXT | no | — | — |
 | `file_name` | TEXT | yes | — | — |
 | `size_bytes` | BIGINT | no | — | CHECK ≥ 0 |
-| `sha256` | VARCHAR(64) | yes | — | CHECK hex64; **not filled by the upload flow** |
+| `sha256` | VARCHAR(64) | yes | — | CHECK hex64; *(M09)* partial UNIQUE index `assets_sha256_key`; filled by the importer, still not by the M07-A upload flow |
 | `width_px`, `height_px` | INTEGER | yes | — | CHECK > 0; filled from the PNG header (and video metadata) |
 | `duration_seconds` | INTEGER | yes | — | video only |
 | `status` | VARCHAR(16) | no | `'pending'` | CHECK `pending\|ready\|quarantined\|archived` |
@@ -186,7 +189,7 @@ All question child tables have guard triggers: inserts, updates and deletes are 
 | `processing_error` | TEXT | yes | — | — |
 | `created_at` | TIMESTAMPTZ | no | now | — |
 
-**`asset_aliases`** (schema only, no code):
+**`asset_aliases`** *(M09: used by the importer)*:
 
 - Columns: `source_namespace` TEXT, `external_id` TEXT, `asset_id` FK.
 - UNIQUE (`source_namespace`, `external_id`). It is designed for mapping package-local file IDs to assets.
@@ -204,6 +207,8 @@ Allowed keys only; any other key returns `400 VALIDATION_ERROR`.
 | `page` | integer ≥ 1 |
 | `number` | string, 1–500 (e.g. `"12а"`) |
 | `note` | string, 1–500 |
+| `chapter`, `variant` *(M09)* | string, 1–500 |
+| `year` *(M09)* | integer 1900–2100 |
 
 ---
 
@@ -506,3 +511,113 @@ No package schema is defined in this repository. The package field names below a
    - no per-question translations (one `language_code` per question).
 12. **Grading semantics are undefined:** numeric tolerance and short-text normalization (decision M08 #4).
 13. **Ownership:** `question_banks.owner_id` and `questions.created_by` are NOT NULL, so every import run must act as a concrete user with `questions.manage`.
+
+---
+
+## 9. Implemented package format `everest.question-import.v1` (M09)
+
+A package is a **directory** or a **ZIP file** with `manifest.json` at its root. A ZIP that wraps everything in one top-level folder is also accepted. Image files sit next to the manifest, for example `assets/fig-3.png`.
+
+Package limits:
+
+- ZIP: stored or deflate entries only. ZIP64, encrypted entries and paths containing `..`, `\`, an absolute prefix or a drive prefix are rejected (`PACKAGE_ARCHIVE_INVALID`).
+- Size: at most 512 MiB per package and 64 MiB per entry.
+- Package hash:
+   - a ZIP is hashed as the sha256 of the file bytes;
+   - a directory is hashed as the sha256 of the sorted `path NUL sha256(file) LF` lines, so the hash does not depend on timestamps or file system order.
+
+Top level (unknown keys return `PACKAGE_FIELD_UNKNOWN`):
+
+| Field | Required | Rules |
+|---|---|---|
+| `schemaVersion` | yes | exactly `everest.question-import.v1` |
+| `sourceNamespace` | no | `^[a-z0-9][a-z0-9:._-]{0,99}$`; default `bank:<bank.code>`. It scopes `asset_aliases` |
+| `subjects[]` | no (≤100) | `{ code, primaryLanguage?='tg', color?='neutral', translations }` |
+| `sections[]` | no (≤1000) | `{ subjectCode, code, primaryLanguage?, translations }` |
+| `topics[]` | no (≤10000) | `{ subjectCode, code, sectionCode?, parentCode?, primaryLanguage?, translations }` |
+| `bank` | yes | `{ code, title, subjectCode, visibility?='private', source? }` (`source` uses the `sourceMetadata` allowlist) |
+| `assets[]` | no (≤20000) | `{ id, file, mimeType, sha256?, fileName? }` |
+| `questions[]` | no (≤20000) | see below |
+
+Field rules:
+
+- `translations` = `{ tg|ru|en: { title } }` (1–200 characters). The primary-language title is required.
+- Codes follow the M08 patterns.
+- Subjects, sections and topics referenced by code may already exist in the database instead of being declared in the package.
+
+Question fields:
+
+| Field | Maps to | Notes |
+|---|---|---|
+| `externalId` | `external_id` | **required**, 1–200, unique in the package |
+| `type` | `question_type` | the 5 M08 types |
+| `language` | `language_code` | default `tg` |
+| `difficulty`, `difficultySource` | same | both or neither |
+| `content` | `content` | §2 blocks; image blocks are `{ "type": "image", "asset": "<assets[].id>", "alt"? }`. A raw `assetId` returns `IMAGE_REFERENCE_INVALID` |
+| `interactionSettings` | same | matching only |
+| `options[]` | `question_options` | `{ key, label?, content }`; `label` → `source_label`; `isCorrect` returns `OPTION_IS_CORRECT_REJECTED` |
+| `matching.{left,right}[]` | `question_matching_items` | same item shape |
+| `topicCodes[]` | `question_topics` | ≤20 distinct topics of the bank subject |
+| `source` | `source_metadata` | allowlist `book, edition, page, number, note, chapter, variant, year` |
+| `answerKey` | `question_answer_keys` | `{ status: unknown\|proposed, source?, answerData?, explanation? }`; `verified` returns `ANSWER_KEY_VERIFIED_REJECTED`; missing means `unknown` |
+
+Every question is converted to the M08 API body and validated by the same functions as `POST /admin/question-banks/:bankId/questions`. As in the API, one question reports its **first** error.
+
+### Re-import rules
+
+- **Question** (`bank.code`, `externalId`):
+   - none → create a draft;
+   - a draft → replace it in place (content, items, topics, metadata; derived images);
+   - published or archived → skip with warning `QUESTION_IMMUTABLE_SKIPPED`;
+   - a stored draft of another type → `QUESTION_TYPE_CHANGED`.
+- **Answer key on update:**
+   - a `proposed` package key replaces the stored key;
+   - an `unknown` package key keeps an existing stored key (author or reviewer work). A verified key then returns to `proposed`, and a key that no longer fits becomes `unknown` (the M08 reconcile rule).
+- **Taxonomy:**
+   - missing entities are created; this needs `taxonomy.manage`, otherwise `TAXONOMY_PERMISSION_REQUIRED`;
+   - existing ones only get translation upserts (with `taxonomy.manage`, otherwise warning `TAXONOMY_TRANSLATION_SKIPPED`);
+   - differing structure (primary language, color, section, parent) is kept as stored, with warning `TAXONOMY_FIELD_MISMATCH`;
+   - nothing is ever deleted.
+- **Bank:**
+   - created with the actor as owner;
+   - an existing bank must belong to the actor (or the actor is an administrator), otherwise `QUESTION_BANK_READ_ONLY`;
+   - it must have the same subject, otherwise `BANK_SUBJECT_MISMATCH`;
+   - its title and visibility are never changed (warning `BANK_FIELD_MISMATCH`).
+- **Asset**, in this order:
+   1. alias (`sourceNamespace`, `id`) with equal bytes → reuse. An alias with other bytes returns `ASSET_ALIAS_CONFLICT`.
+   2. A stored asset with the same sha256 → reuse and add an alias.
+   3. Otherwise upload and create the alias.
+- **Duplicate suggestion:** a question in the same bank with the same type, the same normalized content text (NFKC, lower case, collapsed whitespace) and the same unordered set of option/item texts gets a `question_duplicate_links` row. The new question points to the earliest one, with `marked_by` = actor. Nothing is merged or skipped.
+
+### Content the model cannot express
+
+Such content is mapped to the closest valid form and a warning is stored:
+
+| Package pattern | Mapping | Warning |
+|---|---|---|
+| `table.header` flag | flag dropped; the first row stays a normal row | `CONTENT_TABLE_HEADER_FLATTENED` |
+| `questions[].translations` | ignored; only `language` is imported | `QUESTION_TRANSLATIONS_IGNORED` |
+| `answerKey.tolerance` / `answerKey.normalization` | ignored (M10/M11) | `GRADING_RULE_IGNORED` |
+| a declared asset no question uses | stored anyway | `ASSET_UNUSED` |
+
+A minimal valid package is `tests/fixtures/question-import/sample/` (synthetic).
+
+---
+
+## 10. Gap status after M09
+
+| §8 gap | Status |
+|---|---|
+| 1. No import pipeline | **closed**: CLI, planner, dry run, recorded runs, errors/warnings, counters, `questions.import_id` |
+| 2. No `ready` status | **kept by design**: readiness is the key status (`proposed`/`verified`) |
+| 3. `external_id` optional | **closed for imports**: required by the importer (the column stays nullable for M08 authoring and copies) |
+| 4. Re-import of published questions | **closed**: skip and report `QUESTION_IMMUTABLE_SKIPPED`, never copy or modify |
+| 5. Verified keys from a file | **closed**: rejected; at most `proposed` |
+| 6. Images | **closed** at the service level: CLI upload without `courseId`, `sha256` filled, dedup by unique sha256, `asset_aliases` resolution. **Open:** no HTTP bank-bound upload endpoint; real S3/MinIO import not verified |
+| 7. Book pages | **open by design**: `source_metadata.page` only |
+| 8. Duplicate detection | **closed (conservative)**: exact normalized match, suggestion only. **Open:** no API to list or resolve links; a linked draft cannot be deleted (`QUESTION_IN_USE`) |
+| 9. Taxonomy ordering, descriptions, external IDs | **open**: codes are the keys; lists stay sorted by code |
+| 10. `source_metadata` allowlist | **closed**: `chapter`, `variant`, `year` added (strict, length-limited) |
+| 11. Content model limits | **open**: no inline markup or formulas, no table header or merged cells, no per-question translations (mapped with warnings) |
+| 12. Grading semantics | **open** (M10/M11) |
+| 13. Ownership | **closed**: the CLI requires an existing active user with `questions.manage` |

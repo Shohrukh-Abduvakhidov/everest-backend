@@ -107,7 +107,7 @@ Question body:
 - `externalId`: optional, unique within the bank (`409 QUESTION_EXTERNAL_ID_CONFLICT`).
 - `difficulty` (1–5) and `difficultySource` (`ai|expert|official`): both or neither.
 - `content`: rich content (below), at least one block.
-- `sourceMetadata`: `{ book?, edition?, page? (positive integer), number?, note? }`.
+- `sourceMetadata`: `{ book?, edition?, page? (positive integer), number?, note?, chapter?, variant?, year? (integer 1900–2100) }`. Text fields are trimmed, 1–500 characters. Banks use the same allowlist. `chapter`, `variant` and `year` were added in M09.
 - `topicIds`: up to 20 distinct topics of the bank's subject (`422 TAXONOMY_SUBJECT_MISMATCH`).
 - Choice questions require `options: [{ key, content, sourceLabel? }]` (2–10 items).
 - Matching questions require:
@@ -128,6 +128,33 @@ Rich content is `{ blocks: [...] }`, with at most 100 blocks and 64 KB of JSON. 
 An image must be a `ready` PNG/JPEG asset that the actor uploaded, that is already used in the same bank, or, for administrators, any such asset. Otherwise the request returns `422 QUESTION_ASSET_NOT_USABLE`. `assetIds` in the detail is kept in sync automatically.
 
 `detail` = `{ id, bankId, subjectId, externalId, questionType, languageCode, difficulty, difficultySource, status, content, interactionSettings, sourceMetadata, sourceQuestionId, importId, createdBy, createdAt, updatedAt, options: [{ key, position, sourceLabel, content }], matching: { left, right }|null, topicIds, assetIds, keyStatus, answerKey? }`. `answerKey` = `{ status, source, answerData, explanation, verifiedBy, verifiedAt }` and is present only for actors who can manage the bank. Read-only staff see `keyStatus` only.
+
+## Question import runs (M09)
+
+Packages are imported with the CLI (`npm run import:questions`, see `docs/import-runbook.md`). No HTTP route accepts a package upload. Dry runs are not stored. The API below is read-only and lists recorded real runs.
+
+Permission: `questions.manage` **or** `questions.review`. Otherwise the response is `403 ACTION_FORBIDDEN`.
+
+Scope:
+
+- administrators (owner/admin role) see every run;
+- other users see runs of banks they own and runs they started;
+- a run outside the scope returns `404 QUESTION_IMPORT_NOT_FOUND`.
+
+Endpoints, all under `/api/v1/admin`:
+
+- `GET /question-imports?bankId&status&limit&offset` → `{ imports: [run], pagination }`. The newest runs come first. `status` is one of `pending|validating|validated|importing|completed|failed`.
+- `GET /question-imports/:importId` → `run`. An invalid ID returns `400 INVALID_IMPORT_ID`.
+- `GET /question-imports/:importId/errors?severity&limit&offset` → `{ entries: [entry], pagination }`. `severity` is `warning|error`. Entries are ordered by ID.
+
+Shapes:
+
+- `run` = `{ id, bankId, bankCode, initiatedBy, packageSha256, schemaVersion, idempotencyKey, isDryRun, status, manifest, counters, createdAt, finishedAt }`.
+   - `manifest` is a summary: `bankCode`, `sourceNamespace` and entity counts. It holds no question text.
+   - `counters` = `{ subjects|sections|topics: { created, updated, unchanged }, bank: { created, existing }, assets: { total, uploaded, reusedByAlias, reusedByHash }, questions: { total, created, updated, skippedImmutable, failed, notAttempted }, answerKeys: { unknown, proposed, keptExisting }, duplicates: { suggested }, batches: { size, committed, failed }, warnings, errors }`.
+- `entry` = `{ id, externalId, recordPath, severity, code, message, createdAt }`.
+   - `recordPath` points into the package, for example `questions[12].options` or `questions[200..299]` for a failed batch.
+   - `message` holds codes and field names only. It never contains question text or answers.
 
 Answer keys and review:
 

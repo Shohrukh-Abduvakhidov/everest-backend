@@ -473,7 +473,29 @@ M08 implementation:
 - `question-bank-service` → `question-bank-repository` owns banks, questions, items, topics, `question_assets` and answer keys. Each write locks the question (`FOR UPDATE`) and then the readable bank, checks the manage/draft rules, and writes children and the audit event on the same client.
 - `utils/question-content.js` is pure validation: it rebuilds rich blocks from an allowlist and validates `answer_data` against item keys. The service runs it again before verification and publication. Triggers stay the last line of defence (immutability, verified key, minimum structure), and the new CHECK forbids unattested verified keys.
 - Keys are serialized only for bank managers. Learner-facing question delivery does not exist until M10/M11.
-- Imports (`question_imports`/`question_import_errors`) and duplicate links remain M09.
+- Imports (`question_imports`/`question_import_errors`) and duplicate links are implemented in M09 (below).
+
+M09 implementation (indexed book import):
+
+- **Entry point.** `scripts/import-question-package.js` (CLI) → `question-import-service` → the `question-bank`, `taxonomy` and `question-import` repositories. The read-only API uses route → `readQuestionImportsAuthorizationMiddleware` (manage or review) → `question-import-controller` → the same service.
+- **Package loading.** `utils/question-package.js` loads a directory or a ZIP file:
+   - `utils/zip-reader.js` supports stored and deflate entries, checks CRC, and rejects ZIP64, encrypted entries and unsafe paths;
+   - it hashes the package, parses `manifest.json` and returns plain data;
+   - it has no database access.
+- **One planner.** `planImport` validates the whole package with read-only queries: actor, taxonomy by code, bank owner and subject, existing questions by `external_id`, asset aliases and sha256. Each question is converted to the M08 API body and checked by the shared `parseQuestionBody`/`parseAnswerData`/`parseContent`.
+   - A dry run returns the report.
+   - A real run refuses to write anything while the report has errors.
+- **Real run order:**
+   1. Content-addressed objects are uploaded (`question-imports/sha256/<hash>.<ext>`). This step is idempotent.
+   2. One transaction writes the taxonomy upserts, the bank (created or locked), the `question_imports` row (`importing`), the assets/aliases and the planned warnings.
+   3. Each batch of at most 100 questions (default 100) runs in its own transaction. The transaction locks the bank (`FOR UPDATE`, which serializes concurrent imports into one bank), re-locks each question by `external_id`, writes the question and its children, reconciles the key and assets, records duplicate suggestions, updates the run counters and appends an audit event.
+   4. A failing batch rolls back completely. One error row is recorded, and later batches are counted as `notAttempted`.
+   5. The run ends as `completed` or `failed`.
+- **Invariants:**
+   - Imports insert `status = 'draft'` only and never call publish or verify.
+   - A package key is at most `proposed`.
+   - Published and archived matches are skipped. The DB triggers stay the final guard.
+- **Assets.** A partial unique index `assets_sha256_key` makes the sha256 dedup race-safe. `asset_aliases (source_namespace, external_id)` keeps package-local IDs stable across re-imports.
 
 ## 16. Test attempt architecture
 
@@ -579,7 +601,7 @@ Actual response envelopes:
 | Groups | Partial | M04-A reads and M04-B administration/text announcements done; assets deferred to M07 |
 | Courses/access | Partial | M05-A catalog/lifecycle/teachers, M05-B modules/preview/copy and M06 enrollments/module grants/learner locks and M07-B lessons/playback/offline done against a storage double |
 | Media storage | Partial | M07-A S3 multipart uploads and content/codec/seek-ready verification done against a storage double; real MinIO/S3 and Range-seek verification pending |
-| Question bank | Partial | M08 taxonomy, banks, draft authoring, answer keys, review, publication and copy done; imports/duplicates in M09 |
+| Question bank | Partial | M08 taxonomy, banks, draft authoring, answer keys, review, publication and copy done; M09 CLI package import (dry run, idempotent runs, batches, image dedup/aliases, duplicate suggestions) and read-only run API done; real-storage import not verified |
 | Test engine | Planned | Schema/DB constraints only |
 | Progress | Planned | Schema only |
 | Notifications | Partial | Telegram connection/test only |

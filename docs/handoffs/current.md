@@ -1,56 +1,53 @@
 ---
 project: EVEREST Backend
-current_milestone: M-DOCS
+current_milestone: M09
 status: awaiting_review
-branch: feat/m-docs-swagger
-base_commit: 78b50f5
-updated_at: 2026-10-30
+branch: feat/m09-book-import
+base_commit: b079fd4
+updated_at: 2026-10-31
 ---
 
 # Current handoff
 
 ## State
 
-- M07-C is merged (PR #21).
-- M-DOCS (OpenAPI 3.1 + Swagger UI) is implemented and verified on `feat/m-docs-swagger`. The PR is open for review and must not be merged by the agent.
-- The next ROADMAP milestone is M09 (indexed book import). It needs approved input formats: ask the user for samples or a spec first.
+- M-DOCS (PR #22) and the import contract (PR #23) are merged.
+- M09 (indexed book import) is implemented on `feat/m09-book-import`. The PR is open for review and must not be merged by the agent.
 
-## Completed work (M-DOCS)
+## Completed work (M09)
 
-- **Spec:** `src/docs/openapi.js`, OpenAPI 3.1 covering 133 operations on 103 paths.
-- **Serving:**
-   - `src/controllers/docs-controller.js` and `src/routes/docs.js`: page with CSP, `openapi.json`, CSRF-aware initializer, and allowlisted `swagger-ui-dist` assets.
-   - `src/app.js` mounts it at `/api/docs` when enabled.
-   - `src/configs/env.js` adds `swaggerEnabled` (`SWAGGER_ENABLED`, default `NODE_ENV !== 'production'`).
-- **Coverage hook:** `src/routes/index.js` exports `routeMounts`, used by the router and the coverage test.
-- **Dependencies (exact pins):** `swagger-ui-dist@5.33.1`, dev `@seriousme/openapi-schema-validator@2.11.0`.
-- **Owner bootstrap:** `scripts/bootstrap-owner.js` had a broken import (`accountAdminService` no longer exists). It now uses `bootstrapOwnerService`, guarded by a test. It was not executed against `everest_db`.
-- **Docs repair:** the duplicated block at the top of `docs/api.md` (introduced in M07-C by `String.replace` treating `` $` `` specially) is fixed.
-- **Test:** `tests/unit/openapi.test.js` (6 tests), registered in `tests/all.test.js`.
-- **Docs updated:** `docs/api.md` (Swagger, login, owner/approval walkthrough), `architecture.md` §18a, `decisions.md`, `progress.md`, `ROADMAP.md`.
+- **CLI:** `npm run import:questions -- --package <dir|zip> --actor-phone +992… [--dry-run] [--idempotency-key k] [--batch-size n] [--report file]` (`scripts/import-question-package.js`).
+- **Service:** `src/services/question-import-service.js`. It runs one planner (dry run = report only), then a real run: content-addressed image upload → setup transaction (taxonomy, bank, run, assets/aliases, warnings) → batch transactions of ≤100 questions → finish.
+- **Repositories:** `src/repositories/question-import-repository.js` (new); `taxonomy-repository` (`findEntityByCode`, `upsertTranslations`); `question-bank-repository.createQuestion` (`import_id`).
+- **Utilities:** `utils/question-package.js`, `utils/zip-reader.js`; `question-content.js` adds `chapter`, `variant` and `year` to `source_metadata`.
+- **Storage:** `uploadObject` on `providers/storage/s3-storage-provider.js` and on the memory double.
+- **Read API:** `GET /api/v1/admin/question-imports`, `/:importId` and `/:importId/errors`, with `readQuestionImportsAuthorizationMiddleware` (manage or review). Documented in the OpenAPI spec and `docs/api.md`.
+- **Migration:** `20261031030000000_add-question-import-support.js` (partial unique `assets_sha256_key`; `question_import_errors (import_id, id)`). It is applied to `everest_db`.
+- **Docs:** `import-contract.md` (§9 format, §10 gap status), `import-runbook.md` (new), `decisions.md` (M09 with 18 assumptions), `api.md`, `architecture.md`, `progress.md`, `ROADMAP.md`.
 
-## Rule for future milestones
+## Verification (2026-10-31)
 
-Every new route must be added to `src/docs/openapi.js`, otherwise `npm test` fails (two-way coverage).
+- `node --test tests/integration/question-import.test.js`: 15/15 passed.
+- `npm test`: 207 tests, 203 passed, 3 failed, 1 skipped. The 3 failures come from local `everest_db` data, not from M09:
+   - an owner account now exists (`account-admin.test.js` requires none);
+   - a manual group "Тестовая группа (шапка)" exists (`groups.test.js`).
+   The agent did not delete user data.
+- `npm run test:migrations`: 25/25/24/25.
+- `node scripts/verify-database.js`: valid (312 indexes, 25 migrations).
+- A CLI dry run of `tests/fixtures/question-import/sample` with a temporary admin user (deleted afterwards) reported `valid`.
+- **Not verified:** real MinIO/S3 import, a real book package (`import-packages/` absent), very large packages.
 
-## Verification (2026-10-30)
+## Next concrete tasks
 
-- `npm test`: 199 tests, 198 passed, 0 failed, 1 skipped (real storage).
-- `npm run test:migrations`: 24/24/23/24. No migration was added.
-- Manual check on port 4999: `/api/docs`, `openapi.json` and `swagger-ui.css` returned `200`; the package's `index.html` returned `404`.
-- Not verified: a browser click-through of Swagger login, because the local `.env` lacks `JWT_ACCESS_SECRET`/`OTP_HMAC_SECRET`.
-
-## User environment actions (agent cannot edit env files)
-
-- `.env`:
-   - add `JWT_ACCESS_SECRET` and `OTP_HMAC_SECRET` (each ≥32 characters, different values);
-   - add the Swagger origin (for example `http://localhost:4000`) to `CORS_ORIGINS`;
-   - remove the duplicate `CORS_ORIGINS` line;
-   - optionally set `SWAGGER_ENABLED`.
-- `.env.example`: replace it with the prepared key list and add `SWAGGER_ENABLED=`.
+1. The user places the Tajik package under `import-packages/` and runs a dry run (`docs/import-runbook.md` §1). Then adjust the field mapping if the real format differs from `import-contract.md` §9.
+2. Decide whether the integration tests should tolerate an existing owner or groups, or whether the local `everest_db` test data should be cleaned by the user.
+3. Later milestones:
+   - an HTTP bank-bound image upload and a duplicate-link review API for the admin UI;
+   - real-storage verification once Docker or MinIO is available.
 
 ## Constraints
 
 - Preserve route → middleware → controller → service → repository → PostgreSQL.
-- Do not edit the 24 published migrations. Never merge, force-push, or push to `main`.
+- Do not edit the 25 applied migrations. Never merge, force-push, or push to `main`.
+- Never commit real packages, book pages or images. `import-packages/` is git-ignored.
 - When editing docs with scripts, do not pass literal text as a `String.replace` replacement (`$` patterns); use the Edit tool or a replacer function.

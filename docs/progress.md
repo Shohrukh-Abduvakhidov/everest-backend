@@ -1,8 +1,44 @@
 # EVEREST backend progress
 
-Updated: 2026-10-30.
+Updated: 2026-10-31.
 
 ## Current increment
+
+M09 (indexed book import) is implemented on `feat/m09-book-import` and is awaiting review. M-DOCS (PR #22) and the import contract (PR #23) are merged. Real-storage (MinIO/S3) import and a real book package are **not** verified.
+
+## 2026-10-31 — M09 indexed book import
+
+- **CLI:** `scripts/import-question-package.js` (`npm run import:questions -- --package <dir|zip> --actor-phone … [--dry-run] [--idempotency-key] [--batch-size] [--report]`). It resolves an active actor with `questions.manage`.
+- **Package loading:** `utils/question-package.js` (directory or ZIP, package hash) and `utils/zip-reader.js` (stored/deflate, CRC check, path safety).
+- **Service:** `services/question-import-service.js`.
+   - A single read-only planner validates the manifest, taxonomy, bank, assets and every question through the shared M08 parsers. A dry run returns its report.
+   - A real run uploads content-addressed images, then runs one transaction for taxonomy + bank + run + assets/aliases + warnings, then batch transactions of ≤100 questions, then finishes the run.
+   - Idempotency is by (`bank_id`, `idempotency_key`) + package hash.
+   - Drafts are updated in place; published and archived questions are skipped.
+   - Duplicate suggestions are recorded in `question_duplicate_links`.
+- **Repositories:**
+   - new `question-import-repository.js` (actor, runs, errors, aliases, sha256 assets, duplicate candidates/links);
+   - `taxonomy-repository` gains `findEntityByCode` and `upsertTranslations`;
+   - `question-bank-repository.createQuestion` writes `import_id`.
+- **Storage:** `uploadObject` (PutObject) on the S3 adapter and on the memory double.
+- **Content:** `utils/question-content.js` adds `source_metadata` fields `chapter`, `variant` and `year`.
+- **Read API:** `GET /admin/question-imports`, `/:importId` and `/:importId/errors` (manage or review; scoped), added to `src/docs/openapi.js` and `docs/api.md`.
+- **Migration:** `20261031030000000_add-question-import-support.js` adds the partial unique `assets_sha256_key` and the index `question_import_errors (import_id, id)`. `verify-database.js` expects 312 indexes and 25 migrations; `test-migration-cycle.js` expects 25/25/24/25.
+- **Tests:**
+   - `tests/integration/question-import.test.js` (15 subtests, real PostgreSQL, memory storage double) covers: the actor/permission checks, the 5-type dry run writing nothing, the committed sample fixture, a real run, replay and conflict, draft update with published/archived skip, sha256 reuse, alias conflict, the malformed/invalid package matrix, teacher taxonomy and foreign-bank denial, batch rollback and an idempotent re-run, duplicate suggestions, ZIP loading and path-escape rejection, the draft-only guarantee, and the read API with scope.
+   - `tests/unit/question-content.test.js` covers the new metadata fields.
+   - Synthetic fixtures are in `tests/fixtures/question-import/sample/` and `tests/helpers/import-fixtures.js` (generated PNG, ZIP writer).
+- **Results:**
+   - `node --test tests/integration/question-import.test.js`: 15/15 passed.
+   - `npm test`: 207 tests, 203 passed, 3 failed, 1 skipped (real storage). The 3 failures do not come from M09; they are caused by data in local `everest_db`:
+      - `account-admin.test.js` asserts "integration database must not have a pre-existing owner", but an owner now exists;
+      - `groups.test.js` (one subtest plus its parent) sees an extra manually created group, "Тестовая группа (шапка)".
+   - `npm run test:migrations`: 25/25/24/25, disposable database dropped.
+   - `node scripts/verify-database.js`: `valid: true`.
+   - CLI dry run of the sample fixture with a temporary admin user (deleted afterwards): `valid`, 2 questions.
+- **Not verified:** a real S3/MinIO upload (Docker absent); a real Tajik or biology package (`import-packages/` absent); very large packages (the whole package is held in memory, limit 512 MiB).
+
+## 2026-10-30 — M-DOCS (previous increment)
 
 M07-C is merged into `main` (PR #21). M-DOCS (OpenAPI 3.1 + Swagger UI) is implemented on `feat/m-docs-swagger`. Real MinIO/S3 and Range-seek verification for M07-A/M07-B are still pending, because Docker is not installed. Production SMS remains unavailable pending provider approval. The next ROADMAP milestone is M09 (indexed book import), which needs approved input formats.
 
