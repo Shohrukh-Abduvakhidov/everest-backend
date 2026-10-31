@@ -1,0 +1,75 @@
+{
+  "schemaVersion": "everest.question-import.v1",
+  "sourceNamespace": "fixture:sample-biology",
+  "subjects": [
+    {
+      "code": "fixture-biology",
+      "primaryLanguage": "tg",
+      "color": "green",
+      "translations": { "tg": { "title": "Биология (намуна)" }, "ru": { "title": "Биология (образец)" } }
+    }
+  ],
+  "sections": [
+    {
+      "subjectCode": "fixture-biology",
+      "code": "cells",
+      "translations": { "tg": { "title": "Ҳуҷайра" } }
+    }
+  ],
+  "topics": [
+    {
+      "subjectCode": "fixture-biology",
+      "code": "cell-structure",
+      "sectionCode": "cells",
+      "translations": { "tg": { "title": "Сохти ҳуҷайра" } }
+    },
+    {
+      "subjectCode": "fixture-biology",
+      "code": "organelles",
+      "sectionCode": "cells",
+      "parentCode": "cell-structure",
+      "translations": { "tg": { "title": "Органоидҳо" } }
+    }
+  ],
+  "bank": {
+    "code": "fixture-biology-sample",
+    "title": "Synthetic sample bank",
+    "subjectCode": "fixture-biology",
+    "visibility": "staff",
+    "source": { "book": "Synthetic fixture", "edition": "1", "year": 2026 }
+  },
+  "assets": [
+    {
+      "id": "fig-1",
+      "file": "assets/figure-1.png",
+      "mimeType": "image/png",
+      "sha256": "d25695dd64e08b4f27b4c7bf8a96e6af820a2670ec8ef5c0f371b54223dd477d"
+    }
+  ],
+  "questions": [
+    {
+      "externalId": "sample-1",
+      "type": "single_choice",
+      "language": "tg",
+      "content": {
+        "blocks": [
+          { "type": "text", "text": "Synthetic question: which item is shown?" },
+          { "type": "image", "asset": "fig-1", "alt": "Figure 1" }
+        ]
+      },
+      "options": [
+        { "key": "a", "label": "А)", "content": { "blocks": [{ "type": "text", "text": "Option one" }] } },
+        { "key": "b", "label": "Б)", "content": { "blocks": [{ "type": "text", "text": "Option two" }] } }
+      ],
+      "topicCodes": ["organelles"],
+      "source": { "book": "Synthetic fixture", "page": 1, "number": "1", "chapter": "I" },
+      "answerKey": { "status": "unknown" }
+    },
+    {
+      "externalId": "sample-2",
+      "type": "numeric",
+      "content": { "blocks": [{ "type": "formula", "latex": "2 + 2 = ?" }] },
+      "source": { "page": 1, "number": "2", "variant": "A" }
+    }
+  ]
+}

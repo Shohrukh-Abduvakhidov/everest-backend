@@ -70,6 +70,13 @@ test('source metadata accepts only known fields', () => {
    assert.deepEqual(parseSourceMetadata({ book: ' Book ', page: 3 }), { book: 'Book', page: 3 })
    assert.throws(() => parseSourceMetadata({ page: 0 }))
    assert.throws(() => parseSourceMetadata({ url: 'x' }))
+   assert.deepEqual(
+      parseSourceMetadata({ chapter: ' II ', variant: 'A', year: 2024 }),
+      { chapter: 'II', variant: 'A', year: 2024 },
+   )
+   assert.throws(() => parseSourceMetadata({ year: 1800 }))
+   assert.throws(() => parseSourceMetadata({ year: '2024' }))
+   assert.throws(() => parseSourceMetadata({ chapter: 'x'.repeat(501) }))
 })
 
 test('answer data references existing keys for every question type', () => {
