@@ -1,5 +1,29 @@
 # Decisions
 
+## 2026-10-31 — Admin accounts slice (M17)
+
+Assumptions made without the user (please review):
+
+1. **No migration and no new permission.**
+   - The list reuses `accounts.pending.read`, as requested.
+   - Role replacement is gated by the existing `accounts.approve` permission (owner, admin), and the service enforces the owner/admin rules on top.
+   - A dedicated `accounts.roles.manage` permission can be seeded later if teachers or other roles ever need it.
+2. **`student` is mandatory in every role set** (`422 STUDENT_ROLE_REQUIRED`).
+   - The schema has no constraint here, but registration assigns `student` to every account; this keeps that invariant.
+   - Accounts created outside registration (for example fixtures) must gain `student` the first time their roles are edited.
+3. **Admins cannot edit accounts that hold `owner` or `admin`**, even for teacher/student only. "Admin manages teacher/student only" is read as deny-by-default.
+4. **Owner protection uses one global advisory lock** (the existing `everest.owner-bootstrap` key) for role changes, block/reject/unblock and owner bootstrap. The owner set is therefore checked serially: two owners demoting each other at the same time cannot both succeed.
+5. **"Last active owner"** counts owners whose account status is `active`.
+   - Through the API, the actor is itself an active owner, so this case can only arise through a race or an inactive actor. The check is a defensive guard and is tested at the service level.
+   - Blocked owners may still lose `owner` (an owner actor is required).
+6. **Session revocation on role change.** Permissions are read from the database on every request, so a role change takes effect immediately even without revocation. As requested, the subject's live sessions and refresh tokens are still revoked (reason `roles_changed`), so clients re-authenticate with fresh state. Block keeps the M02D behaviour (`account_blocked`), now covered by a test.
+7. **Unchanged role sets are a no-op** (`changed: false`): no audit row and no revocation.
+8. **Search** has no index (no trigram extension).
+   - It is bounded by a 2–100 character input, literal LIKE wildcards and `limit` ≤ 100.
+   - `total` is a separate `count(*)` with the same filter.
+   - Acceptable for the expected account volume; revisit with `pg_trgm` if accounts reach six figures.
+9. **List item fields:** `id, firstName, lastName, displayName, phone, status, roles, createdAt, lastLoginAt, telegramLinked`. `lastLoginAt` was added beyond the request because the admin UI benefits from it. `approve` is not owner-protected: a pending owner can only exist through manual data.
+
 ## 2026-10-31 — Indexed book import (M09)
 
 User decisions (from the M09 brief):

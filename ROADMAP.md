@@ -357,7 +357,13 @@ This roadmap orders implementation; it does not replace the [current architectur
 
 ## M17 — Administration API
 
-- **Status:** Planned
+- **Status:** Partial. The admin-accounts slice is implemented on `feat/admin-accounts-api` (awaiting review):
+   - `GET /admin/users` (filters, search, `total`);
+   - `total` on `GET /admin/users/pending`;
+   - `PUT /admin/users/:userId/roles`;
+   - owner protection on block/reject/unblock;
+   - session revocation on role change.
+   Verified by `tests/integration/admin-accounts.test.js` (7 subtests). `npm test`: 228 tests, 227 passed, 1 skipped. No migration.
 - **Goal:** Expose authorized operational controls across implemented domains.
 - **Dependencies:** M02C, M02F, and relevant domain milestones.
 - **Deliverables:** User/grant/teacher administration, publication/review/assignment, AI policies, campaigns, and platform settings.

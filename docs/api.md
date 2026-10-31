@@ -438,8 +438,69 @@ All account-administration routes require an authenticated, live session for an 
 Lists pending accounts ordered by `created_at`, then `id`. Query parameters are `limit` (default 20, range 1–100) and `offset` (default 0). The response contains only the decimal-string ID, account status, profile names, one deterministic phone, creation time, and onboarding state.
 
 ```json
-{"data":{"users":[{"id":"123","status":"pending","firstName":"Student","lastName":"Example","phone":"+992900000000","createdAt":"2026-10-25T12:00:00.000Z","onboardingCompletedAt":null}],"pagination":{"limit":20,"offset":0,"hasMore":false}}}
+{"data":{"users":[{"id":"123","status":"pending","firstName":"Student","lastName":"Example","phone":"+992900000000","createdAt":"2026-10-25T12:00:00.000Z","onboardingCompletedAt":null}],"pagination":{"limit":20,"offset":0,"hasMore":false,"total":1}}}
 ```
+
+`pagination.total` (count of all pending accounts) was added in M17. It is additive: the earlier fields are unchanged.
+
+### `GET /api/v1/admin/users` (M17)
+
+Lists every account. Permission: `accounts.pending.read`, the same as the pending list.
+
+Query parameters (unknown parameters return `400 VALIDATION_ERROR`):
+
+| Parameter | Rules |
+|---|---|
+| `limit`, `offset` | as above |
+| `status` | `pending|active|blocked|rejected` |
+| `role` | `owner|admin|teacher|student` (accounts holding that role) |
+| `q` | 2–100 characters after trimming. Case-insensitive match on first name, last name, `first last`, or any of the account's phones. `%`, `_` and `\` are matched literally |
+| `sort` | `-createdAt` (default, newest first) or `createdAt`. Ties are always broken by `id` in the same direction |
+
+Response:
+
+```json
+{"data":{"users":[{"id":"123","firstName":"Ali","lastName":"Karimov","displayName":"Ali Karimov","phone":"+992900000000","status":"active","roles":["student","teacher"],"createdAt":"2026-10-25T12:00:00.000Z","lastLoginAt":null,"telegramLinked":false}],"pagination":{"limit":20,"offset":0,"hasMore":false,"total":1}}}
+```
+
+- `displayName` is the first and last name joined, or `null` when both are empty.
+- `phone` is the primary phone, or else the first verified phone.
+- `roles` is sorted.
+- No password, session, token or Telegram identity data is returned; only the `telegramLinked` flag.
+
+### `PUT /api/v1/admin/users/:userId/roles` (M17)
+
+Replaces the role set of an account. The route is gated by the `accounts.approve` permission (owner, admin), then the role rules below apply.
+
+Body: `{ "roles": ["student", "teacher"] }`. The list must be non-empty, distinct and contain known codes only. Order does not matter.
+
+Rules (deny by default):
+
+- **Owners** may grant and revoke every role.
+- **Admins** may change only `teacher`/`student`, and only on accounts that hold neither `owner` nor `admin`.
+- **Nobody** may change their own roles.
+- **`student`** stays in every set, because registration gives it to every account.
+- **The last active owner** never loses `owner`.
+
+Response: `{ "changed": true, "user": <account as in the list>, "revokedSessions": 1 }`.
+
+- **Unchanged set:** `changed: false`. Nothing is written, audited or revoked (idempotent).
+- **Change:**
+   - the target row and the owner set are locked;
+   - assignments are replaced, and kept ones keep their `assigned_by`;
+   - every live session and refresh token of the subject is revoked with reason `roles_changed`;
+   - `admin.account.roles_changed` is audited with `{ before, after, revokedSessions }`.
+
+| Status | Code | When |
+|---|---|---|
+| 400 | `INVALID_USER_ID`, `INVALID_ROLES`, `VALIDATION_ERROR` | malformed id, roles or body |
+| 403 | `ADMIN_ROLE_REQUIRED` | no `accounts.approve` permission |
+| 403 | `ROLE_ASSIGNMENT_FORBIDDEN` | an admin touches `owner`/`admin` or a privileged account; the actor has neither role |
+| 403 | `OWNER_ACTION_FORBIDDEN` | a non-owner acts on an owner account |
+| 404 | `USER_NOT_FOUND` | unknown account |
+| 409 | `SELF_ROLE_CHANGE_FORBIDDEN` | the actor is the target |
+| 409 | `LAST_OWNER_PROTECTED` | the change would leave no active owner |
+| 422 | `STUDENT_ROLE_REQUIRED` | `student` missing from the set |
 
 ### Account-state transitions
 
@@ -448,7 +509,13 @@ Lists pending accounts ordered by `created_at`, then `id`. Query parameters are 
 - `POST /api/v1/admin/users/:userId/block`: `active` → `blocked`; atomically revokes every live session with reason `account_blocked`.
 - `POST /api/v1/admin/users/:userId/unblock`: `blocked` → `active`; previously revoked sessions remain revoked.
 
-Each transition locks the target account, changes it once, and appends its administrator audit event in the same transaction. Invalid transitions return `409 INVALID_ACCOUNT_TRANSITION`; missing accounts return `404 USER_NOT_FOUND`. Administrators cannot reject or block themselves (`SELF_REJECTION_FORBIDDEN` and `SELF_BLOCK_FORBIDDEN`). Route IDs must be canonical positive PostgreSQL `BIGINT` decimal strings; malformed, zero, leading-zero, or overflowing values return `400 INVALID_USER_ID`.
+Each transition locks the target account, changes it once, and appends its administrator audit event in the same transaction. Invalid transitions return `409 INVALID_ACCOUNT_TRANSITION`; missing accounts return `404 USER_NOT_FOUND`. Administrators cannot reject or block themselves (`SELF_REJECTION_FORBIDDEN` and `SELF_BLOCK_FORBIDDEN`).
+
+Owner protection (M17):
+
+- `block`, `reject` and `unblock` on an account holding `owner` require an owner actor, otherwise `403 OWNER_ACTION_FORBIDDEN`.
+- `block` and `reject` never remove the last active owner (`409 LAST_OWNER_PROTECTED`).
+- Transitions take the same owner-set lock as role changes and owner bootstrap. Route IDs must be canonical positive PostgreSQL `BIGINT` decimal strings; malformed, zero, leading-zero, or overflowing values return `400 INVALID_USER_ID`.
 
 ## Health
 
