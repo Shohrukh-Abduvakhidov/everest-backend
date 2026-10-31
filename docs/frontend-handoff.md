@@ -403,8 +403,8 @@ Enforced in `src/services/account-admin-service.js`.
 
 | Actor → target | approve | reject | block | unblock | roles (`PUT /admin/users/:id/roles`) |
 |---|---|---|---|---|---|
-| owner → owner | ✓ | ✓ | ✓, except the last active owner (`409 LAST_OWNER_PROTECTED`) | ✓ | ✓; removing `owner` from the last active owner returns `409 LAST_OWNER_PROTECTED` |
-| owner → admin / teacher / student | ✓ | ✓ | ✓ | ✓ | ✓ any role set (must contain `student`) |
+| owner → owner | ✓ | ✓ | ✓, except the last active owner (`409 LAST_OWNER_PROTECTED`) | ✓ | ✓ while keeping `owner`; removing `owner` from the last active owner returns `409 LAST_OWNER_PROTECTED` |
+| owner → admin / teacher / student | ✓ | ✓ | ✓ | ✓ | ✓ grant/remove `admin`, `teacher`; granting `owner` returns `403 ROLE_ASSIGNMENT_FORBIDDEN` |
 | admin → owner | ✓ (not owner-protected) | `403 OWNER_ACTION_FORBIDDEN` | `403 OWNER_ACTION_FORBIDDEN` | `403 OWNER_ACTION_FORBIDDEN` | `403 ROLE_ASSIGNMENT_FORBIDDEN` |
 | admin → admin (another) | ✓ | ✓ | ✓ | ✓ | `403 ROLE_ASSIGNMENT_FORBIDDEN` |
 | admin → teacher / student | ✓ | ✓ | ✓ | ✓ | ✓, but only `teacher`/`student` changes; granting `admin`/`owner` returns `403 ROLE_ASSIGNMENT_FORBIDDEN` |
@@ -415,6 +415,7 @@ State rules:
 
 - `approve`/`reject`: `pending` only. `block`: `active` only. `unblock`: `blocked` only. Otherwise `409 INVALID_ACCOUNT_TRANSITION`.
 - **Role sets** must be non-empty, distinct, use known codes (`400 INVALID_ROLES`) and include `student` (`422 STUDENT_ROLE_REQUIRED`).
+- **Granting `owner`** (adding it to an account that does not hold it) is refused for everyone with `403 ROLE_ASSIGNMENT_FORBIDDEN`; owners exist only through `bootstrap:owner`. Do not offer `owner` as a role to add in the UI.
 - **An unchanged role set** returns `changed: false`, with no audit row and no revocation.
 
 ---
@@ -569,31 +570,32 @@ npm run storage:configure   # only with S3/MinIO: bucket CORS/settings
 5. **`AccountTransition.user`** (approve/reject/block/unblock) uses the older `PendingUser` shape (no `roles`, `displayName` or `telegramLinked`). Refetch the row from `GET /admin/users` after an action.
 6. **`approve` is not owner-protected**, and an admin may block, reject or unblock another admin (only owners are protected). This is intentional per `docs/decisions.md` M17; flag it if the product disagrees.
 7. **`LAST_OWNER_PROTECTED` is practically unreachable through the API.** The acting owner is itself an active owner, so the guard only fires in races. The UI may still map it.
-8. **Every role set must include `student`**, even for staff (`422 STUDENT_ROLE_REQUIRED`). The database itself does not require it.
-9. **Matching questions may have `requireAllLeft`/`allowRightReuse` = `null`** (imported books). Such questions cannot be published (`409 QUESTION_NOT_PUBLISHABLE`, detail `INTERACTION_SETTINGS_INCOMPLETE`) until a reviewer sets booleans with `PATCH /admin/questions/:id`.
-10. **Rich content is block-level only:** no inline bold or inline formulas, and no table headers. Imported book text was flattened with warnings (see the run errors API).
-11. **Asset uploads require a `courseId`.** There is no HTTP upload for question-bank images; book images arrive only through the CLI importer.
-12. **No API for duplicate links.** A draft with a duplicate link cannot be deleted (`409 QUESTION_IN_USE`).
-13. **Imports are CLI-only.** The admin UI can only read runs: `GET /admin/question-imports`, `/:id`, `/:id/errors`.
+8. **`owner` cannot be granted through the API** (`403 ROLE_ASSIGNMENT_FORBIDDEN`), and an owner may still remove `owner` from another owner, so a removed owner cannot be restored without `bootstrap:owner` (which works once). Pending product decision.
+9. **Every role set must include `student`**, even for staff (`422 STUDENT_ROLE_REQUIRED`). The database itself does not require it.
+10. **Matching questions may have `requireAllLeft`/`allowRightReuse` = `null`** (imported books). Such questions cannot be published (`409 QUESTION_NOT_PUBLISHABLE`, detail `INTERACTION_SETTINGS_INCOMPLETE`) until a reviewer sets booleans with `PATCH /admin/questions/:id`.
+11. **Rich content is block-level only:** no inline bold or inline formulas, and no table headers. Imported book text was flattened with warnings (see the run errors API).
+12. **Asset uploads require a `courseId`.** There is no HTTP upload for question-bank images; book images arrive only through the CLI importer.
+13. **No API for duplicate links.** A draft with a duplicate link cannot be deleted (`409 QUESTION_IN_USE`).
+14. **Imports are CLI-only.** The admin UI can only read runs: `GET /admin/question-imports`, `/:id`, `/:id/errors`.
 
 ### Not implemented (tables exist, no endpoints)
 
-14. Tests, assignments, attempts and grading (M10/M11).
-15. Progress analytics, notes, favorites and activity APIs.
-16. Notifications and inbox, broadcast campaigns, Web Push.
-17. AI chat and budgets.
-18. Bonuses and achievements.
-19. Invitations.
-20. Platform settings.
+15. Tests, assignments, attempts and grading (M10/M11).
+16. Progress analytics, notes, favorites and activity APIs.
+17. Notifications and inbox, broadcast campaigns, Web Push.
+18. AI chat and budgets.
+19. Bonuses and achievements.
+20. Invitations.
+21. Platform settings.
 
 ### Environment and verification
 
-21. **Production SMS provider:** none is configured; password recovery by SMS is accepted but not delivered. Telegram recovery needs a linked Telegram identity and a bot connection.
-22. **Real S3/MinIO** upload, playback and import were **not verified** in the backend environment (only a storage double in tests).
-23. **No seed or demo-account script** (§5.3). `bootstrap:owner` works once per database.
-24. **`.env.example`** was reported out of date in earlier handoffs (missing `JWT_ACCESS_SECRET`, `OTP_HMAC_SECRET` and `SWAGGER_ENABLED`). Rely on §5.1, not on that file.
+22. **Production SMS provider:** none is configured; password recovery by SMS is accepted but not delivered. Telegram recovery needs a linked Telegram identity and a bot connection.
+23. **Real S3/MinIO** upload, playback and import were **not verified** in the backend environment (only a storage double in tests).
+24. **No seed or demo-account script** (§5.3). `bootstrap:owner` works once per database.
+25. **`.env.example`** was reported out of date in earlier handoffs (missing `JWT_ACCESS_SECRET`, `OTP_HMAC_SECRET` and `SWAGGER_ENABLED`). Rely on §5.1, not on that file.
 
 ### Documentation inconsistencies
 
-25. `docs/api.md` §"Session lifecycle" still says CSRF hardening "remains M02F". That is stale: M02F-B implemented the CSRF token and origin check described in §4.3.
-26. Lists in `docs/api.md` describe ordering per endpoint, but there is no global sort parameter. Only `GET /admin/users` accepts `sort`.
+26. `docs/api.md` §"Session lifecycle" still says CSRF hardening "remains M02F". That is stale: M02F-B implemented the CSRF token and origin check described in §4.3.
+27. Lists in `docs/api.md` describe ordering per endpoint, but there is no global sort parameter. Only `GET /admin/users` accepts `sort`.
