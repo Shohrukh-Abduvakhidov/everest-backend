@@ -59,8 +59,25 @@ async function reviewQuestionsAuthorizationMiddleware(req, res, next) {
    }
 }
 
+// Import run reports are read by authors (questions.manage) and reviewers (questions.review).
+async function readQuestionImportsAuthorizationMiddleware(req, res, next) {
+   try {
+      void res
+      try {
+         await authorize(req, 'questions.manage')
+      } catch (error) {
+         if (error.code !== 'ACTION_FORBIDDEN') throw error
+         await authorize(req, 'questions.review')
+      }
+      next()
+   } catch (error) {
+      next(error)
+   }
+}
+
 export {
    manageQuestionsAuthorizationMiddleware,
+   readQuestionImportsAuthorizationMiddleware,
    manageTaxonomyAuthorizationMiddleware,
    readQuestionsAuthorizationMiddleware,
    readTaxonomyAuthorizationMiddleware,
