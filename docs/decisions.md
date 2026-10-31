@@ -1,5 +1,11 @@
 # Decisions
 
+## 2026-10-31 — Optional group codes and archived groups
+
+1. **`code` is optional on `POST /admin/groups`.** When omitted, the server generates `<slug>-<6 hex>` from the name (Russian/Tajik Cyrillic transliterated to latin, `a-z0-9` and hyphens, at most 80 characters, `group` when the name has no usable characters). The insert uses `ON CONFLICT (code) DO NOTHING`, so a collision retries with a new suffix inside the same transaction (up to 5 attempts) and never surfaces `GROUP_CODE_CONFLICT`. Explicit codes keep the existing validation and `409 GROUP_CODE_CONFLICT`. The column and its unique constraint are unchanged; no migration.
+2. **Archived groups (proposed, pending product confirmation).** Adding, editing or removing members and teachers and creating announcements in an archived group return `409 GROUP_ARCHIVED`. Reading stays allowed, `PATCH status=active` restores the group, and existing announcements may still be edited or archived. Editing the representative flag and teacher permissions is treated as a composition change and is also blocked.
+3. **Announcement `status` filter.** Without `status` the feed is unchanged. With `status`, drafts and archived items are returned only to owners/admins and teachers whose assignment has `can_publish_announcements`; everyone else (students, teachers without publishing) receives published items only, i.e. an empty list for `draft`/`archived`, instead of an error.
+
 ## 2026-10-31 — Owner role is created only by bootstrap:owner
 
 `PUT /admin/users/:userId/roles` never grants `owner`, not even when an owner is the actor (`403 ROLE_ASSIGNMENT_FORBIDDEN`, an existing code). "Granting" means adding a role the target does not hold; keeping `owner` in the set of an existing owner is allowed. New owners come only from `npm run bootstrap:owner`. Owners still grant `admin`, `teacher` and `student`; admin limits are unchanged.
