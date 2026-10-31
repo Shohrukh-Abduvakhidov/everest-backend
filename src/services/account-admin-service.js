@@ -231,6 +231,10 @@ async function replaceUserRolesService(actorValue, targetValue, body, overrides)
             throw new AppError(403, 'ROLE_ASSIGNMENT_FORBIDDEN', 'You cannot change these roles for this account')
          }
       }
+      // The owner role is created only by bootstrap:owner; nobody grants it through the API.
+      if (hasOwner(requested) && !hasOwner(before)) {
+         throw new AppError(403, 'ROLE_ASSIGNMENT_FORBIDDEN', 'You cannot change these roles for this account')
+      }
       if (!changedRoles.length) {
          return {
             changed: false,

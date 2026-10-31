@@ -495,7 +495,7 @@ Response: `{ "changed": true, "user": <account as in the list>, "revokedSessions
 |---|---|---|
 | 400 | `INVALID_USER_ID`, `INVALID_ROLES`, `VALIDATION_ERROR` | malformed id, roles or body |
 | 403 | `ADMIN_ROLE_REQUIRED` | no `accounts.approve` permission |
-| 403 | `ROLE_ASSIGNMENT_FORBIDDEN` | an admin touches `owner`/`admin` or a privileged account; the actor has neither role |
+| 403 | `ROLE_ASSIGNMENT_FORBIDDEN` | anyone (owners included) grants `owner` to an account that does not hold it; an admin touches `owner`/`admin` or a privileged account; the actor has neither role |
 | 403 | `OWNER_ACTION_FORBIDDEN` | a non-owner acts on an owner account |
 | 404 | `USER_NOT_FOUND` | unknown account |
 | 409 | `SELF_ROLE_CHANGE_FORBIDDEN` | the actor is the target |

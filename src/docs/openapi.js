@@ -960,7 +960,7 @@ const routes = [
    ['put', '/admin/users/:userId/roles', {
       tag: 'Admin: accounts', ...admin('accounts.approve'), permissionError: 'ADMIN_ROLE_REQUIRED',
       summary: 'Replace the role set of an account (revokes its sessions)',
-      description: 'Owners manage every role. Admins manage teacher/student of accounts without owner/admin. Nobody changes their own roles; the last active owner keeps owner; `student` is always kept.',
+      description: 'Nobody grants `owner` (owners included; it comes only from bootstrap:owner); keeping `owner` on an existing owner is allowed. Owners grant admin/teacher/student and remove roles. Admins manage teacher/student of accounts without owner/admin. Nobody changes their own roles; the last active owner keeps owner; `student` is always kept.',
       body: body({ roles: arr(enumOf(['owner', 'admin', 'teacher', 'student']), { minItems: 1, uniqueItems: true }) }, ['roles']),
       response: ref('RoleChange'),
       errors: {

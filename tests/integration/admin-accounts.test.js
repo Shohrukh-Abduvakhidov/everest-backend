@@ -242,6 +242,21 @@ test('admin accounts: list, roles and owner protection (M17)', async (t) => {
          const demoted = await put(otherAdminId, ['student'], tokens.owner)
          assert.equal(demoted.status, 200)
          assert.deepEqual(await rolesOf(otherAdminId), ['student'])
+
+         // The owner role is created only by bootstrap:owner: nobody grants it, owners included.
+         expectError(await put(target, ['student', 'owner'], tokens.owner), 403, 'ROLE_ASSIGNMENT_FORBIDDEN')
+         expectError(await put(target, ['student', 'admin', 'owner'], tokens.owner), 403, 'ROLE_ASSIGNMENT_FORBIDDEN')
+         assert.deepEqual(await rolesOf(target), ['admin', 'student'])
+         // Keeping owner on an existing owner is not a grant.
+         const ownerKept = await put(secondOwnerId, ['student', 'owner', 'teacher'], tokens.owner)
+         assert.equal(ownerKept.status, 200, JSON.stringify(ownerKept.body))
+         assert.equal(ownerKept.body.data.changed, true)
+         assert.deepEqual(await rolesOf(secondOwnerId), ['owner', 'student', 'teacher'])
+         const ownerUnchanged = await put(secondOwnerId, ['teacher', 'owner', 'student'], tokens.owner)
+         assert.equal(ownerUnchanged.status, 200)
+         assert.equal(ownerUnchanged.body.data.changed, false)
+         assert.equal((await put(secondOwnerId, ['student', 'owner'], tokens.owner)).status, 200)
+         assert.deepEqual(await rolesOf(secondOwnerId), ['owner', 'student'])
       })
 
       await t.test('role change and block revoke the subject sessions', async () => {

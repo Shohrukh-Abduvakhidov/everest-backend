@@ -1,5 +1,11 @@
 # Decisions
 
+## 2026-10-31 — Owner role is created only by bootstrap:owner
+
+`PUT /admin/users/:userId/roles` never grants `owner`, not even when an owner is the actor (`403 ROLE_ASSIGNMENT_FORBIDDEN`, an existing code). "Granting" means adding a role the target does not hold; keeping `owner` in the set of an existing owner is allowed. New owners come only from `npm run bootstrap:owner`. Owners still grant `admin`, `teacher` and `student`; admin limits are unchanged.
+
+Open: an owner may still remove `owner` from another owner (subject to `LAST_OWNER_PROTECTED`). Combined with this rule, a removed owner cannot be restored through the API. Kept as-is pending a product decision.
+
 ## 2026-10-31 — Admin accounts slice (M17)
 
 Assumptions made without the user (please review):
