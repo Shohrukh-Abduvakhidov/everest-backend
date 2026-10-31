@@ -228,7 +228,7 @@ test('password registration and login integration', async (t) => {
         `SELECT account.last_login_at, session.user_agent, audit.event_code
          FROM users AS account
          JOIN auth_sessions AS session ON session.user_id = account.id
-         JOIN audit_events AS audit ON audit.entity_id = session.id
+         JOIN audit_events AS audit ON audit.entity_id = session.id AND audit.entity_type = 'auth_session'
          WHERE account.id = $1 AND session.revoked_at IS NULL`,
         [userId]
       );
