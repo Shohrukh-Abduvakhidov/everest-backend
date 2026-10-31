@@ -2,7 +2,9 @@ import {
    approveUserService,
    blockUserService,
    listPendingUsersService,
+   listUsersService,
    rejectUserService,
+   replaceUserRolesService,
    unblockUserService,
 } from '../services/account-admin-service.js'
 
@@ -10,6 +12,32 @@ async function listPendingUsersController(req, res, next) {
    try {
       const data = await listPendingUsersService(
          req.query,
+         req.app.locals.serviceDependencies.accountAdmin,
+      )
+      res.json({ data })
+   } catch (error) {
+      next(error)
+   }
+}
+
+async function listUsersController(req, res, next) {
+   try {
+      const data = await listUsersService(
+         req.query,
+         req.app.locals.serviceDependencies.accountAdmin,
+      )
+      res.json({ data })
+   } catch (error) {
+      next(error)
+   }
+}
+
+async function replaceUserRolesController(req, res, next) {
+   try {
+      const data = await replaceUserRolesService(
+         req.auth.userId,
+         req.params.userId,
+         req.body,
          req.app.locals.serviceDependencies.accountAdmin,
       )
       res.json({ data })
@@ -74,6 +102,8 @@ export {
    approveUserController,
    blockUserController,
    listPendingUsersController,
+   listUsersController,
    rejectUserController,
+   replaceUserRolesController,
    unblockUserController,
 }

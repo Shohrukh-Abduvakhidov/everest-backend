@@ -4,14 +4,18 @@ import {
    approveUserController,
    blockUserController,
    listPendingUsersController,
+   listUsersController,
    rejectUserController,
+   replaceUserRolesController,
    unblockUserController,
 } from '../controllers/account-admin-controller.js'
 import {
    approveUserAuthorizationMiddleware,
    blockUserAuthorizationMiddleware,
    listPendingUsersAuthorizationMiddleware,
+   listUsersAuthorizationMiddleware,
    rejectUserAuthorizationMiddleware,
+   replaceUserRolesAuthorizationMiddleware,
    unblockUserAuthorizationMiddleware,
 } from '../middleware/admin-middleware.js'
 import { authMiddleware } from '../middleware/auth-middleware.js'
@@ -622,6 +626,14 @@ adminRouter.get(
    '/question-imports/:importId/errors',
    readQuestionImportsAuthorizationMiddleware,
    listQuestionImportErrorsController,
+)
+adminRouter.get('/users', listUsersAuthorizationMiddleware, listUsersController)
+adminRouter.put(
+   '/users/:userId/roles',
+   replaceUserRolesAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   replaceUserRolesController,
 )
 adminRouter.get(
    '/users/pending',

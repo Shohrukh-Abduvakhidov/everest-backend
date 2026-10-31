@@ -64,10 +64,35 @@ async function unblockUserAuthorizationMiddleware(req, res, next) {
    }
 }
 
+// The full account list uses the same permission as the pending list.
+async function listUsersAuthorizationMiddleware(req, res, next) {
+   try {
+      void res
+      await authorizeAccountAction(req, 'accounts.pending.read')
+      next()
+   } catch (error) {
+      next(error)
+   }
+}
+
+// No dedicated role permission exists; accounts.approve (owner, admin) gates the route and
+// the service applies the owner/admin role rules.
+async function replaceUserRolesAuthorizationMiddleware(req, res, next) {
+   try {
+      void res
+      await authorizeAccountAction(req, 'accounts.approve')
+      next()
+   } catch (error) {
+      next(error)
+   }
+}
+
 export {
    approveUserAuthorizationMiddleware,
    blockUserAuthorizationMiddleware,
    listPendingUsersAuthorizationMiddleware,
+   listUsersAuthorizationMiddleware,
    rejectUserAuthorizationMiddleware,
+   replaceUserRolesAuthorizationMiddleware,
    unblockUserAuthorizationMiddleware,
 }

@@ -51,7 +51,12 @@ const schemas = {
          details: arr(anyObject('Field or reason detail, e.g. { field, message }')),
       }, ['code', 'message', 'details']),
    }, ['error']),
-   Pagination: obj({ limit: int(), offset: int(), hasMore: bool() }, ['limit', 'offset', 'hasMore']),
+   Pagination: obj({
+      limit: int(),
+      offset: int(),
+      hasMore: bool(),
+      total: int({ description: 'Total matching items; present on lists that count (admin accounts)' }),
+   }, ['limit', 'offset', 'hasMore']),
    LanguageCode: enumOf(languages),
    TitleTranslations: {
       type: 'object',
@@ -117,6 +122,23 @@ const schemas = {
       createdAt: dt(),
       onboardingCompletedAt: nullable(dt()),
    }),
+   AdminAccount: obj({
+      id: id(),
+      firstName: nullable(str()),
+      lastName: nullable(str()),
+      displayName: nullable(str({ description: 'First and last name joined; null when both are empty' })),
+      phone: nullable(str({ description: 'Primary E.164 phone' })),
+      status: enumOf(['pending', 'active', 'blocked', 'rejected']),
+      roles: arr(enumOf(['admin', 'owner', 'student', 'teacher']), { description: 'Sorted role codes' }),
+      createdAt: dt(),
+      lastLoginAt: nullable(dt()),
+      telegramLinked: bool(),
+   }, ['id', 'status', 'roles', 'createdAt', 'telegramLinked']),
+   RoleChange: obj({
+      changed: bool({ description: 'false when the requested set equals the current one (no audit, no revocation)' }),
+      user: ref('AdminAccount'),
+      revokedSessions: int(),
+   }, ['changed', 'user', 'revokedSessions']),
    AccountTransition: obj({
       action: enumOf(['approve', 'reject', 'block', 'unblock']),
       user: ref('PendingUser'),
@@ -922,6 +944,33 @@ const routes = [
    }],
 
    // Admin: accounts
+   ['get', '/admin/users', {
+      tag: 'Admin: accounts', ...adminRead('accounts.pending.read'), permissionError: 'ADMIN_ROLE_REQUIRED',
+      summary: 'All accounts (filter, search, total)',
+      description: 'Newest first by default; ties are broken by id. `q` (2–100 characters) matches first name, last name, full name or any phone; LIKE wildcards are literal.',
+      query: [
+         ...limitQuery,
+         { name: 'status', schema: enumOf(['pending', 'active', 'blocked', 'rejected']) },
+         { name: 'role', schema: enumOf(['owner', 'admin', 'teacher', 'student']) },
+         { name: 'q', schema: str({ minLength: 2, maxLength: 100 }) },
+         { name: 'sort', schema: enumOf(['-createdAt', 'createdAt'], { default: '-createdAt' }) },
+      ],
+      response: page('users', ref('AdminAccount')),
+   }],
+   ['put', '/admin/users/:userId/roles', {
+      tag: 'Admin: accounts', ...admin('accounts.approve'), permissionError: 'ADMIN_ROLE_REQUIRED',
+      summary: 'Replace the role set of an account (revokes its sessions)',
+      description: 'Owners manage every role. Admins manage teacher/student of accounts without owner/admin. Nobody changes their own roles; the last active owner keeps owner; `student` is always kept.',
+      body: body({ roles: arr(enumOf(['owner', 'admin', 'teacher', 'student']), { minItems: 1, uniqueItems: true }) }, ['roles']),
+      response: ref('RoleChange'),
+      errors: {
+         400: ['VALIDATION_ERROR', 'INVALID_USER_ID', 'INVALID_ROLES'],
+         403: ['ROLE_ASSIGNMENT_FORBIDDEN', 'OWNER_ACTION_FORBIDDEN'],
+         404: ['USER_NOT_FOUND'],
+         409: ['SELF_ROLE_CHANGE_FORBIDDEN', 'LAST_OWNER_PROTECTED'],
+         422: ['STUDENT_ROLE_REQUIRED'],
+      },
+   }],
    ['get', '/admin/users/pending', {
       tag: 'Admin: accounts', ...adminRead('accounts.pending.read'), permissionError: 'ADMIN_ROLE_REQUIRED',
       summary: 'Pending accounts', query: limitQuery, response: page('users', ref('PendingUser')),
@@ -930,7 +979,12 @@ const routes = [
       tag: 'Admin: accounts', ...admin(`accounts.${action}`), permissionError: 'ADMIN_ROLE_REQUIRED',
       summary: { approve: 'pending → active', reject: 'pending → rejected', block: 'active → blocked (revokes sessions)', unblock: 'blocked → active' }[action],
       response: ref('AccountTransition'),
-      errors: { 400: ['INVALID_USER_ID'], 404: ['USER_NOT_FOUND'], 409: ['INVALID_ACCOUNT_TRANSITION', 'SELF_REJECTION_FORBIDDEN', 'SELF_BLOCK_FORBIDDEN'] },
+      errors: {
+         400: ['INVALID_USER_ID'],
+         ...(action === 'approve' ? {} : { 403: ['OWNER_ACTION_FORBIDDEN'] }),
+         404: ['USER_NOT_FOUND'],
+         409: ['INVALID_ACCOUNT_TRANSITION', 'SELF_REJECTION_FORBIDDEN', 'SELF_BLOCK_FORBIDDEN', ...(action === 'unblock' || action === 'approve' ? [] : ['LAST_OWNER_PROTECTED'])],
+      },
    }]),
 
    // Admin: courses
