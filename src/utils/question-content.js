@@ -13,6 +13,9 @@ const sourceMetadataFields = {
    page: 'integer',
    number: 'text',
    note: 'text',
+   chapter: 'text',
+   variant: 'text',
+   year: 'year',
 }
 
 function validationError(field, message = `${field} is invalid`) {
@@ -169,6 +172,11 @@ function parseSourceMetadata(value) {
       if (value[field] === undefined) continue
       if (kind === 'integer') {
          if (!Number.isSafeInteger(value[field]) || value[field] < 1) {
+            throw validationError('sourceMetadata')
+         }
+         parsed[field] = value[field]
+      } else if (kind === 'year') {
+         if (!Number.isSafeInteger(value[field]) || value[field] < 1900 || value[field] > 2100) {
             throw validationError('sourceMetadata')
          }
          parsed[field] = value[field]

@@ -748,6 +748,15 @@ async function archiveQuestionService(userId, questionIdValue, overrides) {
    })
 }
 
+// Shared with the M09 importer so imported questions go through the same validation path.
+export {
+   canManage,
+   keyShape,
+   mapConstraintError,
+   parseQuestionBody,
+   reconcileAnswerKey,
+}
+
 export {
    archiveQuestionService,
    copyQuestionService,

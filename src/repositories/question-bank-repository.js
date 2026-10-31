@@ -186,8 +186,8 @@ async function createQuestion(question, client) {
       `INSERT INTO questions
          (bank_id, subject_id, external_id, question_type, language_code, difficulty,
           difficulty_source, status, content, interaction_settings, source_metadata,
-          source_question_id, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'draft', $8, $9, $10, $11, $12)
+          source_question_id, created_by, import_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'draft', $8, $9, $10, $11, $12, $13)
        RETURNING id`,
       [
          normalizeInternalId(question.bankId),
@@ -202,6 +202,7 @@ async function createQuestion(question, client) {
          question.sourceMetadata,
          question.sourceQuestionId,
          normalizeInternalId(question.actorId),
+         question.importId ?? null,
       ],
    )
    return result.rows[0].id

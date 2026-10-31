@@ -46,6 +46,19 @@ async function findEntity(kind, id, db = pool) {
    return result.rows[0] || null
 }
 
+// Natural-key lookup used by the importer: subjects by code, sections/topics by
+// (subject, code).
+async function findEntityByCode(kind, code, subjectId, db = pool) {
+   const subjectFilter = kind === 'subject' ? '' : 'AND entity.subject_id = $2'
+   const result = await db.query(
+      `SELECT ${columns[kind]}, ${translationsSql(kind)}
+       FROM ${entities[kind].table} AS entity
+       WHERE entity.code = $1 ${subjectFilter}`,
+      kind === 'subject' ? [code] : [code, normalizeInternalId(subjectId)],
+   )
+   return result.rows[0] || null
+}
+
 async function lockEntity(kind, id, client) {
    const result = await client.query(
       `SELECT ${columns[kind]}
@@ -125,6 +138,20 @@ async function replaceTranslations(kind, id, translations, client) {
    )
 }
 
+// Adds or retitles the given languages and keeps every other stored translation.
+async function upsertTranslations(kind, id, translations, client) {
+   const { translations: table, foreignKey } = entities[kind]
+   const languages = Object.keys(translations)
+   if (!languages.length) return
+   await client.query(
+      `INSERT INTO ${table} (${foreignKey}, language_code, title)
+       SELECT $1, language_code, title
+       FROM unnest($2::text[], $3::text[]) AS input(language_code, title)
+       ON CONFLICT (${foreignKey}, language_code) DO UPDATE SET title = EXCLUDED.title`,
+      [normalizeInternalId(id), languages, languages.map((language) => translations[language].title)],
+   )
+}
+
 async function deleteEntity(kind, id, client) {
    const { table, translations, foreignKey } = entities[kind]
    const entityId = normalizeInternalId(id)
@@ -163,10 +190,12 @@ export {
    createTopic,
    deleteEntity,
    findEntity,
+   findEntityByCode,
    listEntities,
    lockEntity,
    lockTopicTree,
    replaceTranslations,
    topicParentCreatesCycle,
    updateEntity,
+   upsertTranslations,
 }
