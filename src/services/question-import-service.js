@@ -19,6 +19,7 @@ import {
    questionTypes,
 } from '../utils/question-content.js'
 import { packageFile, sha256 } from '../utils/question-package.js'
+import { adaptEntityPackage, isEntityPackage } from '../utils/question-package-adapter.js'
 import { parsePagination, validateBody, validationError } from './course-service.js'
 import { canManage, keyShape, parseQuestionBody, reconcileAnswerKey } from './question-bank-service.js'
 
@@ -43,7 +44,8 @@ const proposalSources = ['official_key', 'expert_review', 'ai_inference']
 const imageTypes = [mimeTypes.png, mimeTypes.jpg]
 const runStatuses = ['pending', 'validating', 'validated', 'importing', 'completed', 'failed']
 const duplicateReason = 'import: same normalized text and options'
-const manifestFields = ['schemaVersion', 'sourceNamespace', 'subjects', 'sections', 'topics', 'bank', 'assets', 'questions']
+const manifestFields = ['schemaVersion', 'sourceNamespace', 'subjects', 'sections', 'topics', 'bank', 'assets', 'questions', 'duplicates']
+const maxAssetMetadataBytes = 16384
 const questionPackageFields = [
    'externalId',
    'type',
@@ -85,7 +87,7 @@ function emptyCounters() {
       assets: { total: 0, uploaded: 0, reusedByAlias: 0, reusedByHash: 0 },
       questions: { total: 0, created: 0, updated: 0, skippedImmutable: 0, failed: 0, notAttempted: 0 },
       answerKeys: { unknown: 0, proposed: 0, keptExisting: 0 },
-      duplicates: { suggested: 0 },
+      duplicates: { suggested: 0, declared: 0 },
       batches: { size: 0, committed: 0, failed: 0 },
       warnings: 0,
       errors: 0,
@@ -468,7 +470,7 @@ async function planAssets(deps, manifest, files, namespace, report) {
    for (const [index, raw] of entries.entries()) {
       const path = `assets[${index}]`
       try {
-         requireFields(raw, ['id', 'file', 'mimeType', 'sha256', 'fileName'], path)
+         requireFields(raw, ['id', 'file', 'mimeType', 'sha256', 'fileName', 'sizeBytes', 'widthPx', 'heightPx', 'sourceMetadata'], path)
          if (typeof raw.id !== 'string' || !assetIdPattern.test(raw.id)) {
             throw packageError('PACKAGE_SCHEMA_INVALID', 'id is invalid', `${path}.id`)
          }
@@ -507,6 +509,26 @@ async function planAssets(deps, manifest, files, namespace, report) {
             addIssue(report, 'error', 'ASSET_HASH_MISMATCH', `${path}.sha256`, `asset ${raw.id} bytes do not match the declared sha256`)
             continue
          }
+         if (raw.sizeBytes !== undefined && raw.sizeBytes !== bytes.length) {
+            addIssue(report, 'error', 'ASSET_SIZE_MISMATCH', `${path}.sizeBytes`, `asset ${raw.id} size differs from the declared sizeBytes`)
+            continue
+         }
+         if ((raw.widthPx !== undefined && media.widthPx && raw.widthPx !== media.widthPx)
+            || (raw.heightPx !== undefined && media.heightPx && raw.heightPx !== media.heightPx)) {
+            addIssue(report, 'warning', 'ASSET_DIMENSIONS_MISMATCH', path,
+               `asset ${raw.id} declared dimensions differ from the image header; the header values are stored`)
+         }
+         // Package provenance (extraction method, page, bbox, ...) is kept on the asset row.
+         let provenance = null
+         if (raw.sourceMetadata !== undefined) {
+            if (isPlainObject(raw.sourceMetadata)
+               && Buffer.byteLength(JSON.stringify(raw.sourceMetadata)) <= maxAssetMetadataBytes) {
+               provenance = raw.sourceMetadata
+            } else {
+               addIssue(report, 'warning', 'ASSET_METADATA_DROPPED', `${path}.sourceMetadata`,
+                  `asset ${raw.id} sourceMetadata is not an object of at most 16 KiB and was not stored`)
+            }
+         }
          const fileName = typeof raw.fileName === 'string' && raw.fileName.trim()
             ? raw.fileName.trim().slice(0, 255)
             : String(raw.file).split('/').pop().slice(0, 255)
@@ -519,6 +541,7 @@ async function planAssets(deps, manifest, files, namespace, report) {
             widthPx: media.widthPx,
             heightPx: media.heightPx,
             fileName,
+            provenance,
             used: false,
             action: 'upload',
             assetId: null,
@@ -574,8 +597,8 @@ function resolveContent(value, resolveAsset, warn) {
             if (block.assetId !== undefined) {
                throw packageError('IMAGE_REFERENCE_INVALID', 'image blocks must reference package assets with "asset"', 'content')
             }
-            const { asset, ...rest } = block
-            return { ...rest, assetId: resolveAsset(asset) }
+            const { asset, assetNamespace, ...rest } = block
+            return { ...rest, assetId: resolveAsset(asset, assetNamespace) }
          }
          if (block.type === 'table' && block.header !== undefined) {
             warn('CONTENT_TABLE_HEADER_FLATTENED', 'table header flag is not supported; the header row is kept as a normal row')
@@ -644,6 +667,10 @@ function prepareQuestion(raw, { resolveAsset, topicIds, warn }) {
          : raw.matching
    }
    const values = parseQuestionBody(body, raw.type, false)
+   if (raw.type === 'matching' && (values.interactionSettings.requireAllLeft === null
+      || values.interactionSettings.allowRightReuse === null)) {
+      warn('MATCHING_RULE_UNSPECIFIED', 'requireAllLeft/allowRightReuse is not stated; a reviewer must set it before publication')
+   }
    const shape = keyShape(
       { question_type: raw.type, interaction_settings: values.interactionSettings },
       {
@@ -692,7 +719,7 @@ async function planQuestions(deps, manifest, context, report) {
    const items = []
    const seen = new Map()
    for (const [index, raw] of rawQuestions.entries()) {
-      const path = `questions[${index}]`
+      const path = context.paths?.[index] ?? `questions[${index}]`
       const externalId = isPlainObject(raw) ? parseExternalId(raw.externalId) : null
       if (!externalId) {
          addIssue(report, 'error', 'QUESTION_EXTERNAL_ID_REQUIRED', `${path}.externalId`, 'imported questions need a non-empty externalId (≤200)')
@@ -712,7 +739,10 @@ async function planQuestions(deps, manifest, context, report) {
             throw packageError('REFERENCE_UNKNOWN', `topic ${unknownTopic} is not in the bank subject`, 'topicCodes')
          }
          const prepared = prepareQuestion(raw, {
-            resolveAsset: (reference) => {
+            resolveAsset: (reference, assetNamespace) => {
+               if (assetNamespace !== undefined && assetNamespace !== context.namespace) {
+                  throw packageError('REFERENCE_UNKNOWN', 'image references an asset of another sourceNamespace', 'content')
+               }
                const asset = context.assets.get(reference)
                if (!asset) throw packageError('REFERENCE_UNKNOWN', `asset ${String(reference).slice(0, 200)} is not declared in assets`, 'content')
                asset.used = true
@@ -789,11 +819,51 @@ function summarizeManifest(manifest, plan) {
       topics: Array.isArray(manifest.topics) ? manifest.topics.length : 0,
       assets: Array.isArray(manifest.assets) ? manifest.assets.length : 0,
       questions: Array.isArray(manifest.questions) ? manifest.questions.length : 0,
+      declaredDuplicates: plan.duplicates?.length ?? 0,
+      format: plan.format,
    }
 }
 
+function parseDeclaredDuplicates(manifest, plannedIds, report) {
+   const duplicates = []
+   for (const [index, raw] of optionalArray(manifest.duplicates, 'duplicates', maxQuestions).entries()) {
+      const path = `duplicates[${index}]`
+      try {
+         requireFields(raw, ['externalId', 'duplicateOf', 'reason'], path)
+         if (typeof raw.externalId !== 'string' || typeof raw.duplicateOf !== 'string' || raw.externalId === raw.duplicateOf) {
+            throw packageError('PACKAGE_SCHEMA_INVALID', 'a duplicate link needs two different externalIds', path)
+         }
+         if (!plannedIds.has(raw.externalId) || !plannedIds.has(raw.duplicateOf)) {
+            addIssue(report, 'error', 'REFERENCE_UNKNOWN', path, 'duplicate link references a question that is not in the package', raw.externalId)
+            continue
+         }
+         duplicates.push({
+            externalId: raw.externalId,
+            duplicateOf: raw.duplicateOf,
+            reason: typeof raw.reason === 'string' && raw.reason.trim()
+               ? raw.reason.trim().slice(0, 1000)
+               : 'package: declared duplicate',
+            path,
+         })
+      } catch (error) {
+         issueFromError(report, error, '')
+      }
+   }
+   return duplicates
+}
+
 async function planImport(deps, actor, pkg, report) {
-   const manifest = pkg.manifest
+   let manifest = pkg.manifest
+   let paths = null
+   if (isEntityPackage(pkg)) {
+      const adapted = adaptEntityPackage(pkg)
+      for (const issue of adapted.issues) {
+         addIssue(report, issue.severity, issue.code, issue.path, issue.message, issue.externalId)
+      }
+      if (!adapted.manifest) throw packageError('PACKAGE_SCHEMA_INVALID', 'the package could not be read', 'manifest')
+      manifest = adapted.manifest
+      paths = adapted.questionPaths
+   }
    if (!isPlainObject(manifest)) throw packageError('PACKAGE_SCHEMA_INVALID', 'manifest must be a JSON object')
    if (manifest.schemaVersion !== schemaVersion) {
       throw packageError('PACKAGE_SCHEMA_VERSION_UNSUPPORTED', `schemaVersion must be ${schemaVersion}`, 'schemaVersion')
@@ -830,7 +900,13 @@ async function planImport(deps, actor, pkg, report) {
       assets: new Map([...assets].filter(([, asset]) => !asset.invalid)),
       topicKnown,
       bankId: bank?.existing?.id || null,
+      namespace,
+      paths,
    }, report)
+   const allIds = new Set((Array.isArray(manifest.questions) ? manifest.questions : [])
+      .map((question) => (isPlainObject(question) ? parseExternalId(question.externalId) : null)).filter(Boolean))
+   const duplicates = parseDeclaredDuplicates(manifest, allIds, report)
+   report.counters.duplicates.declared = duplicates.length
    for (const asset of assets.values()) {
       if (!asset.used && !asset.invalid) {
          addIssue(report, 'warning', 'ASSET_UNUSED', asset.path, `asset ${asset.id} is not referenced by any question`)
@@ -839,7 +915,7 @@ async function planImport(deps, actor, pkg, report) {
       if (!asset.invalid && asset.action === 'alias') report.counters.assets.reusedByAlias += 1
       if (!asset.invalid && asset.action === 'hash') report.counters.assets.reusedByHash += 1
    }
-   const plan = { namespace, taxonomy, bank, assets, questions }
+   const plan = { namespace, taxonomy, bank, assets, questions, duplicates, format: paths ? 'entity_files' : 'nested' }
    plan.manifestSummary = summarizeManifest(manifest, plan)
    return plan
 }
@@ -948,7 +1024,12 @@ async function writeAssets(deps, actor, plan, bankId, client) {
             widthPx: asset.widthPx,
             heightPx: asset.heightPx,
             uploadedBy: actor.id,
-            sourceMetadata: { importNamespace: plan.namespace, bankId },
+            sourceMetadata: {
+               importNamespace: plan.namespace,
+               importExternalId: asset.id,
+               bankId,
+               ...(asset.provenance ? { package: asset.provenance } : {}),
+            },
          }, client)
          if (stored.status !== 'ready' || !imageTypes.includes(stored.mime_type)) {
             throw new AppError(409, 'ASSET_NOT_USABLE', 'A stored file with the same bytes is not usable')
@@ -1010,6 +1091,27 @@ async function suggestDuplicates(deps, actor, bankId, writtenIds, client) {
    return suggested
 }
 
+// Package-declared duplicate pairs are linked as soon as both questions exist in the bank.
+// They are marked done only after their batch commits.
+async function linkDeclaredDuplicates(deps, actor, context, client) {
+   const pending = context.pendingDuplicates.filter((link) => !link.done)
+   if (!pending.length) return []
+   const ids = new Map((await deps.imports.findQuestionsByExternalIds(
+      context.bankId,
+      [...new Set(pending.flatMap((link) => [link.externalId, link.duplicateOf]))],
+      client,
+   )).map((row) => [row.external_id, row.id]))
+   const linked = []
+   for (const link of pending) {
+      const questionId = ids.get(link.externalId)
+      const duplicateOfId = ids.get(link.duplicateOf)
+      if (!questionId || !duplicateOfId) continue
+      const inserted = await deps.imports.insertDuplicateSuggestion(questionId, duplicateOfId, link.reason, actor.id, client)
+      linked.push({ link, inserted })
+   }
+   return linked
+}
+
 async function writeQuestion(deps, actor, context, item, client, local) {
    const stored = await deps.imports.lockQuestionByExternalId(context.bankId, item.externalId, client)
    if (stored && stored.status !== 'draft') {
@@ -1069,6 +1171,7 @@ async function writeBatch(deps, actor, context, batch, client, local) {
       if (questionId) written.push(questionId)
    }
    local.current = null
+   local.declared = await linkDeclaredDuplicates(deps, actor, context, client)
    local.duplicates = await suggestDuplicates(deps, actor, context.bankId, written, client)
    await deps.auth.appendAuditEvent({
       actorUserId: actor.id,
@@ -1114,7 +1217,14 @@ async function runQuestionImportService(actorIdValue, pkg, options = {}, overrid
       }
    }
 
-   const context = { runId: null, bankId: null, subjectId: null, assets: plan.assets, topicId: null }
+   const context = {
+      runId: null,
+      bankId: null,
+      subjectId: null,
+      assets: plan.assets,
+      topicId: null,
+      pendingDuplicates: plan.duplicates.map((link) => ({ ...link, done: false })),
+   }
    try {
       await deps.transaction(async (client) => {
          await writeTaxonomy(deps, plan.taxonomy, client)
@@ -1165,6 +1275,7 @@ async function runQuestionImportService(actorIdValue, pkg, options = {}, overrid
    counters.questions.created = 0
    counters.questions.updated = 0
    counters.answerKeys = { unknown: 0, proposed: 0, keptExisting: 0 }
+   counters.duplicates.declared = 0
    let failed = false
    for (let start = 0; start < plan.questions.length; start += batchSize) {
       const batch = plan.questions.slice(start, start + batchSize)
@@ -1172,7 +1283,15 @@ async function runQuestionImportService(actorIdValue, pkg, options = {}, overrid
          counters.questions.notAttempted += batch.length
          continue
       }
-      const local = { created: 0, updated: 0, skipped: [], keys: { unknown: 0, proposed: 0, keptExisting: 0 }, duplicates: 0, current: null }
+      const local = {
+         created: 0,
+         updated: 0,
+         skipped: [],
+         keys: { unknown: 0, proposed: 0, keptExisting: 0 },
+         duplicates: 0,
+         declared: [],
+         current: null,
+      }
       try {
          await deps.transaction(async (client) => {
             await writeBatch(deps, actor, context, batch, client, local)
@@ -1182,6 +1301,7 @@ async function runQuestionImportService(actorIdValue, pkg, options = {}, overrid
             next.questions.skippedImmutable += local.skipped.length
             for (const status of Object.keys(local.keys)) next.answerKeys[status] += local.keys[status]
             next.duplicates.suggested += local.duplicates
+            next.duplicates.declared += local.declared.filter((entry) => entry.inserted).length
             next.batches.committed += 1
             await deps.imports.updateRunProgress(context.runId, next, client)
          })
@@ -1190,6 +1310,8 @@ async function runQuestionImportService(actorIdValue, pkg, options = {}, overrid
          counters.questions.skippedImmutable += local.skipped.length
          for (const status of Object.keys(local.keys)) counters.answerKeys[status] += local.keys[status]
          counters.duplicates.suggested += local.duplicates
+         counters.duplicates.declared += local.declared.filter((entry) => entry.inserted).length
+         for (const entry of local.declared) entry.link.done = true
          counters.batches.committed += 1
          const skippedNow = local.skipped.map((item) => ({
             severity: 'warning',
@@ -1221,6 +1343,18 @@ async function runQuestionImportService(actorIdValue, pkg, options = {}, overrid
          await deps.imports.insertRunErrors(context.runId, [entry])
          deps.log('question import batch failed', { runId: context.runId, code: entry.code })
       }
+   }
+   const unlinked = context.pendingDuplicates.filter((link) => !link.done).map((link) => ({
+      severity: 'warning',
+      code: 'DUPLICATE_LINK_NOT_CREATED',
+      path: link.path,
+      message: 'declared duplicate link was not created because one of its questions was not imported',
+      externalId: link.externalId,
+   }))
+   if (unlinked.length) {
+      counters.warnings += unlinked.length
+      report.warnings.push(...unlinked)
+      await deps.imports.insertRunErrors(context.runId, unlinked)
    }
    const status = failed ? 'failed' : 'completed'
    await deps.transaction(async (client) => {
