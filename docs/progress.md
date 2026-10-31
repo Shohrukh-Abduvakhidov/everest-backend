@@ -4,7 +4,28 @@ Updated: 2026-10-31.
 
 ## Current increment
 
-M09 (indexed book import) is implemented on `feat/m09-book-import` and is awaiting review. It reads the real book package format, and both real packages pass a dry run and a full disposable-database import. M-DOCS (PR #22) and the import contract (PR #23) are merged. Real-storage (MinIO/S3) import and a real book package are **not** verified.
+M09 (indexed book import) is merged (PR #24). The M17 admin-accounts slice (account list, role replacement, owner protection) is implemented on `feat/admin-accounts-api` and is awaiting review. Real-storage (MinIO/S3) import is still **not** verified.
+
+## 2026-10-31 — M17 admin accounts slice
+
+- **Endpoints:**
+   - `GET /api/v1/admin/users`: status/role/q/sort filters, literal-wildcard search over names and phones, stable order, `pagination.total`;
+   - `pagination.total` added to `GET /admin/users/pending` (additive);
+   - `PUT /api/v1/admin/users/:userId/roles`: owner/admin rules, no self-change, last-owner protection, `student` mandatory, row and owner-set locks, idempotent no-op, audit `admin.account.roles_changed`, session and refresh-token revocation.
+- **Owner protection** on block/reject/unblock: `OWNER_ACTION_FORBIDDEN`, `LAST_OWNER_PROTECTED`.
+- **Code:** `account-admin-repository` (list/count/roles/replace/owner count), `account-admin-service`, `account-admin-controller`, `admin-middleware` and `routes/admin.js`. OpenAPI adds `AdminAccount`, `RoleChange` and `Pagination.total`.
+- **Tests:** `tests/integration/admin-accounts.test.js` (7 subtests) covers:
+   - the permission matrix (anonymous, student, teacher, admin, owner);
+   - filters, search, literal wildcards, pagination and `total`, the stable tie-break, and the response key allowlist;
+   - the role-change matrix, the audit row and idempotency;
+   - session revocation on role change and on block;
+   - owner protection on block/reject/unblock;
+   - the last-owner guard;
+   - concurrent cross-demotion and concurrent identical changes.
+- **Results:**
+   - `npm test` (disposable database): 228 tests, 227 passed, 0 failed, 1 skipped (real storage);
+   - `npm run test:migrations`: 25/25/24/25;
+   - `verify-database.js`: valid. No migration was added.
 
 ## 2026-10-31 — M09 follow-up: real package format and isolated tests
 
