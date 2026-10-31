@@ -1,0 +1,126 @@
+{
+  "schemaVersion": "everest.question-import.v1",
+  "entity": "questions",
+  "records": [
+    {
+      "bankCode": "fixture-bank",
+      "subjectCode": "fixture-subject",
+      "sectionCode": "part-a",
+      "externalId": "fixture-bank-matching-0001",
+      "questionType": "matching",
+      "languageCode": "tg",
+      "difficulty": 2,
+      "difficultySource": "ai",
+      "status": "draft",
+      "content": {
+        "blocks": [
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
+                "text": "Synthetic matching",
+                "marks": []
+              }
+            ]
+          },
+          {
+            "type": "columnHeaders",
+            "left": "Term",
+            "right": "Meaning"
+          }
+        ]
+      },
+      "interactionSettings": {
+        "requireAllLeft": true,
+        "allowRightReuse": null
+      },
+      "sourceMetadata": {
+        "sourceFile": "synthetic.pdf",
+        "sequence": 1,
+        "sourceNumber": "7",
+        "pageIndex1Based": 3,
+        "printedPage": "3",
+        "bookSectionTitle": "Synthetic section",
+        "examPart": [
+          "A"
+        ],
+        "isSample": false,
+        "reviewRequired": false,
+        "bbox": [
+          0.1,
+          0.2,
+          0.3,
+          0.4
+        ],
+        "transcriptionIssues": []
+      }
+    },
+    {
+      "bankCode": "fixture-bank",
+      "subjectCode": "fixture-subject",
+      "sectionCode": "part-a",
+      "externalId": "fixture-bank-open-0001",
+      "questionType": "open",
+      "languageCode": "tg",
+      "difficulty": 2,
+      "difficultySource": "ai",
+      "status": "draft",
+      "content": {
+        "blocks": [
+          {
+            "type": "line_group",
+            "lines": [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "text": "Line one",
+                    "marks": [
+                      "italic"
+                    ]
+                  }
+                ]
+              },
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "text": "Line two",
+                    "marks": []
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "interactionSettings": {
+        "answerFormat": "short_text",
+        "inputCells": 4,
+        "allowedCharacters": "digits"
+      },
+      "sourceMetadata": {
+        "sourceFile": "synthetic.pdf",
+        "sequence": 1,
+        "sourceNumber": "7",
+        "pageIndex1Based": 3,
+        "printedPage": "3",
+        "bookSectionTitle": "Synthetic section",
+        "examPart": [
+          "A"
+        ],
+        "isSample": false,
+        "reviewRequired": false,
+        "bbox": [
+          0.1,
+          0.2,
+          0.3,
+          0.4
+        ],
+        "transcriptionIssues": []
+      },
+      "difficultyReason": "synthetic"
+    }
+  ]
+}

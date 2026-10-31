@@ -10,3 +10,6 @@ uploads/*
 
 # Local agent settings
 .claude/settings.json
+
+# Real question packages (copyrighted book content) stay local
+import-packages/

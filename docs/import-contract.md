@@ -1,11 +1,14 @@
 # Question import contract (input for M09)
 
-Status: reference document, 2026-10-30. It describes what the backend **implements today** (schema plus M08/M07-C code) and what an `everest.question-import.v1` package can and cannot map to.
+Status: reference document, written 2026-10-30, **updated 2026-10-31 for M09**.
 
-Nothing here is implemented as an import pipeline yet:
+- §1–§8 describe the schema and the M08 rules that the importer is bound by. Where M09 changed a statement, it is marked *(M09)*.
+- §9 is the package format `everest.question-import.v1` as used by the real book packages, and how the importer maps it.
+- §10 lists which §8 gaps M09 closed and which remain.
 
-- `question_imports` and `question_import_errors` exist in the schema but have no repository, service or route.
-- Every statement is taken from `src/migrations/*`, `src/repositories/{taxonomy,question-bank}-repository.js`, `src/services/{taxonomy,question-bank,asset-upload}-service.js`, `src/utils/question-content.js`, `docs/api.md` and `docs/decisions.md`.
+The pipeline is implemented in M09: `scripts/import-question-package.js` → `src/services/question-import-service.js` → repositories. Operating instructions are in `docs/import-runbook.md`.
+
+The original sources of §1–§8 are `src/migrations/*`, `src/repositories/{taxonomy,question-bank}-repository.js`, `src/services/{taxonomy,question-bank,asset-upload}-service.js`, `src/utils/question-content.js`, `docs/api.md` and `docs/decisions.md`.
 
 Two kinds of limit appear below:
 
@@ -95,7 +98,7 @@ API rules for topics:
 | `interaction_settings` | JSONB | no | `'{}'` | CHECK object | see §3 |
 | `source_metadata` | JSONB | no | `'{}'` | — | allowlist, see §1.4 |
 | `source_question_id` | BIGINT | yes | — | FK → questions; CHECK ≠ `id` | set only by copy |
-| `import_id` | BIGINT | yes | — | FK → question_imports | **not set by any current code** |
+| `import_id` | BIGINT | yes | — | FK → question_imports | *(M09)* set by the importer to the run that last created or updated the draft |
 | `created_by` | BIGINT | no | — | FK → users | — |
 | `created_at`, `updated_at` | TIMESTAMPTZ | no | now | — | — |
 
@@ -149,9 +152,9 @@ Additional CHECKs:
 
 - Columns: `question_id`, `duplicate_of_id` (FK → questions), `reason` TEXT NULL, `marked_by` BIGINT NOT NULL (FK → users).
 - PK (`question_id`, `duplicate_of_id`); CHECK `question_id <> duplicate_of_id`.
-- **No API.** Its only current use: an M08 draft referenced here cannot be deleted (`409 QUESTION_IN_USE`).
+- **No API.** *(M09)* The importer writes conservative duplicate suggestions here. An M08 draft referenced here cannot be deleted (`409 QUESTION_IN_USE`).
 
-**Import bookkeeping (schema only, no code):**
+**Import bookkeeping** *(M09: implemented; index `question_import_errors (import_id, id)` added)*:
 
 - `question_imports`:
    - `bank_id` NOT NULL, `initiated_by` NOT NULL;
@@ -175,7 +178,7 @@ All question child tables have guard triggers: inserts, updates and deletes are 
 | `mime_type` | TEXT | no | — | — |
 | `file_name` | TEXT | yes | — | — |
 | `size_bytes` | BIGINT | no | — | CHECK ≥ 0 |
-| `sha256` | VARCHAR(64) | yes | — | CHECK hex64; **not filled by the upload flow** |
+| `sha256` | VARCHAR(64) | yes | — | CHECK hex64; *(M09)* partial UNIQUE index `assets_sha256_key`; filled by the importer, still not by the M07-A upload flow |
 | `width_px`, `height_px` | INTEGER | yes | — | CHECK > 0; filled from the PNG header (and video metadata) |
 | `duration_seconds` | INTEGER | yes | — | video only |
 | `status` | VARCHAR(16) | no | `'pending'` | CHECK `pending\|ready\|quarantined\|archived` |
@@ -186,7 +189,7 @@ All question child tables have guard triggers: inserts, updates and deletes are 
 | `processing_error` | TEXT | yes | — | — |
 | `created_at` | TIMESTAMPTZ | no | now | — |
 
-**`asset_aliases`** (schema only, no code):
+**`asset_aliases`** *(M09: used by the importer)*:
 
 - Columns: `source_namespace` TEXT, `external_id` TEXT, `asset_id` FK.
 - UNIQUE (`source_namespace`, `external_id`). It is designed for mapping package-local file IDs to assets.
@@ -204,6 +207,11 @@ Allowed keys only; any other key returns `400 VALIDATION_ERROR`.
 | `page` | integer ≥ 1 |
 | `number` | string, 1–500 (e.g. `"12а"`) |
 | `note` | string, 1–500 |
+| `sourceFile`, `printedPage`, `bookSectionTitle`, `bookRubric` *(M09)* | string, 1–500 |
+| `sequence` *(M09)* | integer ≥ 1 |
+| `isSample`, `reviewRequired` *(M09)* | boolean |
+| `examPart` *(M09)* | 1–10 labels, each ≤20 characters |
+| `year` *(M09)* | integer 1900–2100 |
 
 ---
 
@@ -506,3 +514,174 @@ No package schema is defined in this repository. The package field names below a
    - no per-question translations (one `language_code` per question).
 12. **Grading semantics are undefined:** numeric tolerance and short-text normalization (decision M08 #4).
 13. **Ownership:** `question_banks.owner_id` and `questions.created_by` are NOT NULL, so every import run must act as a concrete user with `questions.manage`.
+
+---
+
+## 9. Package format `everest.question-import.v1` (as produced for real books)
+
+This section describes the format of the real book packages (`everest-tajik-indexed-v1.zip`, `everest-biology-tg-2026-pilot.zip`). The importer reads it directly (`src/utils/question-package-adapter.js`). It is subject-neutral: nothing Tajik- or biology-specific is hard-coded.
+
+### 9.1 Layout
+
+A package is a **ZIP** or a **directory**. A ZIP that wraps everything in one top-level folder is also accepted.
+
+```text
+manifest.json
+data/<entity>.json  or  data/<entity>.partNNN.json   (any number of parts, read in file-name order)
+assets/<file>.png|jpg
+README.md, reports/*, schema/*, scripts/*            (ignored by the importer; never executed)
+```
+
+Every `data/*.json` file is an envelope:
+
+```json
+{ "schemaVersion": "everest.question-import.v1", "entity": "<entity>", "records": [ ... ] }
+```
+
+Envelope errors: an unknown entity returns `PACKAGE_ENTITY_UNKNOWN`, invalid JSON returns `PACKAGE_JSON_INVALID`, and another version returns `PACKAGE_SCHEMA_VERSION_UNSUPPORTED`.
+
+### 9.2 Manifest
+
+| Field | Use |
+|---|---|
+| `schemaVersion` | must be `everest.question-import.v1` |
+| `sourceNamespace` | scopes `asset_aliases`; falls back to `question_banks[0].sourceMetadata.sourceNamespace` |
+| `files[] { path, sha256 }` | optional. A listed file missing from the package returns `PACKAGE_FILE_MISSING`; a hash mismatch returns `PACKAGE_FILE_HASH_MISMATCH` |
+| `readyForImport: false` | warning `PACKAGE_NOT_READY_FOR_IMPORT`; the import is not blocked |
+| `extractionComplete: false` | warning `PACKAGE_EXTRACTION_INCOMPLETE` |
+| everything else (`packageId`, `sourcePdf`, `totals`, `limitations`, …) | informational, not stored |
+
+### 9.3 Package limits and hash
+
+- ZIP: stored or deflate entries only. ZIP64, encryption and unsafe paths are rejected (`PACKAGE_ARCHIVE_INVALID`).
+- Size: at most 512 MiB per package and 64 MiB per entry.
+- Hash: a ZIP is hashed as the sha256 of its bytes. A directory is hashed as the sha256 of the sorted `path NUL sha256 LF` lines.
+
+### 9.4 Entities → database
+
+Records reference each other by natural keys (`subjectCode`, `bankCode`, `questionExternalId`, `optionKey`, `itemKey`, `assetExternalId`), never by database IDs. A reference to an unknown record returns `REFERENCE_UNKNOWN` with the path `data/<file>#records[i]`.
+
+| Entity | Mapped fields | Not stored (one `SOURCE_FIELD_DROPPED` warning per field) |
+|---|---|---|
+| `subjects` | `code`, `primaryLanguage`, `color` (default `neutral`) | `isActive` (`false` → warning `TAXONOMY_INACTIVE_IGNORED`) |
+| `subject_translations` / `section_translations` / `topic_translations` | `languageCode`, `title`, joined by code | — |
+| `sections` | `subjectCode`, `code`, `primaryLanguage` | `position` |
+| `topics` | `subjectCode`, `code`, `sectionCode`, `parentTopicCode`, `primaryLanguage` | `position`, `metadata` |
+| `question_banks` | **exactly one** per package (`PACKAGE_BANK_COUNT_UNSUPPORTED` otherwise): `code`, `title`, `subjectCode`, `visibility` (default `private`), `sourceMetadata` (§9.5) | `primaryLanguage` |
+| `questions` | `externalId` (required), `questionType`, `languageCode`, `difficulty`, `difficultySource`, `content` (§9.6), `interactionSettings`, `sourceMetadata` (§9.5); `bankCode` and `subjectCode` must match the bank | `sectionCode` (sections come through topics), `difficultyReason` |
+| `question_options` | `optionKey` → `option_key`, `sourceLabel` → `source_label`, `position` (order), `content` | `sourceMetadata` (bbox) |
+| `question_matching_items` | `side`, `itemKey`, `sourceLabel`, `position`, `content` | `sourceMetadata` |
+| `question_answer_keys` | `status` (`unknown`\|`proposed`; `verified` → `ANSWER_KEY_VERIFIED_REJECTED`), `source`, `answerDataExternal` (§9.7), `explanation` | — |
+| `question_topics` | `topicCode` (same subject as the bank) | `isPrimary`, `classificationSource`, `reviewRequired`, `reviewReason` |
+| `assets` | `externalId` (alias), `relativePath`, `mimeType` (PNG/JPEG), `sha256` and `sizeBytes` (verified: `ASSET_HASH_MISMATCH` / `ASSET_SIZE_MISMATCH`), `widthPx`/`heightPx` (checked against the PNG header; mismatch → warning). `status` must be `ready`. `sourceMetadata` (`extractionMethod`, page, bbox, `embeddedSha256`, …) is **kept** in `assets.source_metadata.package` (≤16 KiB) | — |
+| `question_assets` | derived in EVEREST from image blocks. A link without a matching image block appends `{ type: image }` to the question content (warning `IMAGE_BLOCK_APPENDED`) | `usageRole` |
+| `question_duplicate_links` | inserted as `question_duplicate_links` with the package `reason`, `marked_by` = actor (counter `duplicates.declared`). Both questions must be in the package | — |
+
+`questions.status` is always `draft`. Any other package value gives warning `QUESTION_STATUS_IGNORED`.
+
+### 9.5 `sourceMetadata` → `source_metadata`
+
+The allowlist (shared with the M08 API, strict, text ≤500 characters) is:
+
+`book`, `edition`, `page`, `number`, `note`, `year`, `sourceFile`, `printedPage`, `sequence`, `bookSectionTitle`, `bookRubric`, `isSample`, `reviewRequired`, `examPart`
+
+Mapping rules:
+
+- `page` = `page`, else a numeric `printedPage`, else `pageIndex1Based`.
+- `number` = `number` as a string, else `sourceNumber`.
+- `year` = `year`, else `examYear`.
+- `examPart` is 1–10 labels, each ≤20 characters.
+- Not stored (warned per field): `bbox`, `bboxCoordinateSystem`, `sourceSpans`, `blockCode`, `gradeLevels`, `classificationSource`, `difficultyReason`, `duplicateCandidateGroup`, `answerKeyEvidence`, `sharedPassageId`, `extractionMethod`, `transcriptionIssues`, `reviewFlags`; bank fields such as `examAuthority`, `examParts`, `sourcePdfSha256`, `totalPdfPages`, `legacy*`. These stay in the package and its reports.
+- Non-empty `transcriptionIssues` or `reviewFlags` give a per-question warning `SOURCE_REVIEW_NOTES_PRESENT`.
+
+### 9.6 Rich content mapping
+
+| Package block | EVEREST block | Warning |
+|---|---|---|
+| `paragraph { children: [text{text, marks}] }` | one `text` block: children joined, `marks` = the marks shared by every non-blank child | `CONTENT_INLINE_MARKS_FLATTENED` when the children's marks differ (inline marks are gap 11) |
+| `paragraph` with inline `math` / `chemistry` children | split into `text` + `formula{display:false}` / `chemistry` blocks | `CONTENT_INLINE_FORMULA_SPLIT` |
+| empty `paragraph` | dropped | `CONTENT_EMPTY_BLOCK_DROPPED` |
+| `line_group { lines: [{children}] }` | `verse { lines }` | `CONTENT_INLINE_MARKS_FLATTENED` if lines had marks |
+| `math { latex, display }` | `formula { latex, display }` | — |
+| `chemistry { latex, display }` | `chemistry { formula }` | `CONTENT_DISPLAY_IGNORED` if `display: true` |
+| `image { assetExternalId, alt, sourceNamespace? }` | `image { assetId, alt }` (resolved through the package assets) | another namespace → `REFERENCE_UNKNOWN` |
+| `table { rows: [{ cells: [{ blocks, rowSpan, colSpan, isHeader }] }] }` | `table { rows: string[][] }` (cell text) | `CONTENT_TABLE_FLATTENED` for headers or merged cells |
+| `columnHeaders { left, right }` (matching) | a one-row `table [[left, right]]` | `MATCHING_COLUMN_HEADERS_AS_TABLE` |
+
+Warnings are reported once per code and record.
+
+### 9.7 Question types, settings and answer data
+
+- **Types:** the 5 EVEREST types are taken as is. `open` with `interactionSettings.answerFormat` `short_text` or `numeric` becomes that type (warning `QUESTION_TYPE_MAPPED`). Its input settings (`inputCells`, `allowedCharacters`, `preserveLeadingZeros`, `caseSensitive`) are not stored (`INTERACTION_SETTINGS_DROPPED`). Any other type is a validation error.
+- **Matching rules:** `requireAllLeft` and `allowRightReuse` may be `null` (= not stated by the book). The value is stored as `null`, never guessed, with warning `MATCHING_RULE_UNSPECIFIED`. While a rule is `null`:
+   - a proposed key may not reuse right items, and is not required to cover every left item;
+   - publication is refused with `409 QUESTION_NOT_PUBLISHABLE` (`INTERACTION_SETTINGS_INCOMPLETE`);
+   - the DB trigger also requires booleans at publication.
+   A reviewer sets the rule with `PATCH /admin/questions/:id`.
+- **`answerDataExternal`** → `answer_data`:
+
+| Package | Converted to |
+|---|---|
+| `{ optionKeys: [k] }` (single choice) | `{ optionKey: k }` |
+| `{ optionKeys }` (multiple choice) | `{ optionKeys }` |
+| `{ pairs: [{ leftKey, rightKey }] }` | `{ pairs: [{ left, right }] }` |
+| `{ acceptedValues: [v], absoluteTolerance, unit }` | `{ value: Number(v) }`; a tolerance or unit gives `GRADING_RULE_IGNORED` |
+| `{ acceptedAnswers, normalization }` | `{ acceptedAnswers }`; a normalization gives `GRADING_RULE_IGNORED` |
+
+   The result is validated by the M08 `parseAnswerData`.
+
+### 9.8 Re-import rules
+
+- **Question** (`bank.code`, `externalId`):
+   - none → create a draft;
+   - a draft → replace it in place (content, items, topics, metadata; derived images);
+   - published or archived → skip with warning `QUESTION_IMMUTABLE_SKIPPED`;
+   - a stored draft of another type → `QUESTION_TYPE_CHANGED`.
+- **Answer key on update:**
+   - a `proposed` package key replaces the stored key;
+   - an `unknown` package key keeps an existing stored key. A verified key then returns to `proposed`, and a key that no longer fits becomes `unknown`.
+- **Taxonomy:**
+   - missing entities are created (needs `taxonomy.manage`, otherwise `TAXONOMY_PERMISSION_REQUIRED`);
+   - existing ones only get translation upserts (with `taxonomy.manage`, otherwise warning `TAXONOMY_TRANSLATION_SKIPPED`);
+   - stored structure is kept (`TAXONOMY_FIELD_MISMATCH`);
+   - nothing is deleted.
+- **Bank:**
+   - created with the actor as owner;
+   - an existing bank must be the actor's (or the actor is an administrator), otherwise `QUESTION_BANK_READ_ONLY`;
+   - it must have the same subject (`BANK_SUBJECT_MISMATCH`);
+   - it is never modified (`BANK_FIELD_MISMATCH`).
+- **Asset:**
+   1. alias (`sourceNamespace`, `externalId`) with equal bytes → reuse. An alias with other bytes returns `ASSET_ALIAS_CONFLICT`.
+   2. The same sha256 → reuse and alias.
+   3. Otherwise upload.
+- **Duplicates:**
+   - declared links are inserted once both questions exist;
+   - in addition, the importer suggests exact duplicates (same bank, type, normalized text and option set);
+   - a pair is linked at most once in either direction;
+   - nothing is merged or skipped.
+
+### 9.9 Internal nested model
+
+The importer converts §9 packages into a nested per-question model. That model is accepted directly when `manifest.json` has a `bank` object and no `data/` envelopes. It exists for tests and hand-written packages; book packages use §9.1. Its fields mirror §9.4 with nested `options`, `matching`, `topicCodes`, `answerKey` and image blocks `{ type: image, asset }`.
+
+A small synthetic §9.1 package is `tests/fixtures/question-import/sample/`.
+
+---
+
+## 10. Gap status after M09
+
+| §8 gap | Status |
+|---|---|
+| 1. No import pipeline | **closed**: CLI, planner, dry run, recorded runs, errors/warnings, counters, `questions.import_id` |
+| 2. No `ready` status | **kept by design**: readiness is the key status (`proposed`/`verified`) |
+| 3. `external_id` optional | **closed for imports**: required by the importer |
+| 4. Re-import of published questions | **closed**: skip and report `QUESTION_IMMUTABLE_SKIPPED` |
+| 5. Verified keys from a file | **closed**: rejected; at most `proposed` |
+| 6. Images | **closed** at the service level: upload without `courseId`, `sha256` filled, unique-sha256 dedup, `asset_aliases`, `question_assets` links mapped to image blocks, package provenance kept. **Open:** no HTTP bank-bound upload endpoint; real S3/MinIO import not verified |
+| 7. Book pages | **open by design**: `page`/`printedPage` in `source_metadata` only; bbox/sourceSpans are not stored |
+| 8. Duplicate detection | **closed (conservative)**: declared links imported and exact matches suggested. **Open:** no API to list or resolve links; a linked draft cannot be deleted (`QUESTION_IN_USE`) |
+| 9. Taxonomy ordering, descriptions, external IDs | **open**: `position`, `isActive` and topic `metadata` are reported as not stored |
+| 10. `source_metadata` allowlist | **closed**: extended with the provenance fields the real packages use (§9.5) |
+| 11. Content model limits | **open**: inline marks, inline formulas, table headers and merged cells, and matching column headers are mapped with warnings |
+| 12. Grading semantics | **open** (M10/M11): open-answer input settings, tolerance and normalization are reported as not stored; unstated matching rules are kept as `null` and block publication |
+| 13. Ownership | **closed**: the CLI requires an existing active user with `questions.manage` |

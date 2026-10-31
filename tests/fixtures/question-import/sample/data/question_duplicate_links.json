@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "everest.question-import.v1",
+  "entity": "question_duplicate_links",
+  "records": [
+    {
+      "bankCode": "fixture-bank",
+      "questionExternalId": "fixture-bank-single-0003",
+      "duplicateOfExternalId": "fixture-bank-single-0001",
+      "reason": "synthetic full-text duplicate"
+    }
+  ]
+}

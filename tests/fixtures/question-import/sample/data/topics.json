@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "everest.question-import.v1",
+  "entity": "topics",
+  "records": [
+    {
+      "subjectCode": "fixture-subject",
+      "code": "topic-a",
+      "sectionCode": "part-a",
+      "parentTopicCode": null,
+      "primaryLanguage": "tg",
+      "position": 1,
+      "metadata": {
+        "classificationSource": "ai"
+      }
+    }
+  ]
+}

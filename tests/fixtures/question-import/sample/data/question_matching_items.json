@@ -1,0 +1,116 @@
+{
+  "schemaVersion": "everest.question-import.v1",
+  "entity": "question_matching_items",
+  "records": [
+    {
+      "bankCode": "fixture-bank",
+      "questionExternalId": "fixture-bank-matching-0001",
+      "side": "left",
+      "itemKey": "l1",
+      "position": 1,
+      "sourceLabel": "1)",
+      "content": {
+        "blocks": [
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
+                "text": "left one",
+                "marks": []
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "bankCode": "fixture-bank",
+      "questionExternalId": "fixture-bank-matching-0001",
+      "side": "left",
+      "itemKey": "l2",
+      "position": 2,
+      "sourceLabel": "2)",
+      "content": {
+        "blocks": [
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
+                "text": "left two",
+                "marks": []
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "bankCode": "fixture-bank",
+      "questionExternalId": "fixture-bank-matching-0001",
+      "side": "right",
+      "itemKey": "r1",
+      "position": 1,
+      "sourceLabel": "1)",
+      "content": {
+        "blocks": [
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
+                "text": "right one",
+                "marks": []
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "bankCode": "fixture-bank",
+      "questionExternalId": "fixture-bank-matching-0001",
+      "side": "right",
+      "itemKey": "r2",
+      "position": 2,
+      "sourceLabel": "2)",
+      "content": {
+        "blocks": [
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
+                "text": "right two",
+                "marks": []
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "bankCode": "fixture-bank",
+      "questionExternalId": "fixture-bank-matching-0001",
+      "side": "right",
+      "itemKey": "r3",
+      "position": 3,
+      "sourceLabel": "3)",
+      "content": {
+        "blocks": [
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
+                "text": "right three",
+                "marks": []
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

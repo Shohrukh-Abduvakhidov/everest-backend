@@ -6,6 +6,7 @@ import {
    GetObjectCommand,
    HeadObjectCommand,
    ListPartsCommand,
+   PutObjectCommand,
    S3Client,
    UploadPartCommand,
 } from '@aws-sdk/client-s3'
@@ -116,6 +117,17 @@ function createS3StorageProvider(config) {
             if (isNotFound(error)) return null
             throw error
          }
+      },
+
+      // Single-request upload for small server-side objects (question import images).
+      async uploadObject({ key, body, contentType }) {
+         await client.send(new PutObjectCommand({
+            Bucket,
+            Key: key,
+            Body: body,
+            ContentType: contentType,
+            ContentLength: body.length,
+         }))
       },
 
       async readRange(key, start, end) {

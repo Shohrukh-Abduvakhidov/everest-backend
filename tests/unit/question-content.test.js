@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+   hasCompleteInteractionSettings,
    isValidAnswerData,
    parseAnswerData,
    parseContent,
@@ -70,6 +71,16 @@ test('source metadata accepts only known fields', () => {
    assert.deepEqual(parseSourceMetadata({ book: ' Book ', page: 3 }), { book: 'Book', page: 3 })
    assert.throws(() => parseSourceMetadata({ page: 0 }))
    assert.throws(() => parseSourceMetadata({ url: 'x' }))
+   assert.deepEqual(
+      parseSourceMetadata({ bookSectionTitle: ' II ', printedPage: '3', sequence: 4, isSample: false, examPart: ['A', 'B'], year: 2024 }),
+      { bookSectionTitle: 'II', printedPage: '3', sequence: 4, isSample: false, examPart: ['A', 'B'], year: 2024 },
+   )
+   assert.throws(() => parseSourceMetadata({ year: 1800 }))
+   assert.throws(() => parseSourceMetadata({ year: '2024' }))
+   assert.throws(() => parseSourceMetadata({ bookSectionTitle: 'x'.repeat(501) }))
+   assert.throws(() => parseSourceMetadata({ isSample: 'no' }))
+   assert.throws(() => parseSourceMetadata({ examPart: [] }))
+   assert.throws(() => parseSourceMetadata({ chapter: 'I' }))
 })
 
 test('answer data references existing keys for every question type', () => {
@@ -103,4 +114,22 @@ test('answer data references existing keys for every question type', () => {
    assert.equal(isValidAnswerData({ acceptedAnswers: ['a', 'b'] }, shortText), true)
    assert.equal(isValidAnswerData({ acceptedAnswers: [' '] }, shortText), false)
    assert.equal(isValidAnswerData({ acceptedAnswers: ['a', 'a'] }, shortText), false)
+})
+
+test('matching rules may be unstated (null) in drafts and are then applied strictly', () => {
+   assert.deepEqual(
+      parseInteractionSettings({ requireAllLeft: true, allowRightReuse: null }, 'matching'),
+      { requireAllLeft: true, allowRightReuse: null },
+   )
+   assert.throws(() => parseInteractionSettings({ requireAllLeft: 'yes', allowRightReuse: null }, 'matching'))
+   assert.equal(hasCompleteInteractionSettings('matching', { requireAllLeft: true, allowRightReuse: null }), false)
+   assert.equal(hasCompleteInteractionSettings('matching', { requireAllLeft: true, allowRightReuse: false }), true)
+   assert.equal(hasCompleteInteractionSettings('single_choice', {}), true)
+   const question = {
+      questionType: 'matching',
+      interactionSettings: { requireAllLeft: null, allowRightReuse: null },
+      matching: { left: [{ key: 'l1' }, { key: 'l2' }], right: [{ key: 'r1' }] },
+   }
+   assert.equal(isValidAnswerData({ pairs: [{ left: 'l1', right: 'r1' }] }, question), true)
+   assert.equal(isValidAnswerData({ pairs: [{ left: 'l1', right: 'r1' }, { left: 'l2', right: 'r1' }] }, question), false)
 })

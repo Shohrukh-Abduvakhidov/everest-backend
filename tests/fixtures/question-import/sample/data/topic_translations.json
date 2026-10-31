@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "everest.question-import.v1",
+  "entity": "topic_translations",
+  "records": [
+    {
+      "subjectCode": "fixture-subject",
+      "topicCode": "topic-a",
+      "languageCode": "tg",
+      "title": "Topic A"
+    }
+  ]
+}

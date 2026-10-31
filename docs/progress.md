@@ -1,8 +1,66 @@
 # EVEREST backend progress
 
-Updated: 2026-10-30.
+Updated: 2026-10-31.
 
 ## Current increment
+
+M09 (indexed book import) is implemented on `feat/m09-book-import` and is awaiting review. It reads the real book package format, and both real packages pass a dry run and a full disposable-database import. M-DOCS (PR #22) and the import contract (PR #23) are merged. Real-storage (MinIO/S3) import and a real book package are **not** verified.
+
+## 2026-10-31 — M09 follow-up: real package format and isolated tests
+
+- **Real format.** Read the real `import-packages/everest-tajik-indexed-v1.zip` and `everest-biology-tg-2026-pilot.zip` (git-ignored, unpacked only into a scratch folder outside the repo). Their relational entity-file format replaces the invented §9 format.
+   - Added `src/utils/question-package-adapter.js` and wired it into `question-import-service`. It adds record paths, asset size/dimension checks and provenance, declared duplicate links, and the `MATCHING_RULE_UNSPECIFIED` warning.
+   - The `source_metadata` allowlist now holds the real provenance fields (`chapter`/`variant` removed). Matching rules may be `null` in drafts; publication is blocked until a reviewer sets them (`INTERACTION_SETTINGS_INCOMPLETE`).
+   - `docs/import-contract.md` §9/§10 and `docs/import-runbook.md` were rewritten.
+- **Dry runs of the real packages** (temporary admin user, deleted afterwards; nothing written):
+   - Tajik: valid, 0 errors. 972 questions (789 single choice, 183 matching), 1 subject, 7 sections, 5 topics, 2 assets, 972 unknown keys, 5 declared duplicates. 773 warnings: `CONTENT_INLINE_MARKS_FLATTENED` 564, `MATCHING_RULE_UNSPECIFIED` 183, `SOURCE_FIELD_DROPPED` 23, `SOURCE_REVIEW_NOTES_PRESENT` 3.
+   - Biology pilot: valid, 0 errors. 20 questions, 5 sections, 50 topics, 6 assets. 51 warnings: `SOURCE_FIELD_DROPPED` 23, `SOURCE_REVIEW_NOTES_PRESENT` 8, `IMAGE_BLOCK_APPENDED` 6, `MATCHING_RULE_UNSPECIFIED` 4, `QUESTION_TYPE_MAPPED` 3, `INTERACTION_SETTINGS_DROPPED` 3, `MATCHING_COLUMN_HEADERS_AS_TABLE` 2, `PACKAGE_NOT_READY_FOR_IMPORT` 1, `PACKAGE_EXTRACTION_INCOMPLETE` 1.
+- **Full real import into a disposable database** (memory storage double; database dropped afterwards):
+   - Tajik: `completed` in about 40 s, 10 batches. 972 questions (all draft), 3,156 options, 1,647 matching items, 999 topic links, 2 asset links, 972 keys (0 verified), 7 duplicate links (5 declared + 2 suggested).
+   - The same key replayed. A re-import with a new key updated 972 and reused both assets by alias.
+   - Biology: `completed`, 20 questions, 52 options, 36 items, 6 asset links.
+- **Tests:**
+   - `npm test` now runs in a disposable database (`scripts/test-disposable-database.js`), so the existing owner and the manual group in `everest_db` no longer affect it, and no local data was deleted.
+   - Fixed a latent audit join in `password-auth.test.js` (scoped by `entity_type`).
+   - New `tests/unit/question-package-adapter.test.js` (3 tests), a real-format integration subtest, nullable-rule unit tests, and the synthetic entity-format fixture `tests/fixtures/question-import/sample/`.
+- **Results:**
+   - `npm test`: 220 tests, 219 passed, 0 failed, 1 skipped (real storage).
+   - `node scripts/verify-database.js`: valid. No migration was added in the follow-up.
+- **Not verified:** real S3/MinIO upload; an HTTP admin UI flow; the full biology book (only the 20-question pilot exists).
+
+## 2026-10-31 — M09 indexed book import
+
+- **CLI:** `scripts/import-question-package.js` (`npm run import:questions -- --package <dir|zip> --actor-phone … [--dry-run] [--idempotency-key] [--batch-size] [--report]`). It resolves an active actor with `questions.manage`.
+- **Package loading:** `utils/question-package.js` (directory or ZIP, package hash) and `utils/zip-reader.js` (stored/deflate, CRC check, path safety).
+- **Service:** `services/question-import-service.js`.
+   - A single read-only planner validates the manifest, taxonomy, bank, assets and every question through the shared M08 parsers. A dry run returns its report.
+   - A real run uploads content-addressed images, then runs one transaction for taxonomy + bank + run + assets/aliases + warnings, then batch transactions of ≤100 questions, then finishes the run.
+   - Idempotency is by (`bank_id`, `idempotency_key`) + package hash.
+   - Drafts are updated in place; published and archived questions are skipped.
+   - Duplicate suggestions are recorded in `question_duplicate_links`.
+- **Repositories:**
+   - new `question-import-repository.js` (actor, runs, errors, aliases, sha256 assets, duplicate candidates/links);
+   - `taxonomy-repository` gains `findEntityByCode` and `upsertTranslations`;
+   - `question-bank-repository.createQuestion` writes `import_id`.
+- **Storage:** `uploadObject` (PutObject) on the S3 adapter and on the memory double.
+- **Content:** `utils/question-content.js` adds `source_metadata` fields `chapter`, `variant` and `year`.
+- **Read API:** `GET /admin/question-imports`, `/:importId` and `/:importId/errors` (manage or review; scoped), added to `src/docs/openapi.js` and `docs/api.md`.
+- **Migration:** `20261031030000000_add-question-import-support.js` adds the partial unique `assets_sha256_key` and the index `question_import_errors (import_id, id)`. `verify-database.js` expects 312 indexes and 25 migrations; `test-migration-cycle.js` expects 25/25/24/25.
+- **Tests:**
+   - `tests/integration/question-import.test.js` (15 subtests, real PostgreSQL, memory storage double) covers: the actor/permission checks, the 5-type dry run writing nothing, the committed sample fixture, a real run, replay and conflict, draft update with published/archived skip, sha256 reuse, alias conflict, the malformed/invalid package matrix, teacher taxonomy and foreign-bank denial, batch rollback and an idempotent re-run, duplicate suggestions, ZIP loading and path-escape rejection, the draft-only guarantee, and the read API with scope.
+   - `tests/unit/question-content.test.js` covers the new metadata fields.
+   - Synthetic fixtures are in `tests/fixtures/question-import/sample/` and `tests/helpers/import-fixtures.js` (generated PNG, ZIP writer).
+- **Results:**
+   - `node --test tests/integration/question-import.test.js`: 15/15 passed.
+   - `npm test`: 207 tests, 203 passed, 3 failed, 1 skipped (real storage). The 3 failures do not come from M09; they are caused by data in local `everest_db`:
+      - `account-admin.test.js` asserts "integration database must not have a pre-existing owner", but an owner now exists;
+      - `groups.test.js` (one subtest plus its parent) sees an extra manually created group, "Тестовая группа (шапка)".
+   - `npm run test:migrations`: 25/25/24/25, disposable database dropped.
+   - `node scripts/verify-database.js`: `valid: true`.
+   - CLI dry run of the sample fixture with a temporary admin user (deleted afterwards): `valid`, 2 questions.
+- **Not verified:** a real S3/MinIO upload (Docker absent); a real Tajik or biology package (`import-packages/` absent); very large packages (the whole package is held in memory, limit 512 MiB).
+
+## 2026-10-30 — M-DOCS (previous increment)
 
 M07-C is merged into `main` (PR #21). M-DOCS (OpenAPI 3.1 + Swagger UI) is implemented on `feat/m-docs-swagger`. Real MinIO/S3 and Range-seek verification for M07-A/M07-B are still pending, because Docker is not installed. Production SMS remains unavailable pending provider approval. The next ROADMAP milestone is M09 (indexed book import), which needs approved input formats.
 

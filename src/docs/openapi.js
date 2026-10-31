@@ -433,6 +433,9 @@ const schemas = {
    }),
    SourceMetadata: body({
       book: str(), edition: str(), page: int({ minimum: 1 }), number: str(), note: str(),
+      year: int({ minimum: 1900, maximum: 2100 }), sourceFile: str(), printedPage: str(), sequence: int({ minimum: 1 }),
+      bookSectionTitle: str(), bookRubric: str(), isSample: bool(), reviewRequired: bool(),
+      examPart: arr(str({ maxLength: 20 }), { minItems: 1, maxItems: 10 }),
    }),
    QuestionBank: obj({
       id: id(),
@@ -476,6 +479,30 @@ const schemas = {
       explanation: ref('RichContent'),
       verifiedBy: nullable(id()),
       verifiedAt: nullable(dt()),
+   }),
+   QuestionImport: obj({
+      id: id(),
+      bankId: id(),
+      bankCode: str(),
+      initiatedBy: id(),
+      packageSha256: str({ pattern: '^[a-f0-9]{64}$' }),
+      schemaVersion: str({ const: 'everest.question-import.v1' }),
+      idempotencyKey: str(),
+      isDryRun: bool(),
+      status: enumOf(['pending', 'validating', 'validated', 'importing', 'completed', 'failed']),
+      manifest: anyObject('Package summary: bankCode, sourceNamespace and entity counts (no question text)'),
+      counters: anyObject('subjects/sections/topics/bank/assets/questions/answerKeys/duplicates/batches counts'),
+      createdAt: dt(),
+      finishedAt: nullable(dt()),
+   }),
+   QuestionImportEntry: obj({
+      id: id(),
+      externalId: nullable(str()),
+      recordPath: nullable(str()),
+      severity: enumOf(['warning', 'error']),
+      code: str(),
+      message: str(),
+      createdAt: dt(),
    }),
    QuestionDetail: {
       allOf: [ref('QuestionSummary'), obj({
@@ -543,7 +570,7 @@ const questionFields = {
    difficulty: nullable(int({ minimum: 1, maximum: 5 })),
    difficultySource: nullable(enumOf(['ai', 'expert', 'official'])),
    content: ref('RichContent'),
-   interactionSettings: anyObject('{} or, for matching, { requireAllLeft: boolean, allowRightReuse: boolean }'),
+   interactionSettings: anyObject('{} or, for matching, { requireAllLeft: boolean|null, allowRightReuse: boolean|null } (null = not stated; drafts only)'),
    sourceMetadata: ref('SourceMetadata'),
    options: arr(ref('QuestionItemInput'), { minItems: 2, maxItems: 10 }),
    matching: body({
@@ -1195,6 +1222,31 @@ const routes = [
    ['post', '/admin/questions/:questionId/archive', {
       tag: 'Admin: questions', ...admin('questions.review'), summary: 'published → archived (one-way)',
       response: ref('QuestionDetail'), errors: { 404: ['QUESTION_NOT_FOUND'], 409: ['INVALID_QUESTION_TRANSITION'] },
+   }],
+
+   // Admin: question imports (runs are started by the CLI, read here)
+   ['get', '/admin/question-imports', {
+      tag: 'Admin: question imports', ...adminRead('questions.manage'), permissionError: 'ACTION_FORBIDDEN',
+      summary: 'Visible import runs (administrators: all; others: own banks and own runs)',
+      description: 'Also allowed with `questions.review`.',
+      query: [
+         ...limitQuery,
+         { name: 'bankId', schema: id() },
+         { name: 'status', schema: enumOf(['pending', 'validating', 'validated', 'importing', 'completed', 'failed']) },
+      ],
+      response: page('imports', ref('QuestionImport')),
+   }],
+   ['get', '/admin/question-imports/:importId', {
+      tag: 'Admin: question imports', ...adminRead('questions.manage'), summary: 'One import run with counters',
+      description: 'Also allowed with `questions.review`.',
+      response: ref('QuestionImport'), errors: { 400: ['VALIDATION_ERROR', 'INVALID_IMPORT_ID'], 404: ['QUESTION_IMPORT_NOT_FOUND'] },
+   }],
+   ['get', '/admin/question-imports/:importId/errors', {
+      tag: 'Admin: question imports', ...adminRead('questions.manage'), summary: 'Errors and warnings of a run',
+      description: 'Also allowed with `questions.review`.',
+      query: [...limitQuery, { name: 'severity', schema: enumOf(['warning', 'error']) }],
+      response: page('entries', ref('QuestionImportEntry')),
+      errors: { 400: ['VALIDATION_ERROR', 'INVALID_IMPORT_ID'], 404: ['QUESTION_IMPORT_NOT_FOUND'] },
    }],
 ]
 

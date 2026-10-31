@@ -30,6 +30,11 @@ function createMemoryStorageProvider() {
          objects.set(key, buffer)
       },
 
+      async uploadObject({ key, body }) {
+         record('uploadObject', { key })
+         objects.set(key, Buffer.from(body))
+      },
+
       async createMultipartUpload({ key, contentType }) {
          const uploadId = randomUUID()
          uploads.set(uploadId, { key, contentType, parts: new Map() })

@@ -102,6 +102,7 @@ import {
 import {
    manageQuestionsAuthorizationMiddleware,
    manageTaxonomyAuthorizationMiddleware,
+   readQuestionImportsAuthorizationMiddleware,
    readQuestionsAuthorizationMiddleware,
    readTaxonomyAuthorizationMiddleware,
    reviewQuestionsAuthorizationMiddleware,
@@ -136,6 +137,11 @@ import {
    updateQuestionController,
    verifyAnswerKeyController,
 } from '../controllers/question-bank-controller.js'
+import {
+   getQuestionImportController,
+   listQuestionImportErrorsController,
+   listQuestionImportsController,
+} from '../controllers/question-import-controller.js'
 
 const adminRouter = express.Router()
 
@@ -601,6 +607,21 @@ adminRouter.post(
    authenticatedCsrfMiddleware,
    adminMutationRateMiddleware,
    archiveQuestionController,
+)
+adminRouter.get(
+   '/question-imports',
+   readQuestionImportsAuthorizationMiddleware,
+   listQuestionImportsController,
+)
+adminRouter.get(
+   '/question-imports/:importId',
+   readQuestionImportsAuthorizationMiddleware,
+   getQuestionImportController,
+)
+adminRouter.get(
+   '/question-imports/:importId/errors',
+   readQuestionImportsAuthorizationMiddleware,
+   listQuestionImportErrorsController,
 )
 adminRouter.get(
    '/users/pending',

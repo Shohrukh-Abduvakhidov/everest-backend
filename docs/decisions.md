@@ -1,5 +1,66 @@
 # Decisions
 
+## 2026-10-31 — Indexed book import (M09)
+
+User decisions (from the M09 brief):
+
+- CLI first: `npm run import:questions`. There is no HTTP package upload in M09.
+- Runs are recorded in `question_imports`/`question_import_errors`; the same key with the same hash replays, and the same key with another hash conflicts.
+- Dry run and real run share one validation path. A dry run writes nothing.
+- Imports create drafts only. They never publish, never guess answers and never verify keys. A package key is at most `proposed`.
+- `external_id` is required for imported questions.
+- Re-import updates drafts in place. Published and archived questions are skipped with `QUESTION_IMMUTABLE_SKIPPED`, never copied or changed. Taxonomy upserts never delete anything.
+- Images are deduplicated by sha256, and `asset_aliases` resolves package-local IDs.
+- Duplicate detection is a conservative suggestion only.
+- Do not fix in M09: per-question translations, inline markup, table headers/merged cells, grading tolerances, a `ready` status, book page tables.
+- Read-only run API with `questions.manage`/`questions.review`.
+
+Follow-up (2026-10-31, real packages `everest-tajik-indexed-v1.zip` and `everest-biology-tg-2026-pilot.zip`). Assumptions made without the user (please review):
+
+- **F1. The real relational format replaces the invented one.** `manifest.json` + `data/<entity>[.partNNN].json` envelopes are read by `utils/question-package-adapter.js` and converted to the internal nested model, which is still accepted for tests and hand-written packages (contract §9.9). Nothing subject-specific is hard-coded.
+- **F2. Not silently dropped.**
+   - Fields without a column are reported once per entity and field (`SOURCE_FIELD_DROPPED`): bbox, sourceSpans, positions, topic metadata, `difficultyReason`, question `sectionCode`, topic-link classification, and several bank provenance fields.
+   - Lossy content mappings are reported once per question and code: inline marks are reduced to the shared marks, `line_group` becomes `verse`, matching `columnHeaders` become a one-row table, inline formulas are split.
+   - The package itself remains the full record.
+- **F3. `open` questions** with `answerFormat: short_text|numeric` become that type. Their input-cell settings are reported, not stored (M10/M11 grading).
+- **F4. `source_metadata` allowlist** = the provenance fields the packages really use: `year` (also from `examYear`), `sourceFile`, `printedPage`, `sequence`, `bookSectionTitle`, `bookRubric`, `isSample`, `reviewRequired`, `examPart`. `page` comes from `page`, then a numeric `printedPage`, then `pageIndex1Based`; `number` comes from `number`, then `sourceNumber`.
+- **F5. Unstated matching rules stay `null`.** Both packages use `allowRightReuse: null`. The M08 parser now accepts `null` in drafts. Keys are validated strictly (no reuse; all-left not required), and publication is refused (`INTERACTION_SETTINGS_INCOMPLETE`). The DB trigger already required booleans only at publication, so no migration was needed. The importer never guesses `false`.
+- **F6. `question_assets` links without an image block** (biology) become image blocks appended to the question content (`IMAGE_BLOCK_APPENDED`), because EVEREST derives `question_assets` from blocks.
+- **F7. Asset provenance** (`extractionMethod`, page, bbox, `embeddedSha256`, …) is kept in `assets.source_metadata.package` (≤16 KiB), which is not exposed to students. Declared `sizeBytes` must match the bytes; declared dimensions are compared with the PNG header (warning only).
+- **F8. Declared duplicate links** are imported with the package `reason` and `marked_by` = actor. They are counted separately (`duplicates.declared`) from the importer's own exact-match suggestions.
+- **F9. `readyForImport: false`** (biology pilot) is a warning, not a block, because a draft-only import is the review step. **More than one bank** per package is rejected.
+- **F10. Test isolation.** `npm test` (`test:auth`) now runs the node:test suite in a freshly migrated disposable database (`scripts/test-disposable-database.js`, the same approach as `test-migration-cycle.js`). The developer database is never read or changed by the suite. This also exposed a latent bug in `password-auth.test.js`: an audit join was not scoped by `entity_type` and passed only because the identity sequences in `everest_db` had drifted apart.
+
+Original assumptions:
+
+1. **Package format.** No package schema existed in the repository, and no sample package was available (`import-packages/` is absent). The implemented format is the camelCase proposal in `docs/import-contract.md` §7, fixed in §9, with three concrete choices:
+   - image blocks use `{ "type": "image", "asset": "<package id>" }`, and a raw DB `assetId` is rejected;
+   - option and item labels are `label`;
+   - a package is a directory or a ZIP with `manifest.json` at the root (or inside one top-level folder).
+   A real Tajik/biology package may need a field mapping. Run a dry run first.
+2. **One bank per package.** `question_imports.bank_id` is NOT NULL, so a run belongs to one bank. A book with several banks is several packages.
+3. **Batches of up to 100 questions** (default 100, `--batch-size 1..100`), each in its own transaction. The **first failing batch stops the run**: it is rolled back and recorded with a single `IMPORT_BATCH_FAILED` (or AppError code) entry covering `questions[a..b]`. Later batches are counted as `notAttempted`, and the run ends as `failed`. Committed batches stay, and a re-run with a new key is idempotent through natural keys. The alternative, continuing after a failure, was rejected because it can cascade errors and makes the run state harder to reason about.
+4. **Validation errors write nothing.** A real run whose planner finds any error returns `status: rejected` and records **no** run (exit code 2). Only runs that pass validation are recorded; a run row always has an existing bank, as the NOT NULL `bank_id` requires.
+5. **Default idempotency key** = `package-<sha256>`. Re-running the same package without `--idempotency-key` replays the earlier result. To re-import after a failure or a published-question change, pass a new key. Allowed keys match `[A-Za-z0-9._:-]{1,200}`.
+6. **A replayed run must be visible to the actor** (bank owner or administrator), otherwise `QUESTION_BANK_READ_ONLY`. A replay of a `failed` run returns that failed result. It does not resume the run.
+7. **Taxonomy permissions.** Creating a missing subject, section or topic needs `taxonomy.manage` (teachers do not have it): `TAXONOMY_PERMISSION_REQUIRED`. Translation changes on existing entities are applied only with `taxonomy.manage`, otherwise they are skipped with a warning. Stored structure (primary language, color, section, parent) is never changed by an import (`TAXONOMY_FIELD_MISMATCH` warning). No ordering, description or external-ID columns were added: codes are the keys.
+8. **An existing bank is never modified** by an import (title and visibility stay; `BANK_FIELD_MISMATCH` warning). Its subject must match.
+9. **Answer key on re-import.** A `proposed` package key replaces the stored key. An `unknown` package key keeps any stored key: an import never erases an answer an author or reviewer entered. The stored explanation is kept in that case too. A verified key on an edited draft returns to `proposed` (the M08 reconcile rule).
+10. **Images: bank-bound upload path = the importer service, not an HTTP endpoint.** Imported images are stored by `storage.uploadObject` (new `PutObject` method on the S3 adapter and the memory double) under the content-addressed key `question-imports/sha256/<hash>.png|jpg`. They are inserted as `ready` `material` assets with `processing_status = not_required`, `uploaded_by` = actor and `source_metadata = { importNamespace, bankId }`. They are not linked to a course.
+   - Checks: PNG/JPEG only, magic bytes via the M07-A `inspectMedia`, 10 MiB per image, optional declared sha256 verified.
+   - An HTTP bank-bound upload endpoint for the admin UI is deferred.
+   - Objects are uploaded before the DB transaction. This is idempotent because the key is the hash; a failed transaction leaves at most an unreferenced object.
+11. **Asset reuse across users.** An asset found by sha256 or by alias is reused even when another user uploaded it: presenting identical bytes proves possession of the content. Package images bypass `findUsableImageAssets` only because they can only be referenced through the package's own `assets[]`. The M08 rule still applies to every later API edit.
+12. **Migration** `20261031030000000_add-question-import-support.js` (reversible):
+   - a partial unique index `assets_sha256_key` on `assets (sha256) WHERE sha256 IS NOT NULL`, for race-safe content dedup. `sha256` was never filled before, so the index cannot conflict with existing rows;
+   - an index `question_import_errors (import_id, id)` for paginated reports.
+13. **`source_metadata` allowlist** (superseded by follow-up assumption F4 below): the first version added `chapter`, `variant` and `year` without a real package; `chapter` and `variant` were removed again because the real packages do not use them.
+14. **Duplicate signature.** Same bank + same type + equal normalized content text (NFKC, lower case, whitespace collapsed; formulas, tables and images included by value) + equal unordered set of normalized option/matching texts. The new question links to the earliest matching question (`reason = 'import: same normalized text and options'`). A link in either direction prevents a second one. Note: a linked draft cannot be deleted through the API (`QUESTION_IN_USE`), and no API exists yet to remove links.
+15. **Errors are per question, first error only**, the same as the M08 API. Messages contain codes, field names and identifiers (topic codes, asset IDs), never question text or answers. Plain database errors in a batch are reported as `database error <sqlstate>` without the driver message.
+16. **Run scope for the read API:** administrators see all runs; others see runs of banks they own and runs they started. Out-of-scope runs return `404`. Dry runs are not stored, so they never appear in the API.
+17. **Run status values used:** `importing` → `completed` | `failed`. `pending`, `validating` and `validated` (in the schema CHECK) are unused, and `is_dry_run` is always `false` for stored runs.
+18. **Limits:** 512 MiB per package, 64 MiB per entry, 20,000 questions and 20,000 assets per package. These limits are not tuned against a real book.
+
 ## 2026-10-30 — OpenAPI 3.1 and Swagger UI (M-DOCS)
 
 User decisions:

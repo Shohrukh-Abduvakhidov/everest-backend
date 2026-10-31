@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "everest.question-import.v1",
+  "entity": "subjects",
+  "records": [
+    {
+      "code": "fixture-subject",
+      "primaryLanguage": "tg",
+      "isActive": true
+    }
+  ]
+}

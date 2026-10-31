@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "everest.question-import.v1",
+  "entity": "question_topics",
+  "records": [
+    {
+      "bankCode": "fixture-bank",
+      "questionExternalId": "fixture-bank-single-0001",
+      "subjectCode": "fixture-subject",
+      "topicCode": "topic-a",
+      "isPrimary": true
+    },
+    {
+      "bankCode": "fixture-bank",
+      "questionExternalId": "fixture-bank-single-0002",
+      "subjectCode": "fixture-subject",
+      "topicCode": "topic-a",
+      "isPrimary": true
+    },
+    {
+      "bankCode": "fixture-bank",
+      "questionExternalId": "fixture-bank-single-0003",
+      "subjectCode": "fixture-subject",
+      "topicCode": "topic-a",
+      "isPrimary": true
+    },
+    {
+      "bankCode": "fixture-bank",
+      "questionExternalId": "fixture-bank-matching-0001",
+      "subjectCode": "fixture-subject",
+      "topicCode": "topic-a",
+      "isPrimary": true
+    },
+    {
+      "bankCode": "fixture-bank",
+      "questionExternalId": "fixture-bank-open-0001",
+      "subjectCode": "fixture-subject",
+      "topicCode": "topic-a",
+      "isPrimary": true
+    }
+  ]
+}

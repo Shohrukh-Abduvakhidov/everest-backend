@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "everest.question-import.v1",
+  "entity": "question_banks",
+  "records": [
+    {
+      "code": "fixture-bank",
+      "title": "Synthetic book bank",
+      "subjectCode": "fixture-subject",
+      "primaryLanguage": "tg",
+      "sourceMetadata": {
+        "sourceNamespace": "fixture-sample",
+        "sourceFile": "synthetic.pdf",
+        "examYear": 2026,
+        "totalPdfPages": 3
+      }
+    }
+  ]
+}

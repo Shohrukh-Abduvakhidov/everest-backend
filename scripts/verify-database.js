@@ -9,11 +9,11 @@ const expected = {
   tables: 87,
   columns: 698,
   foreignKeys: 164,
-  indexes: 310,
+  indexes: 312,
   functions: 7,
   triggers: 11,
   roles: 4,
-  migrations: 24,
+  migrations: 25,
   identityColumns: 67,
 };
 

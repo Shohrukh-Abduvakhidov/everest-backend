@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "everest.question-import.v1",
+  "entity": "section_translations",
+  "records": [
+    {
+      "subjectCode": "fixture-subject",
+      "sectionCode": "part-a",
+      "languageCode": "tg",
+      "title": "Part A"
+    }
+  ]
+}
