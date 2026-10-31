@@ -15,6 +15,7 @@ import { issueSessionService } from '../../src/services/auth/session-service.js'
 import {
    archiveQuestionService,
    publishQuestionService,
+   replaceAnswerKeyService,
    verifyAnswerKeyService,
 } from '../../src/services/question-bank-service.js'
 import {
@@ -23,7 +24,7 @@ import {
    runQuestionImportService,
 } from '../../src/services/question-import-service.js'
 import { loadQuestionPackage } from '../../src/utils/question-package.js'
-import { createPng, createZip, writePackageDirectory } from '../helpers/import-fixtures.js'
+import { createPng, createZip, entityPackage, writePackageDirectory } from '../helpers/import-fixtures.js'
 import { createMemoryStorageProvider } from '../helpers/memory-storage-provider.js'
 
 const { Client } = pg
@@ -83,7 +84,7 @@ function questions(prefix, overrides = {}) {
             { key: 'b', label: 'Б)', content: text('beta') },
          ],
          topicCodes: ['cells'],
-         source: { book: 'Synthetic', page: 3, number: '1', chapter: 'II', year: 2024 },
+         source: { book: 'Synthetic', page: 3, number: '1', bookSectionTitle: 'II', year: 2024 },
          answerKey: { status: 'proposed', source: 'official_key', answerData: { optionKey: 'b' } },
          ...overrides.single,
       },
@@ -249,7 +250,7 @@ test('question package import integration (M09)', async (t) => {
          const sample = await loadQuestionPackage(path.resolve('tests/fixtures/question-import/sample'))
          const report = await dryRunQuestionImportService(adminId, sample)
          assert.equal(report.valid, true, JSON.stringify(report.errors))
-         assert.equal(report.counters.questions.total, 2)
+         assert.equal(report.counters.questions.total, 5)
       })
 
       await t.test('real run imports drafts, images, keys and records the run', async () => {
@@ -264,7 +265,7 @@ test('question package import integration (M09)', async (t) => {
          assert.equal(rows.length, 5)
          assert.ok(rows.every((row) => row.status === 'draft' && row.import_id === firstRun.runId))
          assert.deepEqual(rows.find((row) => row.external_id === 'q-single').source_metadata, {
-            book: 'Synthetic', page: 3, number: '1', chapter: 'II', year: 2024,
+            book: 'Synthetic', page: 3, number: '1', bookSectionTitle: 'II', year: 2024,
          })
          const keys = (await client.query(
             `SELECT question.external_id, answer_key.status, answer_key.source, answer_key.verified_by
@@ -528,6 +529,81 @@ test('question package import integration (M09)', async (t) => {
          await assert.rejects(loadQuestionPackage(evilPath), { code: 'PACKAGE_ARCHIVE_INVALID' })
       })
 
+      await t.test('real entity-file format imports with mapped content and warnings', async () => {
+         const entityBank = `book-${suffix}`
+         const { manifest: entityManifest, files: entityFiles } = entityPackage({
+            subjectCode: `imp-book-${suffix}`,
+            bankCode: entityBank,
+            namespace: `book:${suffix}`,
+            png: createPng(5, 4, 21),
+            answerKeys: {
+               'single-0002': { status: 'proposed', source: 'official_key', answerDataExternal: { optionKeys: ['c'] } },
+            },
+         })
+         const pkg = await packageFrom(entityManifest, entityFiles)
+         const dry = await dryRunQuestionImportService(adminId, pkg)
+         assert.equal(dry.valid, true, JSON.stringify(dry.errors))
+         assert.equal(dry.counters.duplicates.declared, 1)
+
+         const result = await runQuestionImportService(adminId, pkg, {}, overrides)
+         assert.equal(result.status, 'completed', JSON.stringify(result.errors))
+         assert.equal(result.counters.questions.created, 5)
+         assert.equal(result.counters.duplicates.declared, 1)
+         assert.equal(result.counters.answerKeys.proposed, 1)
+         for (const code of ['CONTENT_INLINE_MARKS_FLATTENED', 'MATCHING_RULE_UNSPECIFIED', 'IMAGE_BLOCK_APPENDED', 'QUESTION_TYPE_MAPPED', 'SOURCE_FIELD_DROPPED']) {
+            assert.ok(result.topWarningCodes.some((entry) => entry.code === code), `${code} missing`)
+         }
+         const rows = Object.fromEntries((await client.query(
+            `SELECT external_id, id, question_type, status, content, interaction_settings, source_metadata
+             FROM questions WHERE bank_id = $1`,
+            [result.bankId],
+         )).rows.map((row) => [row.external_id.replace(`${entityBank}-`, ''), row]))
+         assert.equal(rows['open-0001'].question_type, 'short_text')
+         assert.deepEqual(rows['open-0001'].content.blocks[0], { type: 'verse', lines: ['Line one', 'Line two'] })
+         assert.deepEqual(rows['matching-0001'].interaction_settings, { requireAllLeft: true, allowRightReuse: null })
+         assert.equal(rows['single-0001'].source_metadata.bookSectionTitle, 'Synthetic section')
+         assert.ok(Object.values(rows).every((row) => row.status === 'draft'))
+         // One stored figure, linked to both questions (block in one, appended in the other).
+         const links = (await client.query(
+            `SELECT link.asset_id, asset.sha256, asset.source_metadata FROM question_assets AS link
+             JOIN assets AS asset ON asset.id = link.asset_id
+             WHERE link.question_id = ANY($1::bigint[])`,
+            [[rows['single-0001'].id, rows['single-0002'].id]],
+         )).rows
+         assert.equal(links.length, 2)
+         assert.equal(new Set(links.map((link) => link.asset_id)).size, 1)
+         assert.equal(links[0].source_metadata.package.extractionMethod, 'synthetic')
+         const declared = (await client.query(
+            'SELECT reason, marked_by FROM question_duplicate_links WHERE question_id = $1 AND duplicate_of_id = $2',
+            [rows['single-0003'].id, rows['single-0001'].id],
+         )).rows
+         assert.deepEqual(declared, [{ reason: 'synthetic full-text duplicate', marked_by: adminId }])
+         const key = (await client.query('SELECT status, source, answer_data FROM question_answer_keys WHERE question_id = $1', [rows['single-0002'].id])).rows[0]
+         assert.deepEqual(key, { status: 'proposed', source: 'official_key', answer_data: { optionKey: 'c' } })
+
+         // An unstated matching rule blocks publication even with a verified key.
+         const matchingId = rows['matching-0001'].id
+         await replaceAnswerKeyService(adminId, matchingId, {
+            answerData: { pairs: [{ left: 'l1', right: 'r1' }, { left: 'l2', right: 'r2' }] },
+            source: 'official_key',
+         })
+         await verifyAnswerKeyService(adminId, matchingId, { source: 'official_key' })
+         await assert.rejects(publishQuestionService(adminId, matchingId), (error) => {
+            assert.equal(error.code, 'QUESTION_NOT_PUBLISHABLE')
+            assert.equal(error.details[0].message, 'INTERACTION_SETTINGS_INCOMPLETE')
+            return true
+         })
+
+         const tampered = await packageFrom(entityManifest, {
+            ...entityFiles,
+            'data/question_topics.json': Buffer.from(entityFiles['data/question_topics.json'].toString().split('topic-a').join('topic-missing')),
+         })
+         const rejected = await dryRunQuestionImportService(adminId, tampered)
+         assert.equal(rejected.valid, false)
+         assert.ok(rejected.errors.some((entry) => entry.code === 'PACKAGE_FILE_HASH_MISMATCH'))
+         assert.ok(rejected.errors.some((entry) => entry.path.startsWith('data/questions.part001.json#records[')))
+      })
+
       await t.test('imports never publish or verify', async () => {
          const published = await count(
             `SELECT count(*)::integer AS total FROM questions
@@ -539,7 +615,8 @@ test('question package import integration (M09)', async (t) => {
             `SELECT count(*)::integer AS total FROM question_answer_keys AS answer_key
              JOIN questions AS question ON question.id = answer_key.question_id
              WHERE question.created_by = $1 AND answer_key.status = 'verified'
-               AND question.external_id NOT IN ('q-single', 'q-numeric')`,
+               AND question.external_id NOT IN ('q-single', 'q-numeric')
+               AND question.external_id NOT LIKE 'book-%-matching-0001'`,
             [adminId],
          ), 0)
       })

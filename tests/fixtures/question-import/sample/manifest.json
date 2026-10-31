@@ -1,75 +1,78 @@
 {
   "schemaVersion": "everest.question-import.v1",
-  "sourceNamespace": "fixture:sample-biology",
-  "subjects": [
-    {
-      "code": "fixture-biology",
-      "primaryLanguage": "tg",
-      "color": "green",
-      "translations": { "tg": { "title": "Биология (намуна)" }, "ru": { "title": "Биология (образец)" } }
-    }
+  "packageId": "fixture-bank-synthetic",
+  "sourceNamespace": "fixture-sample",
+  "bankCodes": [
+    "fixture-bank"
   ],
-  "sections": [
-    {
-      "subjectCode": "fixture-biology",
-      "code": "cells",
-      "translations": { "tg": { "title": "Ҳуҷайра" } }
-    }
+  "subjectCodes": [
+    "fixture-subject"
   ],
-  "topics": [
+  "readyForImport": true,
+  "files": [
     {
-      "subjectCode": "fixture-biology",
-      "code": "cell-structure",
-      "sectionCode": "cells",
-      "translations": { "tg": { "title": "Сохти ҳуҷайра" } }
+      "path": "data/subjects.json",
+      "sha256": "79404125f77d19d61c80b4fa7950af10ab475f693e86c57a768b27506a6a92df"
     },
     {
-      "subjectCode": "fixture-biology",
-      "code": "organelles",
-      "sectionCode": "cells",
-      "parentCode": "cell-structure",
-      "translations": { "tg": { "title": "Органоидҳо" } }
-    }
-  ],
-  "bank": {
-    "code": "fixture-biology-sample",
-    "title": "Synthetic sample bank",
-    "subjectCode": "fixture-biology",
-    "visibility": "staff",
-    "source": { "book": "Synthetic fixture", "edition": "1", "year": 2026 }
-  },
-  "assets": [
-    {
-      "id": "fig-1",
-      "file": "assets/figure-1.png",
-      "mimeType": "image/png",
-      "sha256": "d25695dd64e08b4f27b4c7bf8a96e6af820a2670ec8ef5c0f371b54223dd477d"
-    }
-  ],
-  "questions": [
-    {
-      "externalId": "sample-1",
-      "type": "single_choice",
-      "language": "tg",
-      "content": {
-        "blocks": [
-          { "type": "text", "text": "Synthetic question: which item is shown?" },
-          { "type": "image", "asset": "fig-1", "alt": "Figure 1" }
-        ]
-      },
-      "options": [
-        { "key": "a", "label": "А)", "content": { "blocks": [{ "type": "text", "text": "Option one" }] } },
-        { "key": "b", "label": "Б)", "content": { "blocks": [{ "type": "text", "text": "Option two" }] } }
-      ],
-      "topicCodes": ["organelles"],
-      "source": { "book": "Synthetic fixture", "page": 1, "number": "1", "chapter": "I" },
-      "answerKey": { "status": "unknown" }
+      "path": "data/subject_translations.json",
+      "sha256": "01fa1a6ce00bb36be6d8e505e770620dad608eb540529b89f9cf51c6510da48c"
     },
     {
-      "externalId": "sample-2",
-      "type": "numeric",
-      "content": { "blocks": [{ "type": "formula", "latex": "2 + 2 = ?" }] },
-      "source": { "page": 1, "number": "2", "variant": "A" }
+      "path": "data/sections.json",
+      "sha256": "e1bcbf73e26a67658a041bcdcad3b2363043848f5d962f24a53fe272c9480648"
+    },
+    {
+      "path": "data/section_translations.json",
+      "sha256": "dc6bba70ee36e5bd92d6b810f74660834e65da636f9bf801576f0121d393711d"
+    },
+    {
+      "path": "data/topics.json",
+      "sha256": "72a41f05b7ba7aefeadca0db57e83dcfa8845fcf4dbe6b8a6affd469008723c3"
+    },
+    {
+      "path": "data/topic_translations.json",
+      "sha256": "ac9cfd8662a7633dbce901891d14414f23343b71a16943afa31ac9a69dbd7652"
+    },
+    {
+      "path": "data/question_banks.json",
+      "sha256": "359925561bc76e8d78c9cb549619b52e93da5fe27184593f576e5192eb00695b"
+    },
+    {
+      "path": "data/questions.part001.json",
+      "sha256": "a8184ecbb9498ef2686ebaf057164471b466a29d85431f9fa4305d346d97a071"
+    },
+    {
+      "path": "data/questions.part002.json",
+      "sha256": "7401e3664e685a978d24ae5ac851082cffa674268e3c07bec55b331d68683aae"
+    },
+    {
+      "path": "data/question_options.part001.json",
+      "sha256": "ee84fe832b20ea4dee91e177e89626c7b76a25f22555e65ccdbe905c7cc76754"
+    },
+    {
+      "path": "data/question_matching_items.json",
+      "sha256": "127e5b4b2ee81e743154944e42b645f84ecf231e04524a40141f7ee7fb0fd746"
+    },
+    {
+      "path": "data/question_answer_keys.json",
+      "sha256": "fb304c238cfc5adfa0c54bebf4541e790192662afb3b3bce4a2fe422a0e99be0"
+    },
+    {
+      "path": "data/question_topics.json",
+      "sha256": "edcfd989a5aacacf059bd56f43a62c5555195db058d3a91e6bf3da78d1c529ab"
+    },
+    {
+      "path": "data/assets.json",
+      "sha256": "5cc4453219a7a77510e6015804e5cf929e51319cfa21f09fe83e48957717c394"
+    },
+    {
+      "path": "data/question_assets.json",
+      "sha256": "eeb2e146cb0e02e564468cb143c02e66af85f1dae5aff6fc5cc6f8bbe364f84a"
+    },
+    {
+      "path": "data/question_duplicate_links.json",
+      "sha256": "76111a4ace85968ae5d175e8ea89d5c27a7bda095128003597e571747ff00ee8"
     }
   ]
 }

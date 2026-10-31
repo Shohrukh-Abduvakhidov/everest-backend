@@ -1,0 +1,21 @@
+{
+  "schemaVersion": "everest.question-import.v1",
+  "entity": "assets",
+  "records": [
+    {
+      "sourceNamespace": "fixture-sample",
+      "externalId": "fig-1",
+      "relativePath": "assets/fig-1.png",
+      "mimeType": "image/png",
+      "sizeBytes": 73,
+      "sha256": "d25695dd64e08b4f27b4c7bf8a96e6af820a2670ec8ef5c0f371b54223dd477d",
+      "widthPx": 4,
+      "heightPx": 3,
+      "status": "ready",
+      "sourceMetadata": {
+        "extractionMethod": "synthetic",
+        "pageIndex1Based": 3
+      }
+    }
+  ]
+}

@@ -1,0 +1,183 @@
+{
+  "schemaVersion": "everest.question-import.v1",
+  "entity": "questions",
+  "records": [
+    {
+      "bankCode": "fixture-bank",
+      "subjectCode": "fixture-subject",
+      "sectionCode": "part-a",
+      "externalId": "fixture-bank-single-0001",
+      "questionType": "single_choice",
+      "languageCode": "tg",
+      "difficulty": 2,
+      "difficultySource": "ai",
+      "status": "draft",
+      "content": {
+        "blocks": [
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
+                "text": "Synthetic stem with ",
+                "marks": [
+                  "bold"
+                ]
+              },
+              {
+                "type": "text",
+                "text": "mixed",
+                "marks": [
+                  "bold",
+                  "italic"
+                ]
+              },
+              {
+                "type": "text",
+                "text": " marks",
+                "marks": [
+                  "bold"
+                ]
+              }
+            ]
+          },
+          {
+            "type": "image",
+            "assetExternalId": "fig-1",
+            "alt": "Synthetic figure"
+          }
+        ]
+      },
+      "interactionSettings": {},
+      "sourceMetadata": {
+        "sourceFile": "synthetic.pdf",
+        "sequence": 1,
+        "sourceNumber": "7",
+        "pageIndex1Based": 3,
+        "printedPage": "3",
+        "bookSectionTitle": "Synthetic section",
+        "examPart": [
+          "A"
+        ],
+        "isSample": false,
+        "reviewRequired": false,
+        "bbox": [
+          0.1,
+          0.2,
+          0.3,
+          0.4
+        ],
+        "transcriptionIssues": []
+      }
+    },
+    {
+      "bankCode": "fixture-bank",
+      "subjectCode": "fixture-subject",
+      "sectionCode": "part-a",
+      "externalId": "fixture-bank-single-0002",
+      "questionType": "single_choice",
+      "languageCode": "tg",
+      "difficulty": 2,
+      "difficultySource": "ai",
+      "status": "draft",
+      "content": {
+        "blocks": [
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
+                "text": "Synthetic stem with a linked figure",
+                "marks": []
+              }
+            ]
+          }
+        ]
+      },
+      "interactionSettings": {},
+      "sourceMetadata": {
+        "sourceFile": "synthetic.pdf",
+        "sequence": 1,
+        "sourceNumber": "7",
+        "pageIndex1Based": 3,
+        "printedPage": "3",
+        "bookSectionTitle": "Synthetic section",
+        "examPart": [
+          "A"
+        ],
+        "isSample": false,
+        "reviewRequired": false,
+        "bbox": [
+          0.1,
+          0.2,
+          0.3,
+          0.4
+        ],
+        "transcriptionIssues": []
+      }
+    },
+    {
+      "bankCode": "fixture-bank",
+      "subjectCode": "fixture-subject",
+      "sectionCode": "part-a",
+      "externalId": "fixture-bank-single-0003",
+      "questionType": "single_choice",
+      "languageCode": "tg",
+      "difficulty": 2,
+      "difficultySource": "ai",
+      "status": "draft",
+      "content": {
+        "blocks": [
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
+                "text": "Synthetic stem with ",
+                "marks": [
+                  "bold"
+                ]
+              },
+              {
+                "type": "text",
+                "text": "mixed",
+                "marks": [
+                  "bold",
+                  "italic"
+                ]
+              },
+              {
+                "type": "text",
+                "text": " marks",
+                "marks": [
+                  "bold"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "interactionSettings": {},
+      "sourceMetadata": {
+        "sourceFile": "synthetic.pdf",
+        "sequence": 1,
+        "sourceNumber": "7",
+        "pageIndex1Based": 3,
+        "printedPage": "3",
+        "bookSectionTitle": "Synthetic section",
+        "examPart": [
+          "A"
+        ],
+        "isSample": false,
+        "reviewRequired": false,
+        "bbox": [
+          0.1,
+          0.2,
+          0.3,
+          0.4
+        ],
+        "transcriptionIssues": []
+      }
+    }
+  ]
+}

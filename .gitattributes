@@ -4,3 +4,5 @@
 *.sql text eol=lf
 *.yml text eol=lf
 *.yaml text eol=lf
+# Import fixtures carry sha256 hashes of their own bytes: never convert line endings.
+tests/fixtures/** -text

@@ -1,0 +1,354 @@
+{
+  "schemaVersion": "everest.question-import.v1",
+  "entity": "question_options",
+  "records": [
+    {
+      "bankCode": "fixture-bank",
+      "questionExternalId": "fixture-bank-single-0001",
+      "optionKey": "a",
+      "position": 1,
+      "sourceLabel": "A)",
+      "content": {
+        "blocks": [
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
+                "text": "alpha a",
+                "marks": []
+              }
+            ]
+          }
+        ]
+      },
+      "sourceMetadata": {
+        "bbox": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "bankCode": "fixture-bank",
+      "questionExternalId": "fixture-bank-single-0001",
+      "optionKey": "b",
+      "position": 2,
+      "sourceLabel": "B)",
+      "content": {
+        "blocks": [
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
+                "text": "alpha b",
+                "marks": []
+              }
+            ]
+          }
+        ]
+      },
+      "sourceMetadata": {
+        "bbox": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "bankCode": "fixture-bank",
+      "questionExternalId": "fixture-bank-single-0001",
+      "optionKey": "c",
+      "position": 3,
+      "sourceLabel": "C)",
+      "content": {
+        "blocks": [
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
+                "text": "alpha c",
+                "marks": []
+              }
+            ]
+          }
+        ]
+      },
+      "sourceMetadata": {
+        "bbox": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "bankCode": "fixture-bank",
+      "questionExternalId": "fixture-bank-single-0001",
+      "optionKey": "d",
+      "position": 4,
+      "sourceLabel": "D)",
+      "content": {
+        "blocks": [
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
+                "text": "alpha d",
+                "marks": []
+              }
+            ]
+          }
+        ]
+      },
+      "sourceMetadata": {
+        "bbox": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "bankCode": "fixture-bank",
+      "questionExternalId": "fixture-bank-single-0002",
+      "optionKey": "a",
+      "position": 1,
+      "sourceLabel": "A)",
+      "content": {
+        "blocks": [
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
+                "text": "beta a",
+                "marks": []
+              }
+            ]
+          }
+        ]
+      },
+      "sourceMetadata": {
+        "bbox": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "bankCode": "fixture-bank",
+      "questionExternalId": "fixture-bank-single-0002",
+      "optionKey": "b",
+      "position": 2,
+      "sourceLabel": "B)",
+      "content": {
+        "blocks": [
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
+                "text": "beta b",
+                "marks": []
+              }
+            ]
+          }
+        ]
+      },
+      "sourceMetadata": {
+        "bbox": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "bankCode": "fixture-bank",
+      "questionExternalId": "fixture-bank-single-0002",
+      "optionKey": "c",
+      "position": 3,
+      "sourceLabel": "C)",
+      "content": {
+        "blocks": [
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
+                "text": "beta c",
+                "marks": []
+              }
+            ]
+          }
+        ]
+      },
+      "sourceMetadata": {
+        "bbox": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "bankCode": "fixture-bank",
+      "questionExternalId": "fixture-bank-single-0002",
+      "optionKey": "d",
+      "position": 4,
+      "sourceLabel": "D)",
+      "content": {
+        "blocks": [
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
+                "text": "beta d",
+                "marks": []
+              }
+            ]
+          }
+        ]
+      },
+      "sourceMetadata": {
+        "bbox": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "bankCode": "fixture-bank",
+      "questionExternalId": "fixture-bank-single-0003",
+      "optionKey": "a",
+      "position": 1,
+      "sourceLabel": "A)",
+      "content": {
+        "blocks": [
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
+                "text": "alpha a",
+                "marks": []
+              }
+            ]
+          }
+        ]
+      },
+      "sourceMetadata": {
+        "bbox": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "bankCode": "fixture-bank",
+      "questionExternalId": "fixture-bank-single-0003",
+      "optionKey": "b",
+      "position": 2,
+      "sourceLabel": "B)",
+      "content": {
+        "blocks": [
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
+                "text": "alpha b",
+                "marks": []
+              }
+            ]
+          }
+        ]
+      },
+      "sourceMetadata": {
+        "bbox": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "bankCode": "fixture-bank",
+      "questionExternalId": "fixture-bank-single-0003",
+      "optionKey": "c",
+      "position": 3,
+      "sourceLabel": "C)",
+      "content": {
+        "blocks": [
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
+                "text": "alpha c",
+                "marks": []
+              }
+            ]
+          }
+        ]
+      },
+      "sourceMetadata": {
+        "bbox": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "bankCode": "fixture-bank",
+      "questionExternalId": "fixture-bank-single-0003",
+      "optionKey": "d",
+      "position": 4,
+      "sourceLabel": "D)",
+      "content": {
+        "blocks": [
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
+                "text": "alpha d",
+                "marks": []
+              }
+            ]
+          }
+        ]
+      },
+      "sourceMetadata": {
+        "bbox": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    }
+  ]
+}
