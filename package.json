@@ -17,6 +17,7 @@
     "bootstrap:owner": "node scripts/bootstrap-owner.js",
     "storage:configure": "node scripts/configure-storage-bucket.js",
     "video:faststart": "node scripts/remux-faststart.js",
+    "import:questions": "node scripts/import-question-package.js",
     "test:sources": "node scripts/verify-migration-sources.js",
     "test:integrity": "node scripts/test-schema-integrity.js",
     "test:server": "node scripts/test-server.js",
