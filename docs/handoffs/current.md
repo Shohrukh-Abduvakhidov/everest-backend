@@ -1,9 +1,9 @@
 ---
 project: EVEREST Backend
-current_milestone: M17 (admin accounts slice)
+current_milestone: M04-B follow-up (group API improvements)
 status: awaiting_review
-branch: feat/admin-accounts-api
-base_commit: c9b1085
+branch: feat/groups-api-improvements
+base_commit: 625d34f
 updated_at: 2026-10-31
 ---
 
@@ -11,35 +11,34 @@ updated_at: 2026-10-31
 
 ## State
 
-- M09 (PR #24) is merged.
-- The M17 admin-accounts slice is implemented on `feat/admin-accounts-api`. The PR is open for review and must not be merged by the agent.
+- PR #27 (owner-role grant restriction) is merged into `main`.
+- Group API improvements are implemented on `feat/groups-api-improvements`. The PR is open for review and must not be merged by the agent.
 
 ## Completed work
 
-- **`GET /api/v1/admin/users`:**
-   - filters: `status`, `role`, `q` (2–100 characters; names, full name or any phone; LIKE wildcards literal), `sort` (`-createdAt` default, `createdAt`), `limit`/`offset`;
-   - items: `id, firstName, lastName, displayName, phone, status, roles, createdAt, lastLoginAt, telegramLinked`;
-   - `pagination.total`.
-- **`GET /api/v1/admin/users/pending`:** additive `pagination.total`.
-- **`PUT /api/v1/admin/users/:userId/roles`:** `{ roles }`.
-   - Owners manage every role. Admins manage teacher/student of non-privileged accounts.
-   - No self-change; `student` is mandatory; the last active owner is protected.
-   - Unchanged sets are idempotent.
-   - Audited, and the subject's sessions are revoked (`roles_changed`).
-- **Status transitions:** block/reject/unblock on an owner need an owner actor (`OWNER_ACTION_FORBIDDEN`); block/reject never remove the last active owner (`LAST_OWNER_PROTECTED`).
-- **Concurrency:** role changes, owner status changes and owner bootstrap share one advisory lock.
-- **Docs:** `api.md`, `decisions.md` (M17 assumptions 1–9), `progress.md`, `ROADMAP.md`, and the OpenAPI spec (`AdminAccount`, `RoleChange`, `Pagination.total`).
+- `POST /admin/groups`: `code` optional, generated from the name (`<slug>-<6 hex>`, ≤ 80 chars) with collision retry inside the transaction; explicit duplicates return `409 GROUP_CODE_CONFLICT`.
+- `GET /groups`: `status`, `q` (2–100, case-insensitive, literal wildcards), unknown params rejected, `pagination.total`.
+- `PATCH /admin/groups/:groupId/members/:userId` `{ isRepresentative }` and `PATCH /admin/groups/:groupId/teachers/:userId` `{ canPublishAnnouncements?, canAssignTests?, canViewResults? }`; audited; list-item shapes.
+- `GET /admin/users`: `notInGroup`, `notTeacherOfGroup`.
+- `POST`/`PATCH /admin/groups` return `memberCount`/`teacherCount`.
+- `409 GROUP_ARCHIVED` for member/teacher add/edit/remove and new announcements in archived groups.
+- `GET /groups/:groupId/announcements?status=` for owner/admin and publishing teachers.
+- Docs: OpenAPI, `api.md`, `frontend-handoff.md`, `decisions.md`, `progress.md`, `ROADMAP.md`.
 
 ## Verification (2026-10-31)
 
-- `npm test` (disposable database): 228 tests, 227 passed, 0 failed, 1 skipped (real storage).
-- `npm run test:migrations`: 25/25/24/25. No migration was added.
-- `node scripts/verify-database.js`: valid.
+- `npm test` (disposable database): 238 passed, 0 failed (includes `tests/integration/group-improvements.test.js`, 11 subtests, and the OpenAPI route test).
+- No migration was added, so `migrate:up` / `test:migrations` were not rerun.
+
+## Decisions needed
+
+1. `GROUP_ARCHIVED` semantics (implemented as proposed, also covers the two new PATCH edits).
+2. Announcement `status` filter for non-staff returns published-only results (empty list for draft/archived) rather than 403; "staff" includes only teachers with `can_publish_announcements`.
 
 ## Next concrete tasks
 
-1. The frontend (PR #7) consumes `GET /admin/users` and `PUT /admin/users/:userId/roles`.
-2. Optional: seed a dedicated `accounts.roles.manage` permission if role management should differ from `accounts.approve`.
+1. Review and merge the group improvements PR.
+2. Frontend consumes the new group endpoints and candidate filters.
 3. Real S3/MinIO verification and the first real book import (M09 runbook).
 
 ## Constraints
