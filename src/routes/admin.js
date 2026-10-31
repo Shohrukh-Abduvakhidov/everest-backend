@@ -98,6 +98,8 @@ import {
    removeGroupMemberController,
    removeGroupTeacherController,
    updateGroupController,
+   updateGroupMemberController,
+   updateGroupTeacherController,
 } from '../controllers/group-controller.js'
 import {
    adminMutationRateMiddleware,
@@ -442,6 +444,13 @@ adminRouter.delete(
    adminMutationRateMiddleware,
    removeGroupMemberController,
 )
+adminRouter.patch(
+   '/groups/:groupId/members/:userId',
+   manageGroupMembersAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   updateGroupMemberController,
+)
 adminRouter.post(
    '/groups/:groupId/teachers',
    manageGroupTeachersAuthorizationMiddleware,
@@ -455,6 +464,13 @@ adminRouter.delete(
    authenticatedCsrfMiddleware,
    adminMutationRateMiddleware,
    removeGroupTeacherController,
+)
+adminRouter.patch(
+   '/groups/:groupId/teachers/:userId',
+   manageGroupTeachersAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   updateGroupTeacherController,
 )
 adminRouter.get('/subjects', readTaxonomyAuthorizationMiddleware, listSubjectsController)
 adminRouter.post(

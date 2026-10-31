@@ -1,3 +1,5 @@
+import { randomBytes } from 'node:crypto'
+
 import * as groupRepository from '../repositories/group-repository.js'
 import * as authRepository from '../repositories/auth-repository.js'
 import { withTransaction } from '../repositories/transaction-repository.js'
@@ -9,7 +11,50 @@ function dependencies(overrides = {}) {
       repository: overrides.repository || groupRepository,
       auth: overrides.auth || authRepository,
       transaction: overrides.transaction || withTransaction,
+      codeSuffix: overrides.codeSuffix || randomCodeSuffix,
    }
+}
+
+const groupCodeMaxLength = 80
+const groupCodeAttempts = 5
+const groupListQueryFields = ['limit', 'offset', 'status', 'q']
+const searchMinLength = 2
+const searchMaxLength = 100
+
+// Russian and Tajik Cyrillic letters to latin; other characters become hyphens.
+const transliteration = {
+   а: 'a', б: 'b', в: 'v', г: 'g', ғ: 'gh', д: 'd', е: 'e', ё: 'yo', ж: 'zh', з: 'z',
+   и: 'i', ӣ: 'i', й: 'y', к: 'k', қ: 'q', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p',
+   р: 'r', с: 's', т: 't', у: 'u', ӯ: 'u', ф: 'f', х: 'kh', ҳ: 'h', ц: 'ts', ч: 'ch',
+   ҷ: 'j', ш: 'sh', щ: 'shch', ъ: '', ы: 'y', ь: '', э: 'e', ю: 'yu', я: 'ya',
+}
+
+function randomCodeSuffix() {
+   return randomBytes(4).toString('hex').slice(0, 6)
+}
+
+function slugifyGroupName(name) {
+   const latin = [...name.toLowerCase()].map((character) => transliteration[character] ?? character).join('')
+   const slug = latin.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+   return slug || 'group'
+}
+
+function generatedGroupCode(name, suffix) {
+   const base = slugifyGroupName(name).slice(0, groupCodeMaxLength - suffix.length - 1).replace(/-+$/, '')
+   return `${base}-${suffix}`
+}
+
+// LIKE wildcards and the escape character in user input are matched literally.
+function escapeLike(value) {
+   return value.replace(/[\\%_]/g, (character) => `\\${character}`)
+}
+
+function requireActiveGroup(row) {
+   requireGroup(row)
+   if (row.status === 'archived') {
+      throw new AppError(409, 'GROUP_ARCHIVED', 'Group is archived')
+   }
+   return row
 }
 
 function parseGroupId(value) {
@@ -111,15 +156,45 @@ function safeGroup(row) {
    }
 }
 
-function managedGroup(row) {
+function managedGroup(row, counts) {
    return {
       id: row.id,
       code: row.code,
       name: row.title,
       description: row.description,
       status: row.status,
+      memberCount: counts.member_count,
+      teacherCount: counts.teacher_count,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
+   }
+}
+
+function safeMember(row) {
+   return {
+      id: row.user_id,
+      firstName: row.first_name,
+      lastName: row.last_name,
+      avatarAssetId: row.avatar_asset_id,
+      role: row.is_representative ? 'representative' : 'member',
+      status: row.status,
+      joinedAt: row.joined_at,
+   }
+}
+
+function safeTeacher(row) {
+   return {
+      id: row.user_id,
+      firstName: row.first_name,
+      lastName: row.last_name,
+      avatarAssetId: row.avatar_asset_id,
+      role: 'teacher',
+      assignedAt: row.assigned_at,
+      permissions: {
+         publishAnnouncements: row.can_publish_announcements,
+         assignTests: row.can_assign_tests,
+         viewResults: row.can_view_results,
+      },
    }
 }
 
@@ -190,14 +265,32 @@ function paginated(items, pagination, key) {
    }
 }
 
+function parseGroupListQuery(query = {}) {
+   const unknown = Object.keys(query).find((field) => !groupListQueryFields.includes(field))
+   if (unknown) throw validationError(unknown)
+   for (const field of ['status', 'q']) {
+      if (query[field] !== undefined && typeof query[field] !== 'string') throw validationError(field)
+   }
+   const status = enumValue(query.status, 'status', ['active', 'archived'], null)
+   let pattern = null
+   if (query.q !== undefined) {
+      const search = query.q.trim()
+      if (search.length < searchMinLength || search.length > searchMaxLength) throw validationError('q')
+      pattern = `%${escapeLike(search)}%`
+   }
+   return { ...parsePagination(query), status, pattern }
+}
+
 async function listGroupsService(userId, query, overrides) {
    const { repository } = dependencies(overrides)
-   const pagination = parsePagination(query)
-   const rows = await repository.listVisibleGroups(
-      normalizeInternalId(userId),
-      pagination,
-   )
-   return paginated(rows.map(safeGroup), pagination, 'groups')
+   const filters = parseGroupListQuery(query || {})
+   const actorId = normalizeInternalId(userId)
+   const rows = await repository.listVisibleGroups(actorId, filters)
+   const total = await repository.countVisibleGroups(actorId, filters)
+   const pagination = { limit: filters.limit, offset: filters.offset }
+   const result = paginated(rows.map(safeGroup), pagination, 'groups')
+   result.pagination.total = total
+   return result
 }
 
 async function getGroupService(userId, groupId, overrides) {
@@ -218,17 +311,7 @@ async function listGroupMembersService(userId, groupId, query, overrides) {
       pagination,
    )
    if (!rows.length) requireVisibleGroup(null)
-   const members = rows
-      .filter((row) => row.id)
-      .map((row) => ({
-         id: row.user_id,
-         firstName: row.first_name,
-         lastName: row.last_name,
-         avatarAssetId: row.avatar_asset_id,
-         role: row.is_representative ? 'representative' : 'member',
-         status: row.status,
-         joinedAt: row.joined_at,
-      }))
+   const members = rows.filter((row) => row.id).map(safeMember)
    return paginated(members, pagination, 'members')
 }
 
@@ -241,47 +324,49 @@ async function listGroupTeachersService(userId, groupId, query, overrides) {
       pagination,
    )
    if (!rows.length) requireVisibleGroup(null)
-   const teachers = rows
-      .filter((row) => row.id)
-      .map((row) => ({
-         id: row.user_id,
-         firstName: row.first_name,
-         lastName: row.last_name,
-         avatarAssetId: row.avatar_asset_id,
-         role: 'teacher',
-         assignedAt: row.assigned_at,
-         permissions: {
-            publishAnnouncements: row.can_publish_announcements,
-            assignTests: row.can_assign_tests,
-            viewResults: row.can_view_results,
-         },
-      }))
+   const teachers = rows.filter((row) => row.id).map(safeTeacher)
    return paginated(teachers, pagination, 'teachers')
 }
 
+function groupCodeConflict() {
+   return new AppError(409, 'GROUP_CODE_CONFLICT', 'Group code already exists')
+}
+
+// An explicit code keeps the 409 contract; a generated code retries with a new suffix
+// inside the same transaction and never reports a conflict to the caller.
+async function insertGroup(repository, codeSuffix, group, client) {
+   if (group.code !== null) {
+      const created = await repository.createGroup(group, client)
+      if (!created) throw groupCodeConflict()
+      return created
+   }
+   for (let attempt = 0; attempt < groupCodeAttempts; attempt += 1) {
+      const code = generatedGroupCode(group.title, codeSuffix())
+      const created = await repository.createGroup({ ...group, code }, client)
+      if (created) return created
+   }
+   throw new Error('Could not generate a unique group code')
+}
+
 async function createGroupService(userId, body, overrides) {
-   const { repository, auth, transaction } = dependencies(overrides)
+   const { repository, auth, transaction, codeSuffix } = dependencies(overrides)
    validateBody(body, ['code', 'name', 'description', 'status'])
    const group = {
-      code: text(body.code, 'code', 80).toLowerCase(),
+      code: body.code === undefined ? null : text(body.code, 'code', groupCodeMaxLength).toLowerCase(),
       title: text(body.name, 'name', 200),
       description: body.description === undefined ? null : text(body.description, 'description', 2000, true),
       status: enumValue(body.status, 'status', ['active', 'archived'], 'active'),
       actorId: parseUserId(userId),
    }
 
-   try {
-      return await transaction(async (client) => {
-         const created = await repository.createGroup(group, client)
-         await audit(auth, client, group.actorId, 'group.created', 'group', created.id, {
-            code: created.code,
-         })
-         return managedGroup(created)
+   return transaction(async (client) => {
+      const created = await insertGroup(repository, codeSuffix, group, client)
+      await audit(auth, client, group.actorId, 'group.created', 'group', created.id, {
+         code: created.code,
+         generatedCode: group.code === null,
       })
-   } catch (error) {
-      if (error.code === '23505') throw new AppError(409, 'GROUP_CODE_CONFLICT', 'Group code already exists')
-      throw error
-   }
+      return managedGroup(created, { member_count: 0, teacher_count: 0 })
+   })
 }
 
 async function updateGroupService(userId, groupIdValue, body, overrides) {
@@ -291,7 +376,7 @@ async function updateGroupService(userId, groupIdValue, body, overrides) {
    const groupId = parseGroupId(groupIdValue)
    const actorId = parseUserId(userId)
    const changes = {
-      code: body.code === undefined ? null : text(body.code, 'code', 80).toLowerCase(),
+      code: body.code === undefined ? null : text(body.code, 'code', groupCodeMaxLength).toLowerCase(),
       title: body.name === undefined ? null : text(body.name, 'name', 200),
       hasDescription: body.description !== undefined,
       description: body.description === undefined ? null : text(body.description, 'description', 2000, true),
@@ -304,10 +389,10 @@ async function updateGroupService(userId, groupIdValue, body, overrides) {
          await audit(auth, client, actorId, 'group.updated', 'group', groupId, {
             fields: Object.keys(body),
          })
-         return managedGroup(updated)
+         return managedGroup(updated, await repository.countGroupPeople(groupId, client))
       })
    } catch (error) {
-      if (error.code === '23505') throw new AppError(409, 'GROUP_CODE_CONFLICT', 'Group code already exists')
+      if (error.code === '23505') throw groupCodeConflict()
       throw error
    }
 }
@@ -320,7 +405,7 @@ async function addGroupMemberService(userId, groupIdValue, body, overrides) {
    const targetUserId = parseUserId(body.userId)
    const isRepresentative = boolean(body.isRepresentative, 'isRepresentative', false)
    return transaction(async (client) => {
-      requireGroup(await repository.findGroupForUpdate(groupId, client))
+      requireActiveGroup(await repository.findGroupForUpdate(groupId, client))
       const target = await repository.findEligibleUserForUpdate(targetUserId, 'student', client)
       if (!target || target.status !== 'active' || !target.eligible) {
          throw new AppError(409, 'GROUP_MEMBER_INELIGIBLE', 'User is not eligible for group membership')
@@ -354,7 +439,7 @@ async function removeGroupMemberService(userId, groupIdValue, targetValue, overr
    const groupId = parseGroupId(groupIdValue)
    const targetUserId = parseUserId(targetValue)
    return transaction(async (client) => {
-      requireGroup(await repository.findGroupForUpdate(groupId, client))
+      requireActiveGroup(await repository.findGroupForUpdate(groupId, client))
       const membership = await repository.removeMembership(groupId, targetUserId, client)
       if (!membership) throw new AppError(404, 'GROUP_MEMBER_NOT_FOUND', 'Group member was not found')
       await audit(auth, client, actorId, 'group.member.removed', 'group', groupId, {
@@ -376,7 +461,7 @@ async function addGroupTeacherService(userId, groupIdValue, body, overrides) {
       canViewResults: boolean(body.canViewResults, 'canViewResults', false),
    }
    return transaction(async (client) => {
-      requireGroup(await repository.findGroupForUpdate(assignment.groupId, client))
+      requireActiveGroup(await repository.findGroupForUpdate(assignment.groupId, client))
       const target = await repository.findEligibleUserForUpdate(assignment.userId, 'teacher', client)
       if (!target || target.status !== 'active' || !target.eligible) {
          throw new AppError(409, 'GROUP_TEACHER_INELIGIBLE', 'User is not eligible for group teaching')
@@ -406,7 +491,7 @@ async function removeGroupTeacherService(userId, groupIdValue, targetValue, over
    const groupId = parseGroupId(groupIdValue)
    const targetUserId = parseUserId(targetValue)
    return transaction(async (client) => {
-      requireGroup(await repository.findGroupForUpdate(groupId, client))
+      requireActiveGroup(await repository.findGroupForUpdate(groupId, client))
       if (!await repository.findTeacherForUpdate(groupId, targetUserId, client)) {
          throw new AppError(404, 'GROUP_TEACHER_NOT_FOUND', 'Group teacher was not found')
       }
@@ -418,13 +503,60 @@ async function removeGroupTeacherService(userId, groupIdValue, targetValue, over
    })
 }
 
+async function updateGroupMemberService(userId, groupIdValue, targetValue, body, overrides) {
+   const { repository, auth, transaction } = dependencies(overrides)
+   validateBody(body, ['isRepresentative'])
+   if (body.isRepresentative === undefined) throw validationError('isRepresentative')
+   const isRepresentative = boolean(body.isRepresentative, 'isRepresentative')
+   const actorId = parseUserId(userId)
+   const groupId = parseGroupId(groupIdValue)
+   const targetUserId = parseUserId(targetValue)
+   return transaction(async (client) => {
+      requireActiveGroup(await repository.findGroupForUpdate(groupId, client))
+      if (!await repository.updateMembershipRepresentative(groupId, targetUserId, isRepresentative, client)) {
+         throw new AppError(404, 'GROUP_MEMBER_NOT_FOUND', 'Group member was not found')
+      }
+      await audit(auth, client, actorId, 'group.member.updated', 'group', groupId, {
+         userId: targetUserId,
+         isRepresentative,
+      })
+      return safeMember(await repository.findMemberItem(groupId, targetUserId, client))
+   })
+}
+
+async function updateGroupTeacherService(userId, groupIdValue, targetValue, body, overrides) {
+   const { repository, auth, transaction } = dependencies(overrides)
+   validateBody(body, ['canPublishAnnouncements', 'canAssignTests', 'canViewResults'])
+   if (!Object.keys(body).length) throw validationError('body')
+   const changes = {
+      canPublishAnnouncements: boolean(body.canPublishAnnouncements, 'canPublishAnnouncements', null),
+      canAssignTests: boolean(body.canAssignTests, 'canAssignTests', null),
+      canViewResults: boolean(body.canViewResults, 'canViewResults', null),
+   }
+   const actorId = parseUserId(userId)
+   const groupId = parseGroupId(groupIdValue)
+   const targetUserId = parseUserId(targetValue)
+   return transaction(async (client) => {
+      requireActiveGroup(await repository.findGroupForUpdate(groupId, client))
+      if (!await repository.updateTeacherPermissions(groupId, targetUserId, changes, client)) {
+         throw new AppError(404, 'GROUP_TEACHER_NOT_FOUND', 'Group teacher was not found')
+      }
+      await audit(auth, client, actorId, 'group.teacher.updated', 'group', groupId, {
+         userId: targetUserId,
+         fields: Object.keys(body),
+      })
+      return safeTeacher(await repository.findTeacherItem(groupId, targetUserId, client))
+   })
+}
+
 async function listGroupAnnouncementsService(userId, groupId, query, overrides) {
    const { repository } = dependencies(overrides)
    const pagination = parsePagination(query)
+   const status = enumValue(query?.status, 'status', ['draft', 'published', 'archived'], null)
    const rows = await repository.listVisibleAnnouncements(
       parseUserId(userId),
       parseGroupId(groupId),
-      pagination,
+      { ...pagination, status },
    )
    if (!rows.length) requireVisibleGroup(null)
    return paginated(rows.filter((row) => row.id).map(safeAnnouncement), pagination, 'announcements')
@@ -448,7 +580,9 @@ async function createGroupAnnouncementService(userId, groupIdValue, body, overri
    const groupId = parseGroupId(groupIdValue)
    const values = parseAnnouncementBody(body)
    return transaction(async (client) => {
-      requireAnnouncementScope(await repository.findAnnouncementManagerScope(actorId, groupId, client))
+      const scope = await repository.findAnnouncementManagerScope(actorId, groupId, client)
+      requireAnnouncementScope(scope)
+      requireActiveGroup(scope)
       const created = await repository.createAnnouncement({
          groupId,
          authorId: actorId,
@@ -512,5 +646,7 @@ export {
    removeGroupMemberService,
    removeGroupTeacherService,
    updateGroupAnnouncementService,
+   updateGroupMemberService,
    updateGroupService,
+   updateGroupTeacherService,
 }
