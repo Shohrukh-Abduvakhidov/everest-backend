@@ -13,6 +13,7 @@ import './unit/openapi.test.js';
 import './integration/password-auth.test.js';
 import './integration/auth-protection.test.js';
 import './integration/account-admin.test.js';
+import './integration/admin-accounts.test.js';
 import './integration/session-lifecycle.test.js';
 import './integration/password-recovery.test.js';
 import './integration/profile.test.js';
