@@ -184,6 +184,7 @@ This roadmap orders implementation; it does not replace the [current architectur
 - **Deliverables:** `course_enrollments`, validity windows, revoke/extend/re-grant, separate `module_access_grants`, locked metadata, protected-content guard (`requireModuleAccessService`), and progress preservation after expiry. Administrative routes under `/api/v1/admin/courses/:courseId/enrollments`; learner reads at `/api/v1/courses`.
 - **Verification:** `tests/integration/course-access.test.js` (16 subtests, 17 reported tests) covers the grant/date/revocation matrix, concurrency, locked metadata, cross-course and cross-user denial, group non-grant, onboarding, audit rollback, and preserved-progress rows. `npm test` passed 130 tests; the disposable migration cycle passed 20/20/19/20.
 - **Documentation updates:** API, decisions (15 recorded assumptions made without user input), architecture, progress, roadmap, handoff.
+- **Follow-up (2026-11-01, `feat/enrollment-reinstate`, awaiting review):** enrollment list exposes `user.phone`; `GET /admin/users?notEnrolledInCourse=`; explicit reinstatement tests (`tests/integration/enrollment-reinstate.test.js`). `npm test`: 244 passed, 0 failed, 1 skipped.
 - **Exclusions:** No `group_courses`; group membership grants nothing; course and module grants remain separate. Teacher and administrator access to protected content is left to M07.
 
 ## M07-A — Media storage and resumable uploads
