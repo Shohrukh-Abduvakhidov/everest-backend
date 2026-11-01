@@ -64,7 +64,7 @@ function safeUser(row) {
 const accountStatuses = ['pending', 'active', 'blocked', 'rejected']
 const roleCodes = ['owner', 'admin', 'teacher', 'student']
 const privilegedRoles = ['owner', 'admin']
-const listQueryFields = ['limit', 'offset', 'status', 'role', 'q', 'sort', 'notInGroup', 'notTeacherOfGroup']
+const listQueryFields = ['limit', 'offset', 'status', 'role', 'q', 'sort', 'notInGroup', 'notTeacherOfGroup', 'notEnrolledInCourse']
 const searchMinLength = 2
 const searchMaxLength = 100
 
@@ -100,7 +100,7 @@ function escapeLike(value) {
 function parseListQuery(query = {}) {
    const unknown = Object.keys(query).find((field) => !listQueryFields.includes(field))
    if (unknown) throw validationError(unknown, `${unknown} is not allowed`)
-   for (const field of ['status', 'role', 'q', 'sort', 'notInGroup', 'notTeacherOfGroup']) {
+   for (const field of ['status', 'role', 'q', 'sort', 'notInGroup', 'notTeacherOfGroup', 'notEnrolledInCourse']) {
       if (query[field] !== undefined && typeof query[field] !== 'string') throw validationError(field)
    }
    if (query.status !== undefined && !accountStatuses.includes(query.status)) throw validationError('status')
@@ -123,6 +123,7 @@ function parseListQuery(query = {}) {
       sort,
       notInGroup: parseGroupFilter(query.notInGroup, 'notInGroup'),
       notTeacherOfGroup: parseGroupFilter(query.notTeacherOfGroup, 'notTeacherOfGroup'),
+      notEnrolledInCourse: parseGroupFilter(query.notEnrolledInCourse, 'notEnrolledInCourse'),
    }
 }
 
