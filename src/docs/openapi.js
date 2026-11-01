@@ -248,7 +248,7 @@ const schemas = {
          id: id(),
          userId: id(),
          courseId: id(),
-         user: obj({ firstName: nullable(str()), lastName: nullable(str()) }, [], { description: 'Lists only' }),
+         user: obj({ firstName: nullable(str()), lastName: nullable(str()), phone: nullable(str({ description: 'Primary phone, E.164' })) }, [], { description: 'Lists only' }),
       })],
    },
    ModuleGrant: {
@@ -970,6 +970,7 @@ const routes = [
          { name: 'sort', schema: enumOf(['-createdAt', 'createdAt'], { default: '-createdAt' }) },
          { name: 'notInGroup', description: 'Exclude active members of this group', schema: id() },
          { name: 'notTeacherOfGroup', description: 'Exclude teachers assigned to this group', schema: id() },
+         { name: 'notEnrolledInCourse', description: 'Exclude accounts with a non-revoked enrollment in this course', schema: id() },
       ],
       response: page('users', ref('AdminAccount')),
    }],
@@ -1066,7 +1067,7 @@ const routes = [
       response: page('enrollments', ref('Enrollment')), errors: { 404: ['COURSE_NOT_FOUND'] },
    }],
    ['post', '/admin/courses/:courseId/enrollments', {
-      tag: 'Admin: enrollments', ...admin('courses.access.manage'), created: true, summary: 'Grant course access to a student',
+      tag: 'Admin: enrollments', ...admin('courses.access.manage'), created: true, summary: 'Grant course access to a student (reinstates a revoked enrollment; its module grants stay revoked)',
       body: grantBody({ userId: id() }, ['userId']), response: ref('Enrollment'),
       errors: { 404: ['COURSE_NOT_FOUND', 'USER_NOT_FOUND'], 409: ['COURSE_NOT_PUBLISHED', 'ENROLLMENT_USER_INELIGIBLE', 'ENROLLMENT_ALREADY_EXISTS'] },
    }],
@@ -1083,7 +1084,7 @@ const routes = [
       tag: 'Admin: enrollments', ...adminRead('courses.access.read'), summary: 'Module grants of a student', response: obj({ moduleGrants: arr(ref('ModuleGrant')) }),
    }],
    ['post', '/admin/courses/:courseId/enrollments/:userId/modules', {
-      tag: 'Admin: enrollments', ...admin('courses.access.manage'), created: true, summary: 'Grant module access',
+      tag: 'Admin: enrollments', ...admin('courses.access.manage'), created: true, summary: 'Grant module access (reinstates a revoked module grant)',
       body: grantBody({ moduleId: id() }, ['moduleId']), response: ref('ModuleGrant'),
       errors: { 404: ['ENROLLMENT_NOT_FOUND', 'COURSE_MODULE_NOT_FOUND'], 409: ['MODULE_NOT_PUBLISHED', 'ENROLLMENT_NOT_ACTIVE', 'MODULE_ACCESS_ALREADY_EXISTS'] },
    }],
