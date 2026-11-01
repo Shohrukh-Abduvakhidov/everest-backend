@@ -145,9 +145,15 @@ async function listEnrollments(courseId, { limit, offset, state }, db = pool) {
    }
    const result = await db.query(
       `SELECT * FROM (
-         SELECT ${enrollmentColumns}, profile.first_name, profile.last_name
+         SELECT ${enrollmentColumns}, profile.first_name, profile.last_name, phone.phone_e164
          FROM course_enrollments AS grant_row
          LEFT JOIN user_profiles AS profile ON profile.user_id = grant_row.user_id
+         LEFT JOIN LATERAL (
+            SELECT candidate.phone_e164 FROM user_phones AS candidate
+            WHERE candidate.user_id = grant_row.user_id
+            ORDER BY candidate.is_primary DESC, candidate.verified_at DESC NULLS LAST, candidate.id
+            LIMIT 1
+         ) AS phone ON TRUE
          WHERE grant_row.course_id = $1
        ) AS listed
        WHERE $2::text IS NULL OR listed.state = $2

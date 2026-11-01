@@ -97,7 +97,7 @@ function safeEnrollment(row) {
       userId: row.user_id,
       courseId: row.course_id,
       ...(row.first_name === undefined ? {} : {
-         user: { firstName: row.first_name, lastName: row.last_name },
+         user: { firstName: row.first_name, lastName: row.last_name, phone: row.phone_e164 },
       }),
       ...safeGrant(row),
    }
