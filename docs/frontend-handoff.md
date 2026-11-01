@@ -179,7 +179,7 @@ Validation errors are `400` with `code: "VALIDATION_ERROR"` and one entry in `de
 
 | Method | Path | Access | Query | Body | Success `data` | Errors |
 |---|---|---|---|---|---|---|
-| GET | `/admin/users` | `accounts.pending.read` | limit, offset, status, role, q, sort, notInGroup, notTeacherOfGroup | — | 200 { users: AdminAccount[], pagination: Pagination } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: ADMIN_ROLE_REQUIRED |
+| GET | `/admin/users` | `accounts.pending.read` | limit, offset, status, role, q, sort, notInGroup, notTeacherOfGroup, notEnrolledInCourse | — | 200 { users: AdminAccount[], pagination: Pagination } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: ADMIN_ROLE_REQUIRED |
 | PUT | `/admin/users/{userId}/roles` | `accounts.approve` + CSRF | — | { roles: owner/admin/teacher/student[] } | 200 RoleChange | 400: VALIDATION_ERROR, INVALID_USER_ID, INVALID_ROLES; 401: AUTHENTICATION_REQUIRED; 403: ADMIN_ROLE_REQUIRED, ROLE_ASSIGNMENT_FORBIDDEN, OWNER_ACTION_FORBIDDEN, CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 404: USER_NOT_FOUND; 409: SELF_ROLE_CHANGE_FORBIDDEN, LAST_OWNER_PROTECTED; 422: STUDENT_ROLE_REQUIRED; 429: AUTH_RATE_LIMITED (Retry-After header) |
 | GET | `/admin/users/pending` | `accounts.pending.read` | limit, offset | — | 200 { users: PendingUser[], pagination: Pagination } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: ADMIN_ROLE_REQUIRED |
 | POST | `/admin/users/{userId}/approve` | `accounts.approve` + CSRF | — | — | 200 AccountTransition | 400: INVALID_USER_ID; 401: AUTHENTICATION_REQUIRED; 403: ADMIN_ROLE_REQUIRED, CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 404: USER_NOT_FOUND; 409: INVALID_ACCOUNT_TRANSITION, SELF_REJECTION_FORBIDDEN, SELF_BLOCK_FORBIDDEN; 429: AUTH_RATE_LIMITED (Retry-After header) |
@@ -319,7 +319,7 @@ Validation errors are `400` with `code: "VALIDATION_ERROR"` and one entry in `de
 - **CourseModule**: { id?: Id, courseId?: Id, title?: string, description?: string?, translations?: CourseTranslations, position?: integer, status?: draft/published/archived, createdAt?: string }
 - **CourseTeacher**: { id?: Id, firstName?: string?, lastName?: string?, avatarAssetId?: Id or null, permissions?: { editCourse?: boolean, manageLessons?: boolean, manageQuestions?: boolean, manageTests?: boolean, viewResults?: boolean } }
 - **CourseTranslations**: object
-- **Enrollment**: any
+- **Enrollment**: GrantWindow + { id?: Id, userId?: Id, courseId?: Id, user?: { firstName?: string?, lastName?: string?, phone?: string? } (lists only) }
 - **EnrollmentWindow**: { state?: active/scheduled/expired, beginsAt?: string, expiresAt?: string? }
 - **ErrorResponse**: { error: { code: string, message: string, details: object[] } }
 - **GrantWindow**: { state?: active/scheduled/expired/revoked, grantedBy?: Id, grantedAt?: string, beginsAt?: string, expiresAt?: string?, revokedAt?: string?, revokedBy?: Id or null }
@@ -582,6 +582,7 @@ npm run storage:configure   # only with S3/MinIO: bucket CORS/settings
 14a. **Archived groups are read-only for composition** (`409 GROUP_ARCHIVED` on add/edit/remove of members and teachers and on new announcements). Restore with `PATCH /admin/groups/:id { status: "active" }`. Existing announcements can still be edited or archived.
 14b. **Group `code` is optional on create**; omit it and show the generated code from the response. Write responses (`POST`/`PATCH /admin/groups`) carry counts but not `relationship`.
 14c. **Candidate pickers:** use `GET /admin/users?role=student&status=active&notInGroup=:id` for members and `role=teacher&status=active&notTeacherOfGroup=:id` for teachers. Eligibility is still enforced on add (`GROUP_MEMBER_INELIGIBLE`, `GROUP_TEACHER_INELIGIBLE`).
+14d. **Enrollment picker and re-enrollment:** use `GET /admin/users?role=student&status=active&notEnrolledInCourse=:courseId`; revoked enrollees stay in the list. `POST /admin/courses/:id/enrollments` on a revoked enrollment reinstates it (`201`) but leaves its module grants revoked, so re-grant modules afterwards (`POST .../modules` also reinstates a revoked grant). Expired non-revoked enrollments still return `409 ENROLLMENT_ALREADY_EXISTS`; extend them with `PATCH`. Enrollment list items now include `user.phone` (E.164 or `null`).
 
 ### Not implemented (tables exist, no endpoints)
 

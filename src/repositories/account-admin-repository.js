@@ -44,7 +44,8 @@ const accountOrders = Object.freeze({
 })
 
 // $1 status, $2 role, $3 LIKE pattern (already escaped by the service),
-// $4 group whose active members are excluded, $5 group whose teachers are excluded.
+// $4 group whose active members are excluded, $5 group whose teachers are excluded,
+// $6 course whose non-revoked enrollees are excluded.
 const accountFilterSql = `($1::text IS NULL OR account.status = $1)
    AND ($2::text IS NULL OR EXISTS (
       SELECT 1 FROM user_roles AS membership
@@ -67,6 +68,11 @@ const accountFilterSql = `($1::text IS NULL OR account.status = $1)
    AND ($5::bigint IS NULL OR NOT EXISTS (
       SELECT 1 FROM group_teachers AS excluded_teacher
       WHERE excluded_teacher.group_id = $5 AND excluded_teacher.user_id = account.id
+   ))
+   AND ($6::bigint IS NULL OR NOT EXISTS (
+      SELECT 1 FROM course_enrollments AS excluded_enrollment
+      WHERE excluded_enrollment.course_id = $6 AND excluded_enrollment.user_id = account.id
+        AND excluded_enrollment.revoked_at IS NULL
    ))`
 
 const accountColumns = `account.id, account.status, account.created_at, account.updated_at,
@@ -97,13 +103,14 @@ async function listUsers(filters, db = pool) {
      ${primaryPhoneJoin}
      WHERE ${accountFilterSql}
      ORDER BY ${accountOrders[filters.sort]}
-     LIMIT $6 OFFSET $7`,
+     LIMIT $7 OFFSET $8`,
       [
          filters.status,
          filters.role,
          filters.pattern,
          filters.notInGroup ?? null,
          filters.notTeacherOfGroup ?? null,
+         filters.notEnrolledInCourse ?? null,
          filters.limit,
          filters.offset,
       ],
@@ -123,6 +130,7 @@ async function countUsers(filters, db = pool) {
          filters.pattern,
          filters.notInGroup ?? null,
          filters.notTeacherOfGroup ?? null,
+         filters.notEnrolledInCourse ?? null,
       ],
    )
    return result.rows[0].total

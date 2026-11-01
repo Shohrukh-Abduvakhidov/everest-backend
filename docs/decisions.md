@@ -1,5 +1,11 @@
 # Decisions
 
+## 2026-11-01 — Re-enrollment and enrollment candidate filter
+
+- `POST` on a revoked enrollment or module grant reinstates the existing row (behaviour already present since M06); this slice adds explicit coverage and docs. The audit codes stay `course.enrollment.regranted` / `course.module_access.regranted` instead of a new `enrollment.reinstated` code, to keep audit history under one code. Module grants are never restored by an enrollment reinstatement.
+- `GET /admin/courses/:courseId/enrollments` items expose `user.phone` with the same primary-phone selection and no masking as `GET /admin/users` (both are admin-only).
+- `GET /admin/users?notEnrolledInCourse=:courseId` excludes only non-revoked enrollments (active, scheduled, expired). Expired enrollees are excluded because a new `POST` would return `409`; they are renewed with `PATCH`. A nonexistent course id simply excludes nobody.
+
 ## 2026-10-31 — Optional group codes and archived groups
 
 1. **`code` is optional on `POST /admin/groups`.** When omitted, the server generates `<slug>-<6 hex>` from the name (Russian/Tajik Cyrillic transliterated to latin, `a-z0-9` and hyphens, at most 80 characters, `group` when the name has no usable characters). The insert uses `ON CONFLICT (code) DO NOTHING`, so a collision retries with a new suffix inside the same transaction (up to 5 attempts) and never surfaces `GROUP_CODE_CONFLICT`. Explicit codes keep the existing validation and `409 GROUP_CODE_CONFLICT`. The column and its unique constraint are unchanged; no migration.
