@@ -522,19 +522,49 @@ npm run storage:configure   # only with S3/MinIO: bucket CORS/settings
 
 ### 5.3 Seed and demo accounts
 
-- **There is no seed script and there are no built-in demo accounts.** The migrations seed only the roles and permissions.
-- **Create demo users per role through the API:**
-   1. Register the owner: `POST /auth/register` (`phone`, `password`, `firstName`, `lastName`). The account is `pending`.
-   2. `npm run bootstrap:owner -- --phone +992XXXXXXXXX`. This activates that account and grants `owner`. It works **once** per database (`OWNER_ALREADY_CONFIGURED` afterwards).
-   3. Register the admin, teacher and student accounts the same way.
-   4. As the owner, call `GET /admin/users/pending` and `POST /admin/users/:id/approve` for each.
-   5. Set roles with `PUT /admin/users/:id/roles`:
-      - admin: `["student","admin"]` (owner only);
-      - teacher: `["student","teacher"]`;
-      - student: unchanged.
-   6. Teachers need course or group assignments to see anything: `POST /admin/courses/:id/teachers`, `POST /admin/groups/:id/teachers`.
-   7. Students need `POST /admin/courses/:id/enrollments` plus module grants to open content.
-- **Tests:** `npm test` runs the whole suite in a disposable database and never touches your local data.
+`npm run seed:demo` fills a **disposable** database with demo accounts and content. It goes through the same services as the API, so validation and audit events apply. The migrations themselves seed only roles and permissions.
+
+**Recreate a disposable database and seed it** (the database name must contain `dev`, `test` or `demo`):
+
+```bash
+# 1. Drop and create an empty database (psql; the user needs CREATEDB)
+psql -U postgres -c "DROP DATABASE IF EXISTS everest_demo WITH (FORCE)"
+psql -U postgres -c "CREATE DATABASE everest_demo"
+
+# 2. Point this shell at it. Environment variables override .env, so .env is not edited.
+export DB_NAME=everest_demo          # PowerShell: $env:DB_NAME = 'everest_demo'
+
+# 3. Migrate and seed
+npm run migrate:up
+npm run seed:demo                    # optional: -- --password 'YourPassw0rd123'
+npm run dev
+```
+
+- **Password:** `--password`, else the `SEED_PASSWORD` variable, else a random one that is printed **once** at the end of the run. It is never written to a file. Existing accounts keep their original password, so a rerun does not change it. The password must have 12 to 128 characters with a letter and a number.
+- **Safety:** the script prints the target database first. It refuses to run when `NODE_ENV=production` (even with `--force`) or when `DB_NAME` contains none of `dev`, `test`, `demo` (override with `--force`). It is idempotent: a second run skips what exists and creates nothing.
+- **Never** run it against a real or shared database. There is no `--reset` flag; drop and recreate the database instead.
+
+| Phone | Role | Roles in the API |
+|---|---|---|
+| `+992900000001` | owner | `owner` |
+| `+992900000002` | admin | `["student","admin"]` |
+| `+992900000003` | teacher | `["student","teacher"]` |
+| `+992900000004` to `+992900000008` | 5 students (Aziza, Bahrom, Dilnoza, Eraj, Firuza) | `["student"]` |
+
+All eight accounts are `active` with a completed onboarding profile (last name `Demo`). The owner is created by the same service as `bootstrap:owner`. If the database already has an owner, the script skips the demo owner, says so, and uses that existing owner to approve and configure everything else.
+
+**Content created:**
+
+- 2 subjects (`demo-biology`, `demo-chemistry`).
+- Course "Biology Fundamentals (demo)": **published**, 2 published modules with 3 published text lessons each. The teacher is assigned to the course.
+- Course "Chemistry Basics (draft demo)": **draft**.
+- Group "Demo Group A" (`demo-group-a`) with students 1 to 3 as members, the teacher assigned, and 2 published announcements.
+- Question bank `demo-biology-bank` with 5 published questions, one per type (`single_choice`, `multiple_choice`, `matching`, `numeric`, `short_text`), each with a verified answer key.
+- Students 1 and 2 are enrolled in the published course with grants for both modules. Students 3 to 5 have no enrollment, so they appear in `GET /admin/users?notEnrolledInCourse=:courseId`.
+
+**Manual setup without the script** (the same result through the API): register with `POST /auth/register`, `npm run bootstrap:owner -- --phone +992XXXXXXXXX` (works once per database), then `POST /admin/users/:id/approve`, `PUT /admin/users/:id/roles`, `POST /admin/courses/:id/teachers`, `POST /admin/groups/:id/teachers` and `POST /admin/courses/:id/enrollments` plus module grants.
+
+**Tests:** `npm test` runs the whole suite in a disposable database and never touches your local data. `tests/integration/seed-demo.test.js` creates its own database, runs the seed twice and compares counts.
 
 ---
 
@@ -598,7 +628,7 @@ npm run storage:configure   # only with S3/MinIO: bucket CORS/settings
 
 22. **Production SMS provider:** none is configured; password recovery by SMS is accepted but not delivered. Telegram recovery needs a linked Telegram identity and a bot connection.
 23. **Real S3/MinIO** upload, playback and import were **not verified** in the backend environment (only a storage double in tests).
-24. **No seed or demo-account script** (§5.3). `bootstrap:owner` works once per database.
+24. **Demo data:** `npm run seed:demo` (§5.3) seeds a disposable database. `bootstrap:owner` works once per database.
 25. **`.env.example`** was reported out of date in earlier handoffs (missing `JWT_ACCESS_SECRET`, `OTP_HMAC_SECRET` and `SWAGGER_ENABLED`). Rely on §5.1, not on that file.
 
 ### Documentation inconsistencies

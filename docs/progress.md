@@ -1,10 +1,17 @@
 # EVEREST backend progress
 
-Updated: 2026-11-01.
+Updated: 2026-11-02.
 
 ## Current increment
 
 M09 (indexed book import) is merged (PR #24). The M17 admin-accounts slice (account list, role replacement, owner protection) is implemented on `feat/admin-accounts-api` and is awaiting review. Real-storage (MinIO/S3) import is still **not** verified.
+
+## 2026-11-02 — Development seed script (`feat/dev-seed`)
+
+- `npm run seed:demo` (`scripts/seed-demo.js`): 8 active demo accounts (owner, admin, teacher, 5 students; phones `+992900000001` to `08`) and demo content (2 subjects, a published course with 2 modules and 6 text lessons, a draft course, a group with 3 students, a teacher and 2 announcements, a question bank with 5 published questions of every type, and 2 enrollments with module grants). It uses the existing services only.
+- Safety guards (production, database name, `--force`), idempotent reruns, and the password rules are in `docs/decisions.md` and `docs/frontend-handoff.md` §5.3.
+- **Tests:** `tests/integration/seed-demo.test.js` (own disposable database, two seed runs, count comparison, guard refusals). `npm test` (disposable database): 248 tests, 247 passed, 0 failed, 1 skipped (real S3 storage, unconfigured). No migration was added.
+- **Not verified:** a run against a long-lived local development database, the seeded data through the HTTP API and the frontend, and a seed against an existing owner other than the demo owner (the code path exists but has no test).
 
 ## 2026-11-01 — Re-enrollment and enrollment API improvements (`feat/enrollment-reinstate`)
 

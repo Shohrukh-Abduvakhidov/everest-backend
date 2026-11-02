@@ -15,6 +15,7 @@
     "migrate:down": "node src/configs/migrate.js down",
     "migrate:create": "node-pg-migrate create -m src/migrations -j js",
     "bootstrap:owner": "node scripts/bootstrap-owner.js",
+    "seed:demo": "node scripts/seed-demo.js",
     "storage:configure": "node scripts/configure-storage-bucket.js",
     "video:faststart": "node scripts/remux-faststart.js",
     "import:questions": "node scripts/import-question-package.js",
