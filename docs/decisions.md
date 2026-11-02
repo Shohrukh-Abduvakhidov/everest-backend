@@ -442,3 +442,14 @@ M02B registration accepts a normalizable E.164 phone, first and last names, and 
 Passwords must be 12–128 Unicode characters and contain at least one letter and one number. They are hashed asynchronously with Node.js `scrypt` using a random 16-byte salt, cost `N=16384`, `r=8`, `p=1`, and a 64-byte derived key. Stored hashes are self-describing. Verification uses `timingSafeEqual`, and unknown-phone login verifies against a valid dummy hash to reduce timing differences.
 
 Password login uses a generic invalid-credentials response for unknown phones and wrong passwords. A correct password still requires an active account. Session creation, `last_login_at`, and a successful-login audit share one transaction; the access token uses the same server-side session and HttpOnly cookie contract as Telegram login.
+
+## 2026-11-02 — Development seed script
+
+`npm run seed:demo` (`scripts/seed-demo.js`) seeds demo accounts and content through the existing services, so validation and audit events apply. It adds no SQL and no migration.
+
+- **Safety.** It prints the target database before doing anything. It refuses `NODE_ENV=production` unconditionally, and refuses a `DB_NAME` that contains none of `dev`, `test` or `demo` unless `--force` is passed. There is no `--reset` flag; a disposable database is recreated instead.
+- **Idempotency by lookup.** Each step looks the entity up (phone, subject code, course/module/lesson title, group and bank code, question external id) or treats the service's own conflict code as "exists". A rerun after an interrupted run resumes at the first unfinished step.
+- **Owner.** The demo owner is created with `bootstrapOwnerService`, as in `bootstrap:owner`. If an owner already exists, the demo owner is skipped and reported, and that existing owner acts as the actor for approvals and role changes.
+- **Passwords.** `--password`, else `SEED_PASSWORD`, else a random password printed once. It is never stored. Reruns do not reset the password of an existing account.
+- **Roles.** They are raised only from the bare `student` role, so manual role changes after seeding are kept.
+- **Test.** `tests/integration/seed-demo.test.js` creates its own database, because a seeded owner would otherwise leak into the shared disposable database used by the other tests.
