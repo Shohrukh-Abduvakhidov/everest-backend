@@ -62,6 +62,49 @@ Rules:
 - A section or parent from another subject returns `422 TAXONOMY_SUBJECT_MISMATCH`. A parent that would create a cycle (including the topic itself) returns `409 TOPIC_CYCLE`.
 - Other errors: `400 INVALID_SUBJECT_ID|INVALID_SECTION_ID|INVALID_TOPIC_ID`, `404 SUBJECT|SECTION|TOPIC_NOT_FOUND`, `409 SECTION_IN_USE|TOPIC_IN_USE`.
 
+## Test authoring APIs (M10)
+
+All mutations need CSRF for cookie sessions, use the administrative rate limit, and write the change and its audit event in one transaction. Rules and their reasons are in `docs/decisions.md`.
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| GET | `/admin/tests` | `tests.read` | List in scope; `limit`, `offset`, `courseId`, `status`; `hasMore` |
+| POST | `/admin/tests` | `tests.manage` | Create a draft |
+| GET | `/admin/tests/:testId` | `tests.read` | Test with questions |
+| PATCH | `/admin/tests/:testId` | `tests.manage` | Edit draft settings |
+| DELETE | `/admin/tests/:testId` | `tests.manage` | Delete a draft |
+| POST | `/admin/tests/:testId/questions` | `tests.manage` | Add up to 100 questions |
+| PUT | `/admin/tests/:testId/questions/order` | `tests.manage` | Replace the order (full list) |
+| DELETE | `/admin/tests/:testId/questions/:questionId` | `tests.manage` | Remove a question |
+| PUT | `/admin/tests/:testId/questions/:questionId/points` | `tests.manage` | Set points |
+| POST | `/admin/tests/:testId/publish` | `tests.publish` | Publish a draft |
+| POST | `/admin/tests/:testId/archive` | `tests.manage` | Archive a published test |
+| POST | `/admin/tests/:testId/copy` | `tests.manage` | Copy as a draft |
+| GET | `/admin/tests/:testId/assignments` | `tests.read` | List; `limit`, `offset`, `status`; `hasMore` |
+| POST | `/admin/tests/:testId/assignments` | `tests.assign` | Assign to one group or one student |
+| PATCH | `/admin/tests/:testId/assignments/:assignmentId` | `tests.assign` | Change `opensAt`, `closesAt` |
+| DELETE | `/admin/tests/:testId/assignments/:assignmentId` | `tests.assign` | Revoke (the row stays) |
+
+**Scope.** Owner/admin reach every test. A teacher needs the `teacher` role and `course_teachers.can_manage_tests` on the test's course; otherwise `404 TEST_NOT_FOUND` or `404 COURSE_NOT_FOUND`. Assigning to a group also needs `group_teachers.can_assign_tests`; otherwise `404 GROUP_NOT_FOUND`. `tests.publish` is owner/admin only.
+
+**Settings** (`POST` needs `courseId` and `title`; `courseId` cannot change):
+
+| Field | Values | Default |
+|---|---|---|
+| `mode` | `lesson`, `practice`, `exam` (needs a time limit) | `practice` |
+| `timeLimitMinutes` | 1 to 1440, or `null` | `null` |
+| `maxAttempts` | 1 to 1000, or `null` for unlimited | 1 |
+| `resultPolicy` | `first`, `best`, `last` | `first` |
+| `answerRevealPolicy` | `after_submission`, `after_window`, `never` | `after_submission` |
+| `shuffleQuestions`, `shuffleOptions` | boolean | `false` |
+| `passPercent` | 0 to 100, or `null` | `null` |
+
+**Lifecycle.** `draft → published → archived`. Only drafts change; otherwise `409 TEST_IMMUTABLE`. Publishing needs at least one question and every question published with a verified key (`409 TEST_NOT_PUBLISHABLE`).
+
+**Questions.** `{ "questions": [{ "questionId": "1", "points": 2.5 }] }`. Points default to 1 and come back as decimal strings. Questions must be published, have a verified key (`409 QUESTION_NOT_ELIGIBLE`) and sit in a bank the actor can read (`404 QUESTION_NOT_FOUND`). Responses never carry answer keys.
+
+**Assignments.** Send exactly one of `groupId` and `userId`, plus optional `opensAt` and `closesAt`. The test must be published (`409 TEST_NOT_PUBLISHED`). A student needs a current enrollment (`409 STUDENT_NOT_ENROLLED`); a group must be active (`409 GROUP_ARCHIVED`) and grants no course access. An audience has one active assignment per test (`409 ASSIGNMENT_DUPLICATE`). `after_window` tests need `closesAt`. Revoked assignments cannot change (`409 ASSIGNMENT_NOT_ACTIVE`).
+
 ## Question bank APIs (M08)
 
 All routes are under `/api/v1/admin` and are staff-only. Students have none of these permissions.

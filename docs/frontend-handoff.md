@@ -366,6 +366,29 @@ Validation errors are `400` with `code: "VALIDATION_ERROR"` and one entry in `de
 - **Topic**: { id?: Id, subjectId?: Id, sectionId?: Id or null, parentId?: Id or null, code?: string, primaryLanguage?: LanguageCode, title?: string?, translations?: TitleTranslations }
 - **Upload**: { id?: Id, assetId?: Id, courseId?: Id, kind?: video/material, fileName?: string, mimeType?: string, sizeBytes?: integer, partSizeBytes?: integer, partCount?: integer, status?: initiated/completed/aborted/rejected/expired, rejectionCode?: string?, createdAt?: string, expiresAt?: string, completedAt?: string?, abortedAt?: string? }
 
+### Admin: tests (M10)
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| GET | `/admin/tests` | `tests.read` | List in scope; `limit`, `offset`, `courseId`, `status`; `hasMore` |
+| POST | `/admin/tests` | `tests.manage` | Create a draft |
+| GET | `/admin/tests/:testId` | `tests.read` | Test with questions |
+| PATCH | `/admin/tests/:testId` | `tests.manage` | Edit draft settings |
+| DELETE | `/admin/tests/:testId` | `tests.manage` | Delete a draft |
+| POST | `/admin/tests/:testId/questions` | `tests.manage` | Add up to 100 questions |
+| PUT | `/admin/tests/:testId/questions/order` | `tests.manage` | Replace the order (full list) |
+| DELETE | `/admin/tests/:testId/questions/:questionId` | `tests.manage` | Remove a question |
+| PUT | `/admin/tests/:testId/questions/:questionId/points` | `tests.manage` | Set points |
+| POST | `/admin/tests/:testId/publish` | `tests.publish` | Publish a draft |
+| POST | `/admin/tests/:testId/archive` | `tests.manage` | Archive a published test |
+| POST | `/admin/tests/:testId/copy` | `tests.manage` | Copy as a draft |
+| GET | `/admin/tests/:testId/assignments` | `tests.read` | List; `limit`, `offset`, `status`; `hasMore` |
+| POST | `/admin/tests/:testId/assignments` | `tests.assign` | Assign to one group or one student |
+| PATCH | `/admin/tests/:testId/assignments/:assignmentId` | `tests.assign` | Change `opensAt`, `closesAt` |
+| DELETE | `/admin/tests/:testId/assignments/:assignmentId` | `tests.assign` | Revoke (the row stays) |
+
+Exact bodies and error codes are in Swagger and `docs/api.md`.
+
 ---
 
 ## 3. Permission matrix
@@ -388,6 +411,8 @@ As seeded by the migrations:
 | `taxonomy.manage` | ✓ | ✓ | — | — |
 | `questions.read`, `questions.manage` | ✓ | ✓ | ✓ (own banks / staff-visible banks) | — |
 | `questions.review` | ✓ | ✓ | — | — |
+| `tests.read`, `tests.manage`, `tests.assign`, `tests.results.read` | ✓ | ✓ | ✓ scoped | — |
+| `tests.publish` | ✓ | ✓ | — | — |
 
 Notes:
 
@@ -396,7 +421,8 @@ Notes:
    - courses, modules and lessons: only courses the teacher is assigned to; editing also needs the assignment flags `canEditCourse` / `canManageLessons`;
    - uploads: an assigned teacher with `canManageLessons`;
    - groups: assigned groups, and announcements only when the assignment allows publishing;
-   - question banks: the teacher's own banks for writes; own and staff-visible banks for reads.
+   - question banks: the teacher's own banks for writes; own and staff-visible banks for reads;
+   - tests: courses with `canManageTests`; a group assignment also needs `canAssignTests` on the group.
 - **Missing permission:** most routes return `403 ACTION_FORBIDDEN`; account-administration routes return `403 ADMIN_ROLE_REQUIRED`. A missing scope (resource not visible to the actor) returns the resource's `404`.
 
 ### 3.2 Account actions: who may act on whom
@@ -581,7 +607,7 @@ All eight accounts are `active` with a completed onboarding profile (last name `
 | Courses & learning | `courses`, `course_teachers`, `course_modules`, `lessons`, `lesson_video_chapters`, `lesson_resources`, `course_enrollments`, `module_access_grants`, `lesson_progress`, `lesson_notes`, `course_favorites`, `learning_activity_events`, `offline_downloads` | course → modules → lessons; enrollments and module grants per user (separate, admin-granted) | yes (notes, favorites, activity: schema only) |
 | Assets | `assets`, `asset_uploads`, `asset_aliases` | uploads → asset + course; aliases (namespace, externalId) → asset | yes (uploads); aliases via import |
 | Question bank | `question_banks`, `questions`, `question_options`, `question_matching_items`, `question_answer_keys`, `question_topics`, `question_assets`, `question_duplicate_links`, `question_imports`, `question_import_errors` | bank → subject, owner; question → bank; options, items, key, topics, assets → question; correctness only in `question_answer_keys` | yes (admin); import via CLI; read-only run API |
-| Tests & attempts | `tests`, `test_questions`, `test_assignments`, `test_attempts`, `attempt_questions`, `student_answers`, `attempt_score_revisions` | — | **no API yet** (M10/M11) |
+| Tests & attempts | `tests`, `test_questions`, `test_assignments`, `test_attempts`, `attempt_questions`, `student_answers`, `attempt_score_revisions` | tests → course; test_questions → test + question | authoring and assignment yes (M10); attempts **no API** (M11) |
 | AI | `ai_*` (11 tables) | — | **no API** |
 | Bonus & achievements | `bonus_*` (5 tables), `achievements`, `user_achievements` | — | **no API** |
 | Notifications | `notifications`, `notification_deliveries`, `notification_preferences`, `push_subscriptions`, `broadcast_campaigns` | — | **no API** (only a Telegram test message) |
@@ -613,10 +639,14 @@ All eight accounts are `active` with a completed onboarding profile (last name `
 14b. **Group `code` is optional on create**; omit it and show the generated code from the response. Write responses (`POST`/`PATCH /admin/groups`) carry counts but not `relationship`.
 14c. **Candidate pickers:** use `GET /admin/users?role=student&status=active&notInGroup=:id` for members and `role=teacher&status=active&notTeacherOfGroup=:id` for teachers. Eligibility is still enforced on add (`GROUP_MEMBER_INELIGIBLE`, `GROUP_TEACHER_INELIGIBLE`).
 14d. **Enrollment picker and re-enrollment:** use `GET /admin/users?role=student&status=active&notEnrolledInCourse=:courseId`; revoked enrollees stay in the list. `POST /admin/courses/:id/enrollments` on a revoked enrollment reinstates it (`201`) but leaves its module grants revoked, so re-grant modules afterwards (`POST .../modules` also reinstates a revoked grant). Expired non-revoked enrollments still return `409 ENROLLMENT_ALREADY_EXISTS`; extend them with `PATCH`. Enrollment list items now include `user.phone` (E.164 or `null`).
+14e. **Published tests are fully frozen.** Only archive and copy work; show settings as read-only. Tests have no translations, no module or lesson link, and no per-assignment time or attempt overrides.
+14f. **Points and `totalPoints` are decimal strings** such as `"2.50"`. Do not treat them as numbers for display.
+14g. **`DELETE` on an assignment revokes it**, and the row stays in the list with `status: "revoked"`.
+14h. **`tests.results.read` has no endpoint yet.** Results arrive with attempts in M11.
 
 ### Not implemented (tables exist, no endpoints)
 
-15. Tests, assignments, attempts and grading (M10/M11).
+15. Attempts, grading and results (M11).
 16. Progress analytics, notes, favorites and activity APIs.
 17. Notifications and inbox, broadcast campaigns, Web Push.
 18. AI chat and budgets.
