@@ -34,6 +34,7 @@ Mapping and additions:
 - **Assignment rules:** the test must be published; the group must be active; one active assignment per test and audience (`409 ASSIGNMENT_DUPLICATE`, serialized by the test row lock); `closesAt` must be later than `opensAt` and in the future on create; `after_window` tests need a `closesAt`, otherwise results would never open.
 - Archiving a test leaves its assignments as they are. M11 must refuse a start on a test that is not published.
 - Deleting a draft that has copies returns `409 TEST_HAS_COPIES`: `copied_from_id` is `ON DELETE RESTRICT`.
+- Questions are added by hand. Selection by parameters (`generation_filters`), listed in the roadmap, was not requested here and is not built.
 
 Open for M11:
 
