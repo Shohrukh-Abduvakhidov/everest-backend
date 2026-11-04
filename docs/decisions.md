@@ -1,5 +1,44 @@
 # Decisions
 
+## 2026-11-04 — M10 test authoring and assignment
+
+Made without the user (the task ran unattended); please review. The learner side is M11.
+
+**Migration.** `20261101010000000_add-test-authoring.js` adds `tests.course_id` (required, indexed) and the five permissions. A migration was needed because `tests` had no link to a course, while a test must belong to a course and teacher scope comes from `course_teachers` of that course. `test_assignments.course_id` cannot replace it: it is one of four exclusive audiences. No API has ever written `tests`, so the `NOT NULL` needs no backfill; on a database that already has rows the migration stops without changing anything. Two fixtures that inserted raw `tests` rows were updated.
+
+Deviations from the requested defaults, all because of the schema:
+
+1. **No translations.** `tests` has no translations column. Only `title`.
+2. **No module or lesson link.** The column does not exist, and this is not worth a migration without a rule that needs it. The audience columns `course_id` and `lesson_id` of `test_assignments` stay unused by the API.
+3. **No per-assignment overrides** of time limit or attempts: `test_assignments` has no columns for them.
+4. **No snapshot columns.** `test_questions` is the reference, and nothing more is needed: triggers already make published questions, their options, matching items, keys, assets and topics immutable, block their deletion, and block a return to draft. Archiving a question changes only its status, and it stays in published tests. Grading snapshots per attempt are `attempt_questions.grading_snapshot` (M11).
+5. **No settings can change on a published test.** The `guard_test` trigger allows only a status change. So a published test can only be archived or copied, and `PATCH` returns `409 TEST_IMMUTABLE`.
+6. **Show-results policy** maps to `answer_reveal_policy`: `after_submission`, `after_window`, `never`. The value `after_answer` exists in the schema but is not accepted, because it was not requested.
+7. **Assignment `DELETE` revokes** (`status = 'revoked'`) instead of deleting, so M11 attempts keep their assignment. The row stays in the list.
+
+Mapping and additions:
+
+- Time limit is `timeLimitMinutes` (1 to 1440) stored as `duration_seconds`.
+- `maxAttempts` defaults to 1 in the service, because the column has no default; explicit `null` means unlimited.
+- `passPercent` is stored in `grading_policy`. Its meaning in grading is for M11.
+- `mode` is required by the schema: `lesson`, `practice` (default) or `exam`. `exam` needs a time limit (database CHECK). `nct` is refused because the NCT rules are an open product decision.
+- `resultPolicy` (`first`, default, `best`, `last`) is stored as the schema offers it; M11 applies it.
+- Points are `NUMERIC(10,2)`, so they are decimal strings in responses. Requests accept a number or a string, above 0, at most 9999.99, at most 2 decimals.
+- `counts_for_group_ranking` stays false: the ranking formula is not approved.
+- **Teacher scope is the same for read, manage and assign:** the `teacher` role plus `course_teachers.can_manage_tests`. Outside it the test returns `404 TEST_NOT_FOUND` and the course `404 COURSE_NOT_FOUND`. `tests.publish` is owner/admin only; a teacher gets `403 ACTION_FORBIDDEN`.
+- **`tests.results.read` is seeded but no endpoint uses it yet**: results need attempts (M11). Its scope (`can_view_results`) is applied there.
+- **Extra rule, not requested:** a teacher can assign only to a group where `group_teachers.can_assign_tests` is true; otherwise `404 GROUP_NOT_FOUND`. The flag exists for this, and without the rule a teacher could reach any group.
+- **Question eligibility:** published, verified key, and in a bank the actor can read (same rule as M08). An unreadable question returns `404 QUESTION_NOT_FOUND`. The subject of the question is not compared with the subject of the course.
+- **Individual assignment** needs an active user with an enrollment in the test's course that is not revoked or expired (`409 STUDENT_NOT_ENROLLED`). A scheduled enrollment counts, because the assignment may open later.
+- **Group assignment** does not check members. Groups grant nothing, so M11 must check each student at start.
+- **Assignment rules:** the test must be published; the group must be active; one active assignment per test and audience (`409 ASSIGNMENT_DUPLICATE`, serialized by the test row lock); `closesAt` must be later than `opensAt` and in the future on create; `after_window` tests need a `closesAt`, otherwise results would never open.
+- Archiving a test leaves its assignments as they are. M11 must refuse a start on a test that is not published.
+- Deleting a draft that has copies returns `409 TEST_HAS_COPIES`: `copied_from_id` is `ON DELETE RESTRICT`.
+
+Open for M11:
+
+- Tests have no module, so "module grant" at start has no defined target. Options: require any current module grant in the course, or add a nullable `tests.module_id`.
+
 ## 2026-11-01 — Re-enrollment and enrollment candidate filter
 
 - `POST` on a revoked enrollment or module grant reinstates the existing row (behaviour already present since M06); this slice adds explicit coverage and docs. The audit codes stay `course.enrollment.regranted` / `course.module_access.regranted` instead of a new `enrollment.reinstated` code, to keep audit history under one code. Module grants are never restored by an enrollment reinstatement.
