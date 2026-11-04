@@ -51,6 +51,9 @@ async function counts(databaseName) {
          verifiedKeys: await scalar(`SELECT count(*) FROM question_answer_keys WHERE status = 'verified'`),
          enrollments: await scalar(`SELECT count(*) FROM course_enrollments`),
          moduleGrants: await scalar(`SELECT count(*) FROM module_access_grants`),
+         publishedTests: await scalar(`SELECT count(*) FROM tests WHERE status = 'published'`),
+         testQuestions: await scalar(`SELECT count(*) FROM test_questions`),
+         groupAssignments: await scalar(`SELECT count(*) FROM test_assignments WHERE group_id IS NOT NULL AND status = 'active'`),
       }
    } finally {
       await client.end()
@@ -107,6 +110,9 @@ test('demo seed is idempotent and refuses unsafe targets', async (t) => {
             verifiedKeys: 5,
             enrollments: 2,
             moduleGrants: 4,
+            publishedTests: 1,
+            testQuestions: 5,
+            groupAssignments: 1,
          })
 
          const second = await run(['scripts/seed-demo.js', '--password', seedPassword], databaseName)

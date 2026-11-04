@@ -60,8 +60,8 @@ try {
   );
 
   const testId = await insertReturningId(
-    'INSERT INTO tests (title, mode, created_by) VALUES ($1, $2, $3)',
-    ['Integrity test', 'practice', adminId]
+    'INSERT INTO tests (title, mode, created_by, course_id) VALUES ($1, $2, $3, $4)',
+    ['Integrity test', 'practice', adminId, courseOne]
   );
   const groupId = await insertReturningId(
     'INSERT INTO groups (code, title, created_by) VALUES ($1, $2, $3)',

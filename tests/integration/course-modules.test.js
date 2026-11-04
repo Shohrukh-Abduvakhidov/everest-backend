@@ -204,8 +204,8 @@ test('course modules, preview and copy integration', async (t) => {
             [moduleIds[1], courseId, adminId],
          )
          const createdTest = await client.query(
-            "INSERT INTO tests (title, mode, created_by) VALUES ('Quiz', 'practice', $1) RETURNING id",
-            [adminId],
+            "INSERT INTO tests (title, mode, created_by, course_id) VALUES ('Quiz', 'practice', $1, $2) RETURNING id",
+            [adminId, courseId],
          )
          await client.query(
             'INSERT INTO test_assignments (test_id, lesson_id, assigned_by) VALUES ($1, $2, $3)',

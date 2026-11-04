@@ -48,6 +48,15 @@ import {
    replaceAnswerKeyService,
    verifyAnswerKeyService,
 } from '../src/services/question-bank-service.js'
+import {
+   addTestQuestionsService,
+   createAssignmentService,
+   createTestService,
+   getTestService,
+   listAssignmentsService,
+   listTestsService,
+   publishTestService,
+} from '../src/services/test-service.js'
 import { createSubjectService, listSubjectsService } from '../src/services/taxonomy-service.js'
 
 // Development seed: demo accounts and content created through the same services the API
@@ -389,6 +398,7 @@ async function ensureQuestionBank(actorId, subjectId) {
    note('question bank', code, created.created)
 
    const { questions } = await listBankQuestionsService(actorId, bank.id, { limit: '100' })
+   const questionIds = []
    for (const definition of demoQuestions) {
       let question = questions.find((item) => item.externalId === definition.externalId)
       const questionCreated = !question
@@ -417,7 +427,31 @@ async function ensureQuestionBank(actorId, subjectId) {
          await publishQuestionService(actorId, question.id)
       }
       note('question', definition.externalId, questionCreated)
+      questionIds.push(question.id)
    }
+   return questionIds
+}
+
+async function ensureDemoTest(actorId, courseId, questionIds, groupId) {
+   const title = 'Biology Fundamentals quiz (demo)'
+   const { tests } = await listTestsService(actorId, { courseId, limit: '100' })
+   const existing = tests.find((item) => item.title === title)
+   const test = existing || await createTestService(actorId, { courseId, title, passPercent: 60 })
+   note('test', title, !existing)
+   // A rerun after an interrupted run resumes at the first unfinished step.
+   if (test.status === 'draft') {
+      const { questions } = await getTestService(actorId, test.id)
+      if (!questions.length) {
+         await addTestQuestionsService(actorId, test.id, {
+            questions: questionIds.map((questionId) => ({ questionId })),
+         })
+      }
+      await publishTestService(actorId, test.id)
+   }
+   const { assignments } = await listAssignmentsService(actorId, test.id, { status: 'active' })
+   const assigned = assignments.some((item) => item.groupId === groupId)
+   if (!assigned) await createAssignmentService(actorId, test.id, { groupId })
+   note('test assignment', `${title} / group ${groupId}`, !assigned)
 }
 
 async function ensureEnrollments(actorId, courseId, moduleIds, studentIds) {
@@ -472,6 +506,7 @@ async function seedContent(actorId, userIds) {
          canEditCourse: true,
          canManageLessons: true,
          canManageQuestions: true,
+         canManageTests: true,
          canViewResults: true,
       }),
       ['COURSE_TEACHER_ALREADY_ASSIGNED'],
@@ -479,8 +514,9 @@ async function seedContent(actorId, userIds) {
    note('course teacher', `user ${userIds.teacher}`, courseTeacher.created)
 
    const studentIds = [userIds.student1, userIds.student2, userIds.student3, userIds.student4, userIds.student5]
-   await ensureGroup(actorId, studentIds.slice(0, 3), userIds.teacher)
-   await ensureQuestionBank(actorId, biologyId)
+   const groupId = await ensureGroup(actorId, studentIds.slice(0, 3), userIds.teacher)
+   const questionIds = await ensureQuestionBank(actorId, biologyId)
+   await ensureDemoTest(actorId, course.id, questionIds, groupId)
    await ensureEnrollments(actorId, course.id, moduleIds, studentIds.slice(0, 2))
 }
 

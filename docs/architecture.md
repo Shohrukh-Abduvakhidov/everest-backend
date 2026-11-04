@@ -508,6 +508,8 @@ M09 implementation (indexed book import):
 
 Implemented database protection includes composite ownership FKs, one simultaneously open attempt per assignment/user, answer-to-attempt-question consistency, numeric/status checks, published test/question immutability, and append-only score revisions. The schema does not by itself implement timers, autosave conflict responses, finalization locks, submission, grading, expiry workers, result reveal policy, or student-safe serialization; all corresponding APIs/services/repositories remain planned.
 
+M10 implements authoring: `routes/admin.js` → `test-admin-middleware` → `test-controller` → `test-service` → `test-repository`. Each mutation locks the test row, so question changes and duplicate assignment checks serialize. `tests.course_id` sets teacher scope. `test_questions` references questions directly, because published question content is immutable by trigger.
+
 ## 17. Notification architecture
 
 In-app notification records (`notifications`) are distinct from delivery attempts (`notification_deliveries`). `notification_preferences` enables channels per event. Broadcast campaigns snapshot content/audience/channels and lifecycle. Telegram destinations come from `telegram_connections`; Web Push destinations come from `push_subscriptions` and contain separate browser permission/key material.
@@ -610,7 +612,7 @@ Actual response envelopes:
 | Courses/access | Partial | M05-A catalog/lifecycle/teachers, M05-B modules/preview/copy and M06 enrollments/module grants/learner locks and M07-B lessons/playback/offline done against a storage double |
 | Media storage | Partial | M07-A S3 multipart uploads and content/codec/seek-ready verification done against a storage double; real MinIO/S3 and Range-seek verification pending |
 | Question bank | Partial | M08 taxonomy, banks, draft authoring, answer keys, review, publication and copy done; M09 CLI package import (dry run, idempotent runs, batches, image dedup/aliases, duplicate suggestions) and read-only run API done; real-storage import not verified |
-| Test engine | Planned | Schema/DB constraints only |
+| Test engine | Partial | M10 authoring, publication and assignment done; attempts and grading planned (M11) |
 | Progress | Planned | Schema only |
 | Notifications | Partial | Telegram connection/test only |
 | AI | Planned | Schema only |

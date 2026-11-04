@@ -38,6 +38,12 @@ const pagination = ref('Pagination')
 const page = (key, item) => obj({ [key]: arr(item), pagination }, [key, 'pagination'])
 const deleted = () => obj({ id: id(), status: str({ const: 'deleted' }) }, ['id', 'status'])
 
+const testModes = ['lesson', 'practice', 'exam']
+const testResultPolicies = ['first', 'best', 'last']
+const testRevealPolicies = ['after_submission', 'after_window', 'never']
+const testAssignmentStatuses = ['active', 'revoked', 'closed']
+const testPoints = () => str({ pattern: '^[0-9]+(\\.[0-9]{1,2})?$', description: 'Decimal string', examples: ['1.00'] })
+
 const schemas = {
    Id: str({
       pattern: '^[1-9][0-9]*$',
@@ -459,6 +465,55 @@ const schemas = {
       bookSectionTitle: str(), bookRubric: str(), isSample: bool(), reviewRequired: bool(),
       examPart: arr(str({ maxLength: 20 }), { minItems: 1, maxItems: 10 }),
    }),
+   Test: obj({
+      id: id(),
+      courseId: id(),
+      title: str(),
+      mode: enumOf(testModes),
+      timeLimitMinutes: nullable(int()),
+      maxAttempts: nullable(int({ description: 'null means unlimited' })),
+      resultPolicy: enumOf(testResultPolicies),
+      answerRevealPolicy: enumOf(testRevealPolicies),
+      shuffleQuestions: bool(),
+      shuffleOptions: bool(),
+      passPercent: nullable(num()),
+      status: enumOf(['draft', 'published', 'archived']),
+      questionCount: int(),
+      totalPoints: testPoints(),
+      activeAssignmentCount: int(),
+      copiedFromId: nullable(id()),
+      createdBy: id(),
+      createdAt: dt(),
+      updatedAt: dt(),
+   }),
+   TestQuestion: obj({
+      questionId: id(),
+      bankId: id(),
+      position: int(),
+      points: testPoints(),
+      questionType: str(),
+      languageCode: ref('LanguageCode'),
+      status: enumOf(['draft', 'published', 'archived']),
+      keyStatus: enumOf(['unknown', 'proposed', 'verified']),
+      content: ref('RichContent'),
+   }, [], { description: 'Never carries the answer key.' }),
+   TestDetail: {
+      allOf: [ref('Test'), obj({ questions: arr(ref('TestQuestion')) }, ['questions'])],
+   },
+   TestAssignment: obj({
+      id: id(),
+      testId: id(),
+      audienceType: enumOf(['group', 'user']),
+      groupId: nullable(id()),
+      groupTitle: nullable(str()),
+      userId: nullable(id()),
+      userDisplayName: nullable(str()),
+      status: enumOf(testAssignmentStatuses),
+      opensAt: dt(),
+      closesAt: nullable(dt()),
+      assignedBy: id(),
+      createdAt: dt(),
+   }),
    QuestionBank: obj({
       id: id(),
       code: str(),
@@ -601,6 +656,18 @@ const questionFields = {
    }, ['left', 'right']),
    topicIds: arr(id(), { maxItems: 20, uniqueItems: true }),
 }
+const testFields = {
+   title: str({ minLength: 1, maxLength: 200 }),
+   mode: enumOf(testModes, { description: 'Default practice. exam needs a time limit.' }),
+   timeLimitMinutes: nullable(int({ minimum: 1, maximum: 1440 })),
+   maxAttempts: nullable(int({ minimum: 1, maximum: 1000, description: 'Default 1; null means unlimited' })),
+   resultPolicy: enumOf(testResultPolicies),
+   answerRevealPolicy: enumOf(testRevealPolicies),
+   shuffleQuestions: bool(),
+   shuffleOptions: bool(),
+   passPercent: nullable(num({ minimum: 0, maximum: 100 })),
+}
+const pointsInput = () => ({ type: ['number', 'string'], description: 'Above 0, at most 9999.99, at most 2 decimals' })
 const announcementFields = {
    title: str({ maxLength: 200 }),
    content: str({ maxLength: 10000 }),
@@ -1331,6 +1398,86 @@ const routes = [
       query: [...limitQuery, { name: 'severity', schema: enumOf(['warning', 'error']) }],
       response: page('entries', ref('QuestionImportEntry')),
       errors: { 400: ['VALIDATION_ERROR', 'INVALID_IMPORT_ID'], 404: ['QUESTION_IMPORT_NOT_FOUND'] },
+   }],
+   // Admin: tests
+   ['get', '/admin/tests', {
+      tag: 'Admin: tests', ...adminRead('tests.read'), summary: 'Tests in scope',
+      query: [...limitQuery, { name: 'courseId', schema: id() }, { name: 'status', schema: enumOf(['draft', 'published', 'archived']) }],
+      response: page('tests', ref('Test')),
+   }],
+   ['post', '/admin/tests', {
+      tag: 'Admin: tests', ...admin('tests.manage'), created: true, summary: 'Create a draft test in a course',
+      body: body({ courseId: id(), ...testFields }, ['courseId', 'title']), response: ref('TestDetail'),
+      errors: { 404: ['COURSE_NOT_FOUND'], 409: ['COURSE_ARCHIVED'] },
+   }],
+   ['get', '/admin/tests/:testId', {
+      tag: 'Admin: tests', ...adminRead('tests.read'), summary: 'Test with its questions', response: ref('TestDetail'),
+      errors: { 400: ['VALIDATION_ERROR', 'INVALID_TEST_ID'], 404: ['TEST_NOT_FOUND'] },
+   }],
+   ['patch', '/admin/tests/:testId', {
+      tag: 'Admin: tests', ...admin('tests.manage'), summary: 'Edit draft settings',
+      body: body(testFields), response: ref('TestDetail'),
+      errors: { 400: ['VALIDATION_ERROR', 'INVALID_TEST_ID'], 404: ['TEST_NOT_FOUND'], 409: ['TEST_IMMUTABLE'] },
+   }],
+   ['delete', '/admin/tests/:testId', {
+      tag: 'Admin: tests', ...admin('tests.manage'), summary: 'Delete a draft', response: deleted(),
+      errors: { 400: ['VALIDATION_ERROR', 'INVALID_TEST_ID'], 404: ['TEST_NOT_FOUND'], 409: ['TEST_IMMUTABLE', 'TEST_HAS_COPIES'] },
+   }],
+   ['post', '/admin/tests/:testId/questions', {
+      tag: 'Admin: tests', ...admin('tests.manage'), created: true, summary: 'Add published questions with verified keys',
+      body: body({
+         questions: arr(body({ questionId: id(), points: pointsInput() }, ['questionId']), { minItems: 1, maxItems: 100 }),
+      }, ['questions']),
+      response: ref('TestDetail'),
+      errors: { 400: ['VALIDATION_ERROR', 'INVALID_TEST_ID'], 404: ['TEST_NOT_FOUND', 'QUESTION_NOT_FOUND'], 409: ['TEST_IMMUTABLE', 'TEST_QUESTION_DUPLICATE', 'TEST_QUESTION_LIMIT', 'QUESTION_NOT_ELIGIBLE'] },
+   }],
+   ['put', '/admin/tests/:testId/questions/order', {
+      tag: 'Admin: tests', ...admin('tests.manage'), summary: 'Replace the question order (full list)',
+      body: body({ questionIds: arr(id(), { minItems: 1 }) }, ['questionIds']), response: ref('TestDetail'),
+      errors: { 400: ['VALIDATION_ERROR', 'INVALID_TEST_ID'], 404: ['TEST_NOT_FOUND'], 409: ['TEST_IMMUTABLE'] },
+   }],
+   ['delete', '/admin/tests/:testId/questions/:questionId', {
+      tag: 'Admin: tests', ...admin('tests.manage'), summary: 'Remove a question; positions close up', response: ref('TestDetail'),
+      errors: { 400: ['VALIDATION_ERROR', 'INVALID_TEST_ID', 'INVALID_QUESTION_ID'], 404: ['TEST_NOT_FOUND', 'TEST_QUESTION_NOT_FOUND'], 409: ['TEST_IMMUTABLE'] },
+   }],
+   ['put', '/admin/tests/:testId/questions/:questionId/points', {
+      tag: 'Admin: tests', ...admin('tests.manage'), summary: 'Set the points of a question',
+      body: body({ points: pointsInput() }, ['points']), response: ref('TestDetail'),
+      errors: { 400: ['VALIDATION_ERROR', 'INVALID_TEST_ID', 'INVALID_QUESTION_ID'], 404: ['TEST_NOT_FOUND', 'TEST_QUESTION_NOT_FOUND'], 409: ['TEST_IMMUTABLE'] },
+   }],
+   ['post', '/admin/tests/:testId/publish', {
+      tag: 'Admin: tests', ...admin('tests.publish'), summary: 'Publish a draft', response: ref('TestDetail'),
+      errors: { 400: ['VALIDATION_ERROR', 'INVALID_TEST_ID'], 404: ['TEST_NOT_FOUND'], 409: ['INVALID_TEST_TRANSITION', 'TEST_NOT_PUBLISHABLE', 'COURSE_ARCHIVED'] },
+   }],
+   ['post', '/admin/tests/:testId/archive', {
+      tag: 'Admin: tests', ...admin('tests.manage'), summary: 'Archive a published test', response: ref('TestDetail'),
+      errors: { 400: ['VALIDATION_ERROR', 'INVALID_TEST_ID'], 404: ['TEST_NOT_FOUND'], 409: ['INVALID_TEST_TRANSITION'] },
+   }],
+   ['post', '/admin/tests/:testId/copy', {
+      tag: 'Admin: tests', ...admin('tests.manage'), created: true, summary: 'Copy as a new draft', response: ref('TestDetail'),
+      errors: { 400: ['VALIDATION_ERROR', 'INVALID_TEST_ID'], 404: ['TEST_NOT_FOUND'], 409: ['COURSE_ARCHIVED'] },
+   }],
+   ['get', '/admin/tests/:testId/assignments', {
+      tag: 'Admin: tests', ...adminRead('tests.read'), summary: 'Assignments of a test',
+      query: [...limitQuery, { name: 'status', schema: enumOf(testAssignmentStatuses) }],
+      response: page('assignments', ref('TestAssignment')),
+      errors: { 400: ['VALIDATION_ERROR', 'INVALID_TEST_ID'], 404: ['TEST_NOT_FOUND'] },
+   }],
+   ['post', '/admin/tests/:testId/assignments', {
+      tag: 'Admin: tests', ...admin('tests.assign'), created: true, summary: 'Assign to one group or one enrolled student',
+      description: 'Send exactly one of groupId and userId. A group grants no course access.',
+      body: body({ groupId: id(), userId: id(), opensAt: dt(), closesAt: nullable(dt()) }), response: ref('TestAssignment'),
+      errors: { 400: ['VALIDATION_ERROR', 'INVALID_TEST_ID'], 404: ['TEST_NOT_FOUND', 'GROUP_NOT_FOUND', 'USER_NOT_FOUND'], 409: ['TEST_NOT_PUBLISHED', 'COURSE_ARCHIVED', 'GROUP_ARCHIVED', 'STUDENT_NOT_ENROLLED', 'ASSIGNMENT_DUPLICATE'] },
+   }],
+   ['patch', '/admin/tests/:testId/assignments/:assignmentId', {
+      tag: 'Admin: tests', ...admin('tests.assign'), summary: 'Change the window of an active assignment',
+      body: body({ opensAt: dt(), closesAt: nullable(dt()) }), response: ref('TestAssignment'),
+      errors: { 400: ['VALIDATION_ERROR', 'INVALID_TEST_ID', 'INVALID_ASSIGNMENT_ID'], 404: ['TEST_NOT_FOUND', 'ASSIGNMENT_NOT_FOUND'], 409: ['ASSIGNMENT_NOT_ACTIVE', 'TEST_NOT_PUBLISHED'] },
+   }],
+   ['delete', '/admin/tests/:testId/assignments/:assignmentId', {
+      tag: 'Admin: tests', ...admin('tests.assign'), summary: 'Revoke an assignment (the row stays)',
+      response: obj({ id: id(), status: str({ const: 'revoked' }) }, ['id', 'status']),
+      errors: { 400: ['VALIDATION_ERROR', 'INVALID_TEST_ID', 'INVALID_ASSIGNMENT_ID'], 404: ['TEST_NOT_FOUND', 'ASSIGNMENT_NOT_FOUND'], 409: ['ASSIGNMENT_NOT_ACTIVE'] },
    }],
 ]
 

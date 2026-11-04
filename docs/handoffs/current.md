@@ -1,44 +1,44 @@
 ---
 project: EVEREST Backend
-current_milestone: Development seed script
+current_milestone: M10 test authoring and assignment
 status: awaiting_review
-branch: feat/dev-seed
-base_commit: 7449006
-updated_at: 2026-11-02
+branch: feat/m10-tests
+base_commit: d44821b
+updated_at: 2026-11-04
 ---
 
 # Current handoff
 
 ## State
 
-- PR #29 (enrollment improvements) is merged into `main`.
-- The development seed is on `feat/dev-seed`; the PR is open for review and must not be merged by the agent.
+- M10 is on `feat/m10-tests`, with a PR open for review. It must not be merged by the agent.
 
 ## Completed work
 
-- `npm run seed:demo` (`scripts/seed-demo.js`): 8 active demo accounts (`+992900000001` owner, `02` admin, `03` teacher, `04` to `08` students) and demo content through the existing services (2 subjects; a published course with 2 modules and 6 text lessons; a draft course; a group with 3 students, the teacher and 2 announcements; a question bank with 5 published questions, one per type; 2 enrollments with module grants).
-- Guards: refuses `NODE_ENV=production`, and a `DB_NAME` without `dev`, `test` or `demo` unless `--force`. Reruns skip what exists.
-- Docs: `docs/frontend-handoff.md` §5.3 (how to recreate a disposable database and seed it), `decisions.md`, `progress.md`.
+- 16 endpoints under `/api/v1/admin/tests`, five `tests.*` permissions, migration `20261101010000000_add-test-authoring.js`.
+- OpenAPI, `docs/api.md`, `docs/frontend-handoff.md`, decisions, progress and roadmap.
+- `seed:demo` creates a published 5-question test assigned to the demo group.
 
-## Verification (2026-11-02)
+## Verification (2026-11-04)
 
-- `npm test` (disposable database): 248 tests, 247 passed, 0 failed, 1 skipped (real S3 storage, unconfigured). Includes `tests/integration/seed-demo.test.js`, which runs the seed twice in its own database and compares counts.
-- No migration was added.
+- `npm test` (disposable database): 260 tests, 259 passed, 0 failed, 1 skipped (real S3 storage, unconfigured).
+- `npm run test:migrations` passed. `verify-database.js` valid.
 
 ## Not verified
 
-- A run against a long-lived local development database, and the seeded data through the HTTP API and the frontend.
-- The path where an owner other than the demo owner already exists (implemented, not tested).
+- The API through the frontend, and a seed rerun on a long-lived database.
+- `tests.results.read`: seeded, but no endpoint uses it until M11.
 
 ## Decisions needed
 
-1. Passwords: a random password is printed once when none is supplied. A fixed default would be easier to remember but would be committed to the repository.
+1. Module grant at test start: tests have no module. Require any current grant in the course, or add `tests.module_id`?
+2. Review the deviations in `docs/decisions.md` (2026-11-04), above all the extra `can_assign_tests` rule and the frozen settings of published tests.
+3. NCT rules, which stay refused as a mode until decided.
 
 ## Next concrete tasks
 
-1. Review and merge the seed PR.
-2. Frontend uses the seeded accounts for local development.
-3. Real S3/MinIO verification and the first real book import (M09 runbook).
+1. Review and merge the M10 PR.
+2. M11: attempts, autosave and grading. Refuse a start on a test that is not published, and check each group student's access at start.
 
 ## Constraints
 

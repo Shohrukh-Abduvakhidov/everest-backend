@@ -7,13 +7,13 @@ const client = new Client(env.database);
 
 const expected = {
   tables: 87,
-  columns: 698,
-  foreignKeys: 164,
-  indexes: 312,
+  columns: 699,
+  foreignKeys: 165,
+  indexes: 313,
   functions: 7,
   triggers: 11,
   roles: 4,
-  migrations: 25,
+  migrations: 26,
   identityColumns: 67,
 };
 
@@ -151,9 +151,9 @@ try {
     && remainingUuidColumns.rowCount === 1
     && remainingUuidColumns.rows[0].table_name === 'sms_deliveries'
     && remainingUuidColumns.rows[0].column_name === 'idempotency_key'
-    && authorizationSeeds.rows[0].permissions === 29
-    && authorizationSeeds.rows[0].role_permissions === 67
-    && authorizationSeeds.rows[0].teacher_grants === 9
+    && authorizationSeeds.rows[0].permissions === 34
+    && authorizationSeeds.rows[0].role_permissions === 81
+    && authorizationSeeds.rows[0].teacher_grants === 13
     && authorizationSeeds.rows[0].student_grants === 0
     && permissionConstraintCode === '23514'
     && generatedIdentity.type === 'bigint'

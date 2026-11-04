@@ -1,10 +1,18 @@
 # EVEREST backend progress
 
-Updated: 2026-11-02.
+Updated: 2026-11-04.
 
 ## Current increment
 
 M09 (indexed book import) is merged (PR #24). The M17 admin-accounts slice (account list, role replacement, owner protection) is implemented on `feat/admin-accounts-api` and is awaiting review. Real-storage (MinIO/S3) import is still **not** verified.
+
+## 2026-11-04 — M10 test authoring and assignment (`feat/m10-tests`)
+
+- 16 admin endpoints, five `tests.*` permissions and migration `20261101010000000_add-test-authoring.js` (`tests.course_id`). Rules and deviations are in `docs/decisions.md`.
+- `seed:demo` adds one published test with 5 questions, assigned to the demo group, and gives the demo teacher `canManageTests` on newly created assignments.
+- `scripts/verify-database.js` and `scripts/test-migration-cycle.js` were updated for the new catalog.
+- **Tests:** `tests/integration/tests-authoring.test.js` (11 subtests). `npm test` (disposable database): 260 tests, 259 passed, 0 failed, 1 skipped (real S3 storage, unconfigured). `verify-database.js` valid on the local database after `migrate:up`.
+- **Not verified:** the API through the frontend; a seed rerun on a long-lived database; `migrate:up` on a database that already has `tests` rows, where it stops by design.
 
 ## 2026-11-02 — Development seed script (`feat/dev-seed`)
 

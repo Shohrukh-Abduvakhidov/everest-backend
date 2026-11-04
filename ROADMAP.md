@@ -1,9 +1,9 @@
 ---
 project: EVEREST Backend
 roadmap_version: 1
-current_milestone: M07-B
+current_milestone: M10
 current_status: in_progress
-updated_at: 2026-10-29
+updated_at: 2026-11-04
 architecture: docs/architecture.md
 ---
 
@@ -289,7 +289,7 @@ This roadmap orders implementation; it does not replace the [current architectur
 
 ## M10 — Test constructor and assignments
 
-- **Status:** Planned
+- **Status:** Implemented, awaiting review (`feat/m10-tests`). Parameter-based question selection and course or lesson audiences are not built; see `docs/decisions.md`.
 - **Goal:** Author, publish, and assign tests with explicit policies.
 - **Dependencies:** M04–M06 and M08.
 - **Deliverables:** Test creation, manual/parameter selection, publication, course/user/group audiences, timing, and attempt policies.
