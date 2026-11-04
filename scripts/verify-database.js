@@ -151,9 +151,9 @@ try {
     && remainingUuidColumns.rowCount === 1
     && remainingUuidColumns.rows[0].table_name === 'sms_deliveries'
     && remainingUuidColumns.rows[0].column_name === 'idempotency_key'
-    && authorizationSeeds.rows[0].permissions === 29
-    && authorizationSeeds.rows[0].role_permissions === 67
-    && authorizationSeeds.rows[0].teacher_grants === 9
+    && authorizationSeeds.rows[0].permissions === 34
+    && authorizationSeeds.rows[0].role_permissions === 81
+    && authorizationSeeds.rows[0].teacher_grants === 13
     && authorizationSeeds.rows[0].student_grants === 0
     && permissionConstraintCode === '23514'
     && generatedIdentity.type === 'bigint'

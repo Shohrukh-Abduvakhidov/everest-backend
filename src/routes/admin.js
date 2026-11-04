@@ -148,6 +148,30 @@ import {
    listQuestionImportErrorsController,
    listQuestionImportsController,
 } from '../controllers/question-import-controller.js'
+import {
+   addTestQuestionsController,
+   archiveTestController,
+   copyTestController,
+   createAssignmentController,
+   createTestController,
+   deleteTestController,
+   getTestController,
+   listAssignmentsController,
+   listTestsController,
+   publishTestController,
+   removeTestQuestionController,
+   reorderTestQuestionsController,
+   revokeAssignmentController,
+   updateAssignmentController,
+   updateTestController,
+   updateTestQuestionPointsController,
+} from '../controllers/test-controller.js'
+import {
+   assignTestsAuthorizationMiddleware,
+   manageTestsAuthorizationMiddleware,
+   publishTestsAuthorizationMiddleware,
+   readTestsAuthorizationMiddleware,
+} from '../middleware/test-admin-middleware.js'
 
 const adminRouter = express.Router()
 
@@ -683,6 +707,112 @@ adminRouter.post(
    authenticatedCsrfMiddleware,
    adminMutationRateMiddleware,
    unblockUserController,
+)
+adminRouter.get(
+   '/tests',
+   readTestsAuthorizationMiddleware,
+   listTestsController,
+)
+adminRouter.post(
+   '/tests',
+   manageTestsAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   createTestController,
+)
+adminRouter.get(
+   '/tests/:testId',
+   readTestsAuthorizationMiddleware,
+   getTestController,
+)
+adminRouter.patch(
+   '/tests/:testId',
+   manageTestsAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   updateTestController,
+)
+adminRouter.delete(
+   '/tests/:testId',
+   manageTestsAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   deleteTestController,
+)
+adminRouter.post(
+   '/tests/:testId/questions',
+   manageTestsAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   addTestQuestionsController,
+)
+adminRouter.put(
+   '/tests/:testId/questions/order',
+   manageTestsAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   reorderTestQuestionsController,
+)
+adminRouter.delete(
+   '/tests/:testId/questions/:questionId',
+   manageTestsAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   removeTestQuestionController,
+)
+adminRouter.put(
+   '/tests/:testId/questions/:questionId/points',
+   manageTestsAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   updateTestQuestionPointsController,
+)
+adminRouter.post(
+   '/tests/:testId/publish',
+   publishTestsAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   publishTestController,
+)
+adminRouter.post(
+   '/tests/:testId/archive',
+   manageTestsAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   archiveTestController,
+)
+adminRouter.post(
+   '/tests/:testId/copy',
+   manageTestsAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   copyTestController,
+)
+adminRouter.get(
+   '/tests/:testId/assignments',
+   readTestsAuthorizationMiddleware,
+   listAssignmentsController,
+)
+adminRouter.post(
+   '/tests/:testId/assignments',
+   assignTestsAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   createAssignmentController,
+)
+adminRouter.patch(
+   '/tests/:testId/assignments/:assignmentId',
+   assignTestsAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   updateAssignmentController,
+)
+adminRouter.delete(
+   '/tests/:testId/assignments/:assignmentId',
+   assignTestsAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   revokeAssignmentController,
 )
 
 export default adminRouter
