@@ -212,6 +212,10 @@ test('test attempts integration', async (t) => {
       assert.ok(assignments.some((item) => item.id === assignment.id))
       assert.equal((await startAttemptService(learner, assignment.id)).attempt.assignmentId, assignment.id)
       await client.query(`UPDATE group_members SET status = 'left', left_at = CURRENT_TIMESTAMP WHERE user_id = $1`, [learner])
+      // The running attempt continues; only a new one is refused.
+      const running = await startAttemptService(learner, assignment.id)
+      assert.equal(running.resumed, true)
+      await submitAttemptService(learner, running.attempt.id)
       await rejects(startAttemptService(learner, assignment.id), 'ASSIGNMENT_NOT_FOUND')
    })
 
@@ -227,7 +231,14 @@ test('test attempts integration', async (t) => {
       const open = await startAttemptService(learner, assignment.id, at(61))
       assert.equal(open.attempt.deadlineAt, new Date(assignment.closesAt).toISOString())
       await client.query(`UPDATE test_assignments SET status = 'revoked' WHERE id = $1`, [assignment.id])
-      await rejects(startAttemptService(learner, assignment.id, at(62)), 'ASSIGNMENT_NOT_FOUND')
+      // Revoking does not stop the running attempt: it can be resumed, answered and submitted.
+      const resumed = await startAttemptService(learner, assignment.id, at(62))
+      assert.equal(resumed.resumed, true)
+      await saveAnswerService(learner, open.attempt.id, open.questions[0].id, {
+         answer: { optionKey: 'A' }, revision: 1,
+      }, at(62))
+      assert.equal((await submitAttemptService(learner, open.attempt.id, at(63))).attempt.score, '2.00')
+      await rejects(startAttemptService(learner, assignment.id, at(64)), 'ASSIGNMENT_NOT_FOUND')
    })
 
    await t.test('the deadline takes the earliest of limit, window and personal window', async () => {
@@ -414,7 +425,7 @@ test('test attempts integration', async (t) => {
 
    await t.test('reveal policies decide what the result returns', async () => {
       const learner = await student()
-      const immediate = await publishedTest({ answerRevealPolicy: 'after_submission' })
+      const immediate = await publishedTest({ answerRevealPolicy: 'after_submission', maxAttempts: 1 })
       const openAssignment = await assign(immediate.id, learner)
       const openView = await startAttemptService(learner, openAssignment.id)
       await rejects(getAttemptResultService(learner, openView.attempt.id), 'RESULT_NOT_READY')
@@ -441,6 +452,79 @@ test('test attempts integration', async (t) => {
       const late = await getAttemptResultService(learner, windowView.attempt.id, at(61))
       assert.equal(late.revealed, true)
       assert.equal(late.questions.length, 1)
+   })
+
+   await t.test('after_submission holds keys back while attempts remain', async () => {
+      const learner = await student()
+      const quiz = await publishedTest({ answerRevealPolicy: 'after_submission', maxAttempts: 2 })
+      const assignment = await assign(quiz.id, learner)
+      const first = await startAttemptService(learner, assignment.id)
+      const early = await submitAttemptService(learner, first.attempt.id)
+      assert.equal(early.revealed, false)
+      assert.equal(early.remainingAttempts, 1)
+      assert.deepEqual(early.questions, [])
+      assert.ok(early.attempt.score !== null)
+
+      const second = await startAttemptService(learner, assignment.id)
+      const last = await submitAttemptService(learner, second.attempt.id)
+      assert.equal(last.revealed, true)
+      assert.equal(last.questions.length, 1)
+      // The first attempt is revealed too once no attempt is left.
+      assert.equal((await getAttemptResultService(learner, first.attempt.id)).revealed, true)
+
+      const windowed = await publishedTest({ answerRevealPolicy: 'after_submission', maxAttempts: 3 })
+      const closesAt = later(60)
+      const windowAssignment = await assign(windowed.id, learner, { closesAt: closesAt.toISOString() })
+      const view = await startAttemptService(learner, windowAssignment.id)
+      const held = await submitAttemptService(learner, view.attempt.id)
+      assert.equal(held.revealed, false)
+      assert.equal(held.revealsAt, closesAt.toISOString())
+      assert.equal((await getAttemptResultService(learner, view.attempt.id, at(61))).revealed, true)
+
+      const unlimited = await publishedTest({ answerRevealPolicy: 'after_submission', maxAttempts: null })
+      const open = await assign(unlimited.id, learner)
+      const unlimitedView = await startAttemptService(learner, open.id)
+      const result = await submitAttemptService(learner, unlimitedView.attempt.id)
+      assert.equal(result.revealed, false)
+      assert.equal(result.remainingAttempts, null)
+   })
+
+   await t.test('group teachers see only attempts of their group assignments', async () => {
+      const quiz = await publishedTest()
+      const group = await client.query(
+         `INSERT INTO groups (code, title, created_by) VALUES ($1, 'Results group', $2) RETURNING id`,
+         [`att-results-${suffix}`, adminId],
+      )
+      const groupId = group.rows[0].id
+      const member = await student()
+      const outsider = await student()
+      await client.query('INSERT INTO group_members (group_id, user_id, added_by) VALUES ($1, $2, $3)', [groupId, member, adminId])
+      const groupAssignment = await createAssignmentService(adminId, quiz.id, { groupId })
+      const directAssignment = await assign(quiz.id, outsider)
+      const inGroup = await startAttemptService(member, groupAssignment.id)
+      const direct = await startAttemptService(outsider, directAssignment.id)
+
+      const groupTeacher = await createUser('teacher')
+      const flagless = await createUser('teacher')
+      await client.query(
+        `INSERT INTO group_teachers (group_id, user_id, can_view_results, assigned_by)
+          VALUES ($1, $2, TRUE, $4), ($1, $3, FALSE, $4)`,
+         [groupId, groupTeacher, flagless, adminId],
+      )
+      const seen = await listTestAttemptsService(groupTeacher, quiz.id)
+      assert.deepEqual(seen.attempts.map((item) => item.id), [inGroup.attempt.id])
+      assert.equal((await getTestAttemptService(groupTeacher, quiz.id, inGroup.attempt.id)).attempt.userId, member)
+      await rejects(getTestAttemptService(groupTeacher, quiz.id, direct.attempt.id), 'ATTEMPT_NOT_FOUND')
+      await rejects(listTestAttemptsService(flagless, quiz.id), 'TEST_NOT_FOUND')
+
+      await submitAttemptService(member, inGroup.attempt.id)
+      await submitAttemptService(outsider, direct.attempt.id)
+      const request = (attemptQuestionId) => ({
+         reason: 'Group review', idempotencyKey: `group-${attemptQuestionId}-${suffix}`,
+         overrides: [{ attemptQuestionId, points: '1' }],
+      })
+      await rejects(regradeAttemptService(groupTeacher, quiz.id, direct.attempt.id, request(direct.questions[0].id)), 'ATTEMPT_NOT_FOUND')
+      assert.equal((await regradeAttemptService(groupTeacher, quiz.id, inGroup.attempt.id, request(inGroup.questions[0].id))).attempt.score, '1.00')
    })
 
    await t.test('the lesson summary shows the attempt state', async () => {
@@ -577,6 +661,18 @@ test('test attempts integration', async (t) => {
 
       const forbidden = await api('GET', `/admin/tests/${quiz.id}/attempts`, actor)
       assert.equal(forbidden.status, 403)
+      // Regrade is a separate permission held by owner and admin only.
+      const teacher = await createUser('teacher')
+      await client.query(
+         'INSERT INTO course_teachers (course_id, user_id, can_view_results, assigned_by) VALUES ($1, $2, TRUE, $3)',
+         [courseId, teacher, adminId],
+      )
+      const teacherSession = await session(teacher)
+      assert.equal((await api('GET', `/admin/tests/${quiz.id}/attempts`, teacherSession)).status, 200)
+      const denied = await api('POST', `/admin/tests/${quiz.id}/attempts/${attemptId}/regrade`, teacherSession, {
+         reason: 'No', idempotencyKey: `denied-${suffix}`, overrides: [{ attemptQuestionId: item.id, points: '1' }],
+      })
+      assert.equal(denied.status, 403)
       const admin = await session(adminId)
       const listed = await api('GET', `/admin/tests/${quiz.id}/attempts?assignmentId=${assignment.id}`, admin)
       assert.equal(listed.status, 200)

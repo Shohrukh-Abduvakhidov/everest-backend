@@ -151,10 +151,15 @@ test('result policies pick first, best or last among finished attempts', () => {
 
 test('reveal policies', () => {
    const closesAt = '2026-06-01T11:00:00Z'
-   assert.equal(answersRevealed('after_submission', null, new Date(0)), true)
+   assert.equal(answersRevealed('after_submission', null, new Date(0), 0), true)
    assert.equal(answersRevealed('never', closesAt, new Date('2030-01-01T00:00:00Z')), false)
    assert.equal(answersRevealed('after_window', closesAt, new Date('2026-06-01T10:59:00Z')), false)
    assert.equal(answersRevealed('after_window', closesAt, new Date('2026-06-01T11:00:00Z')), true)
+   // after_submission waits for the last attempt, or for the window to close.
+   assert.equal(answersRevealed('after_submission', null, new Date(0), 1), false)
+   assert.equal(answersRevealed('after_submission', null, new Date(0), null), false)
+   assert.equal(answersRevealed('after_submission', closesAt, new Date('2026-06-01T10:00:00Z'), 2), false)
+   assert.equal(answersRevealed('after_submission', closesAt, new Date('2026-06-01T11:00:00Z'), 2), true)
 })
 
 test('remaining attempts ignore cancelled ones; null means unlimited', () => {
