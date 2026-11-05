@@ -42,9 +42,12 @@ function selectResultAttempt(policy, attempts) {
    return finished[0]
 }
 
-function answersRevealed(policy, closesAt, now) {
-   if (policy === 'after_submission') return true
-   if (policy === 'after_window') return Boolean(closesAt) && new Date(closesAt) <= now
+// after_submission holds the keys back while the student can still retry the assignment.
+// Unlimited attempts (remaining = null) never run out, so only a closed window reveals.
+function answersRevealed(policy, closesAt, now, remaining = 0) {
+   const windowClosed = Boolean(closesAt) && new Date(closesAt) <= now
+   if (policy === 'after_window') return windowClosed
+   if (policy === 'after_submission') return remaining === 0 || windowClosed
    return false
 }
 

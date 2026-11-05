@@ -366,7 +366,15 @@ async function startAttemptService(userId, assignmentIdValue, overrides) {
       const now = deps.clock()
       await deps.repository.lockAttemptSlot(actorId, assignmentId, client)
       const assignment = await deps.repository.findLearnerAssignment(actorId, assignmentId, client)
-      if (!assignment) throw assignmentNotFound()
+      if (!assignment) {
+         // A revoked assignment or a left group stops new attempts, not a running one.
+         const [open] = (await deps.repository.listUserAttempts(actorId, [assignmentId], client))
+            .filter((attempt) => attempt.status === 'in_progress')
+         if (!open) throw assignmentNotFound()
+         const running = await deps.repository.findAttempt(actorId, open.id, client)
+         await requireContentAccess(deps, actorId, running, now, client)
+         return { attemptId: open.id, resumed: true }
+      }
       if (assignment.test_status !== 'published') {
          throw new AppError(409, 'TEST_NOT_AVAILABLE', 'This test is not available')
       }
@@ -464,7 +472,9 @@ async function saveAnswerService(userId, attemptIdValue, attemptQuestionIdValue,
 
 async function readResult(deps, attempt, now) {
    const policy = attempt.policy_snapshot.answerRevealPolicy
-   const revealed = answersRevealed(policy, attempt.closes_at, now)
+   const attempts = await deps.repository.listUserAttempts(attempt.user_id, [attempt.assignment_id])
+   const remaining = remainingAttempts(attempt.policy_snapshot.maxAttempts, attempts)
+   const revealed = answersRevealed(policy, attempt.closes_at, now, remaining)
    const questions = revealed
       ? await deps.repository.listAttemptQuestions(attempt.id, { withSnapshot: true })
       : []
@@ -476,7 +486,8 @@ async function readResult(deps, attempt, now) {
       passed: passPercent === null ? null : percent >= passPercent,
       answerRevealPolicy: policy,
       revealed,
-      revealsAt: policy === 'after_window' && !revealed ? iso(attempt.closes_at) : null,
+      revealsAt: policy !== 'never' && !revealed ? iso(attempt.closes_at) : null,
+      remainingAttempts: remaining,
       questions: questions.map(safeReviewQuestion),
       serverNow: now.toISOString(),
    }
