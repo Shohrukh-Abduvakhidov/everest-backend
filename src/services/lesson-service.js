@@ -16,7 +16,8 @@ import {
 const languages = ['tg', 'ru', 'en']
 const lessonTypes = ['video', 'text', 'test', 'mixed']
 const videoLessonTypes = ['video', 'mixed']
-const lessonFields = ['title', 'lessonType', 'content', 'translations', 'videoAssetId', 'allowOffline']
+const testLessonTypes = ['test', 'mixed']
+const lessonFields = ['title', 'lessonType', 'content', 'translations', 'videoAssetId', 'testId', 'allowOffline']
 const maximumTitleLength = 200
 const maximumLessonsPerOrder = 1000
 const maximumBlocks = 200
@@ -181,6 +182,10 @@ function parseLessonBody(body, partial = false) {
       videoAssetId: body.videoAssetId === undefined || body.videoAssetId === null
          ? null
          : parseBodyId(body.videoAssetId, 'videoAssetId'),
+      hasTestId: body.testId !== undefined,
+      testId: body.testId === undefined || body.testId === null
+         ? null
+         : parseBodyId(body.testId, 'testId'),
       allowOffline: body.allowOffline ?? null,
    }
 }
@@ -303,6 +308,7 @@ function safeLessonSummary(row) {
       lessonType: row.lesson_type,
       translations: row.translations,
       videoAssetId: row.video_asset_id,
+      testId: row.test_id,
       allowOffline: row.allow_offline,
       status: row.status,
       createdAt: iso(row.created_at),
@@ -388,6 +394,24 @@ async function validateVideoAsset(repository, courseId, lessonId, assetId, clien
    return asset
 }
 
+function testNotPublished() {
+   return conflict('TEST_NOT_PUBLISHED', 'A published lesson needs a published test')
+}
+
+// The test must belong to this course. A draft test may be linked while the lesson is
+// prepared; publication needs a published test.
+async function validateLinkedTest(repository, courseId, testId, client) {
+   const test = await repository.lockCourseTest(courseId, testId, client)
+   if (!test) throw validationError('testId', 'testId must be a test of this course')
+   if (test.status === 'archived') throw conflict('TEST_ARCHIVED', 'An archived test cannot be linked to a lesson')
+   return test
+}
+
+async function requirePublishedLinkedTest(repository, courseId, testId, client) {
+   const test = await repository.lockCourseTest(courseId, testId, client)
+   if (test?.status !== 'published') throw testNotPublished()
+}
+
 async function audit(auth, actorId, code, entityId, metadata, client) {
    await auth.appendAuditEvent({
       actorUserId: actorId,
@@ -435,6 +459,9 @@ async function createLessonService(userId, courseIdValue, moduleIdValue, body, o
    if (values.videoAssetId && !videoLessonTypes.includes(values.lessonType)) {
       throw validationError('videoAssetId', 'Only video and mixed lessons can have a video')
    }
+   if (values.testId && !testLessonTypes.includes(values.lessonType)) {
+      throw validationError('testId', 'Only test and mixed lessons can link a test')
+   }
    return transaction(async (client) => {
       await requireManageableCourse(repository, actorId, courseId, client)
       if (!await repository.findModuleForUpdate(courseId, moduleId, client)) {
@@ -443,6 +470,7 @@ async function createLessonService(userId, courseIdValue, moduleIdValue, body, o
       if (values.videoAssetId) {
          await validateVideoAsset(repository, courseId, null, values.videoAssetId, client)
       }
+      if (values.testId) await validateLinkedTest(repository, courseId, values.testId, client)
       const position = await repository.findNextLessonPosition(moduleId, client)
       const lesson = await repository.createLesson({
          ...values,
@@ -471,11 +499,18 @@ async function updateLessonService(userId, courseIdValue, lessonIdValue, body, o
       if (videoAssetId && !videoLessonTypes.includes(lessonType)) {
          throw validationError('videoAssetId', 'Only video and mixed lessons can have a video')
       }
+      const testId = values.hasTestId ? values.testId : current.test_id
+      if (testId && !testLessonTypes.includes(lessonType)) {
+         throw validationError('testId', 'Only test and mixed lessons can link a test')
+      }
+      const testChanged = values.hasTestId && testId !== current.test_id
       const videoChanged = values.hasVideoAssetId && videoAssetId !== current.video_asset_id
+      if (testChanged && testId) await validateLinkedTest(repository, courseId, testId, client)
       if (current.status === 'published') {
-         if (lessonType === 'test') {
-            throw conflict('LESSON_TYPE_NOT_PUBLISHABLE', 'A published lesson cannot become a test lesson')
+         if (lessonType === 'test' && !testId) {
+            throw conflict('LESSON_TEST_REQUIRED', 'A published test lesson must keep a test')
          }
+         if (testChanged && testId) await requirePublishedLinkedTest(repository, courseId, testId, client)
          if (videoLessonTypes.includes(lessonType) && current.video_asset_id && !videoAssetId) {
             throw conflict('LESSON_VIDEO_REQUIRED', 'A published video lesson must keep a video')
          }
@@ -528,9 +563,10 @@ async function changeLessonStatus(userId, courseIdValue, lessonIdValue, from, to
          throw conflict('INVALID_LESSON_TRANSITION', 'Lesson lifecycle transition is not allowed')
       }
       if (to === 'published') {
-         if (current.lesson_type === 'test') {
-            throw conflict('LESSON_TYPE_NOT_PUBLISHABLE', 'Test lessons cannot be published yet')
+         if (current.lesson_type === 'test' && !current.test_id) {
+            throw conflict('LESSON_TEST_REQUIRED', 'A test lesson needs a test before publication')
          }
+         if (current.test_id) await requirePublishedLinkedTest(repository, courseId, current.test_id, client)
          if (current.lesson_type === 'video' && !current.video_asset_id) {
             throw conflict('LESSON_VIDEO_REQUIRED', 'A video lesson needs a video before publication')
          }
@@ -725,6 +761,14 @@ const lessonCopySteps = [
    },
    async function copyResourcesStep(context) {
       return { resources: await context.lessons.copyResources(context.lessonIdMap, context.client) }
+   },
+   async function reportClearedTestLinksStep(context) {
+      return {
+         clearedTestLinks: await context.lessons.countLinkedLessons(
+            [...context.lessonIdMap.keys()],
+            context.client,
+         ),
+      }
    },
 ]
 

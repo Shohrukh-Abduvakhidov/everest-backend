@@ -88,7 +88,8 @@ async function updateModuleStatus(moduleId, status, client) {
 
 async function moduleHasLessons(moduleId, client) {
    const result = await client.query(
-      'SELECT EXISTS (SELECT 1 FROM lessons WHERE module_id = $1) AS has_lessons',
+      `SELECT EXISTS (SELECT 1 FROM lessons WHERE module_id = $1)
+         OR EXISTS (SELECT 1 FROM tests WHERE module_id = $1) AS has_lessons`,
       [normalizeInternalId(moduleId)],
    )
    return result.rows[0].has_lessons

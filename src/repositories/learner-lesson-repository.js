@@ -3,7 +3,7 @@ import { normalizeInternalId } from '../utils/internal-id.js'
 
 const learnerLessonColumns = `lesson.id, lesson.module_id, lesson.course_id, lesson.title,
    lesson.position, lesson.lesson_type, lesson.content, lesson.translations,
-   lesson.video_asset_id, lesson.allow_offline,
+   lesson.video_asset_id, lesson.test_id, lesson.allow_offline,
    can_access_module($1, lesson.module_id) AS granted`
 
 // A learner sees lesson metadata only inside a course they hold a non-revoked enrollment
@@ -43,6 +43,34 @@ async function findLearnerLesson(userId, courseId, lessonId, db = pool) {
       [normalizeInternalId(userId), normalizeInternalId(courseId), normalizeInternalId(lessonId)],
    )
    return result.rows[0] || null
+}
+
+// Safe test facts for a lesson. Questions, keys and grading settings are never selected. The
+// assignments are the learner's own: direct ones and those of their active group memberships.
+async function findLearnerLessonTest(userId, testId, db = pool) {
+   const test = await db.query(
+      `SELECT test.id, test.title, test.status, test.duration_seconds, test.max_attempts,
+         (SELECT count(*)::integer FROM test_questions WHERE test_id = test.id) AS question_count
+       FROM tests AS test WHERE test.id = $1`,
+      [normalizeInternalId(testId)],
+   )
+   if (!test.rows[0]) return null
+   const assignments = await db.query(
+      `SELECT assignment.opens_at, assignment.closes_at,
+         CASE
+            WHEN assignment.opens_at > CURRENT_TIMESTAMP THEN 'upcoming'
+            WHEN assignment.closes_at IS NOT NULL AND assignment.closes_at <= CURRENT_TIMESTAMP THEN 'closed'
+            ELSE 'open'
+         END AS state
+       FROM test_assignments AS assignment
+       WHERE assignment.test_id = $2 AND assignment.status = 'active' AND (
+          assignment.user_id = $1 OR assignment.group_id IN (
+             SELECT group_id FROM group_members WHERE user_id = $1 AND status = 'active'
+          )
+       )`,
+      [normalizeInternalId(userId), normalizeInternalId(testId)],
+   )
+   return { ...test.rows[0], assignments: assignments.rows }
 }
 
 async function hasLearnerCourse(userId, courseId, db = pool) {
@@ -207,6 +235,7 @@ export {
    createNote,
    deleteNote,
    findLearnerLesson,
+   findLearnerLessonTest,
    findProgress,
    hasLearnerCourse,
    listFavorites,

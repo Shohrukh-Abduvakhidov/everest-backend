@@ -155,6 +155,23 @@ function requireWindow(test, opensAt, closesAt) {
    }
 }
 
+function requireNoLinkedLessons(lessons) {
+   if (!lessons.length) return
+   throw new AppError(409, 'TEST_LINKED_TO_LESSON', 'A lesson uses this test; change the lesson first', lessons.map((lesson) => ({
+      field: 'lessonId',
+      message: lesson.id,
+   })))
+}
+
+async function parseModuleForCourse(repository, value, courseId, client) {
+   if (value === null) return null
+   const moduleId = parseFieldId(value, 'moduleId')
+   if (!(await repository.courseHasModule(courseId, moduleId, client))) {
+      throw validationError('moduleId', 'moduleId must be a module of the test course')
+   }
+   return moduleId
+}
+
 function currentSettings(row) {
    return {
       title: row.title,
@@ -223,6 +240,7 @@ function safeTest(row) {
    return {
       id: row.id,
       courseId: row.course_id,
+      moduleId: row.module_id,
       ...currentSettings(row),
       status: row.status,
       questionCount: row.question_count,
@@ -321,7 +339,7 @@ async function getTestService(userId, testIdValue, overrides) {
 async function createTestService(userId, body, overrides) {
    const { repository, auth, transaction } = dependencies(overrides)
    const actorId = normalizeInternalId(userId)
-   validateBody(body, ['courseId', ...settingFields])
+   validateBody(body, ['courseId', 'moduleId', ...settingFields])
    const courseId = parseFieldId(body.courseId, 'courseId')
    if (!('title' in body)) throw validationError('title')
    const settings = mergeSettings(defaultSettings, body)
@@ -329,8 +347,12 @@ async function createTestService(userId, body, overrides) {
       const course = await repository.lockManageableCourse(actorId, courseId, client)
       if (!course) throw new AppError(404, 'COURSE_NOT_FOUND', 'Course was not found')
       requireCourseNotArchived(course.status)
+      const moduleId = body.moduleId === undefined
+         ? null
+         : await parseModuleForCourse(repository, body.moduleId, courseId, client)
       const testId = await repository.createTest({
          ...persistedSettings(settings),
+         moduleId,
          courseId,
          createdBy: actorId,
       }, client)
@@ -343,13 +365,16 @@ async function updateTestService(userId, testIdValue, body, overrides) {
    const { repository, auth, transaction } = dependencies(overrides)
    const actorId = normalizeInternalId(userId)
    const testId = parseTestId(testIdValue)
-   validateBody(body, settingFields)
+   validateBody(body, ['moduleId', ...settingFields])
    if (!Object.keys(body).length) throw validationError('body')
    return transaction(async (client) => {
       const test = await loadTest(repository, client, actorId, testId)
       requireDraft(test)
       const settings = mergeSettings(currentSettings(test), body)
-      await repository.updateTest(testId, persistedSettings(settings, test.grading_policy), client)
+      const moduleId = body.moduleId === undefined
+         ? test.module_id
+         : await parseModuleForCourse(repository, body.moduleId, test.course_id, client)
+      await repository.updateTest(testId, { ...persistedSettings(settings, test.grading_policy), moduleId }, client)
       await audit(auth, client, actorId, 'test.updated', 'test', testId, { fields: Object.keys(body) })
       return readDetail(repository, actorId, testId, client)
    })
@@ -365,6 +390,7 @@ async function deleteTestService(userId, testIdValue, overrides) {
       if (await repository.hasCopies(testId, client)) {
          throw new AppError(409, 'TEST_HAS_COPIES', 'A test that has copies cannot be deleted')
       }
+      requireNoLinkedLessons(await repository.listLinkedLessons(testId, { publishedOnly: false }, client))
       await repository.deleteDraftTest(testId, client)
       await audit(auth, client, actorId, 'test.deleted', 'test', testId, { title: test.title })
       return { id: testId, status: 'deleted' }
@@ -512,6 +538,7 @@ async function archiveTestService(userId, testIdValue, overrides) {
       if (test.status !== 'published') {
          throw new AppError(409, 'INVALID_TEST_TRANSITION', 'Only published tests can be archived')
       }
+      requireNoLinkedLessons(await repository.listLinkedLessons(testId, { publishedOnly: true }, client))
       await repository.setTestStatus(testId, 'archived', client)
       await audit(auth, client, actorId, 'test.archived', 'test', testId, {})
       return readDetail(repository, actorId, testId, client)
