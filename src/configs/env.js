@@ -73,6 +73,13 @@ const env = Object.freeze({
   authPublicRateLimit: readInteger('AUTH_PUBLIC_RATE_LIMIT', 100, { max: 10000 }),
   authAdminRateLimit: readInteger('AUTH_ADMIN_RATE_LIMIT', 100, { max: 10000 }),
   playbackRateLimit: readInteger('PLAYBACK_RATE_LIMIT', 120, { max: 10000 }),
+  questionImportRateLimit: readInteger('QUESTION_IMPORT_RATE_LIMIT', 20, { max: 10000 }),
+  questionImportMaxUploadBytes: readInteger('QUESTION_IMPORT_MAX_UPLOAD_MB', 256, { max: 512 }) * 1024 * 1024,
+  questionImportUploadDirectory: path.resolve(
+    readString('QUESTION_IMPORT_UPLOAD_DIR', path.resolve(currentDirectory, '../../uploads/question-imports')),
+  ),
+  questionImportUploadTtlHours: readInteger('QUESTION_IMPORT_UPLOAD_TTL_HOURS', 24, { max: 720 }),
+  questionImportWorkerIntervalMs: readInteger('QUESTION_IMPORT_WORKER_INTERVAL_MS', 5000),
   otpHmacSecret: readString('OTP_HMAC_SECRET'),
   recoveryChallengeTtlSeconds: readInteger('RECOVERY_CHALLENGE_TTL_SECONDS', 600),
   recoveryResetTtlSeconds: readInteger('RECOVERY_RESET_TTL_SECONDS', 600),

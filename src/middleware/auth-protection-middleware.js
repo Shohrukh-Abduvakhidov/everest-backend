@@ -118,6 +118,17 @@ async function adminMutationRateMiddleware(req, res, next) {
    }
 }
 
+// Per-user limit: each package upload parses a ZIP and runs a full dry run.
+async function questionImportUploadRateMiddleware(req, res, next) {
+   try {
+      void res
+      await limitKey(req, 'admin.question-import-upload', req.auth.userId, 'questionImportRateLimit')
+      next()
+   } catch (error) {
+      next(error)
+   }
+}
+
 // Per-user limit for signed media URL issuance (playback, materials, offline).
 async function learnerMediaRateMiddleware(req, res, next) {
    try {
@@ -130,6 +141,7 @@ async function learnerMediaRateMiddleware(req, res, next) {
 }
 
 export {
+   questionImportUploadRateMiddleware,
    adminMutationRateMiddleware,
    authenticatedCsrfMiddleware,
    learnerMediaRateMiddleware,

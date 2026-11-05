@@ -1,4 +1,9 @@
 import {
+   confirmQuestionPackageUploadService,
+   getQuestionPackageUploadService,
+   uploadQuestionPackageService,
+} from '../services/question-import-upload-service.js'
+import {
    getQuestionImportService,
    listQuestionImportErrorsService,
    listQuestionImportsService,
@@ -40,7 +45,42 @@ async function listQuestionImportErrorsController(req, res, next) {
    }
 }
 
+async function uploadQuestionPackageController(req, res, next) {
+   try {
+      const data = await uploadQuestionPackageService(req.auth.userId, req.body, req.query, overrides(req))
+      res.status(data.duplicate ? 200 : 201).json({ data })
+   } catch (error) {
+      next(error)
+   }
+}
+
+async function getQuestionPackageUploadController(req, res, next) {
+   try {
+      const data = await getQuestionPackageUploadService(req.auth.userId, req.params.uploadId, overrides(req))
+      res.json({ data })
+   } catch (error) {
+      next(error)
+   }
+}
+
+async function confirmQuestionPackageUploadController(req, res, next) {
+   try {
+      const data = await confirmQuestionPackageUploadService(
+         req.auth.userId,
+         req.params.uploadId,
+         req.body,
+         overrides(req),
+      )
+      res.status(202).json({ data })
+   } catch (error) {
+      next(error)
+   }
+}
+
 export {
+   confirmQuestionPackageUploadController,
+   getQuestionPackageUploadController,
+   uploadQuestionPackageController,
    getQuestionImportController,
    listQuestionImportErrorsController,
    listQuestionImportsController,
