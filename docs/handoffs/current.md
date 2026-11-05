@@ -20,6 +20,12 @@ updated_at: 2026-11-05
 - Learner: assignments list, start or resume, attempt, autosave, submit, results. Staff: attempts list, detail, regrade.
 - Grading of all five types, result and reveal policies, `npm run worker:attempts`, lesson attempt state, seeded attempts.
 
+## Verification (2026-11-05)
+
+- `npm test` with `DB_NAME` on a disposable migrated database: exit 0; 314 tests, 313 passed, 0 failed, 1 skipped (real S3 storage, unconfigured).
+- `npm run test:migrations` passed the up, no-op, down, up cycle on a disposable database. `verify-database.js` passed.
+- `everest_db` was not touched and has no migration `20261105030000000`.
+
 ## Not verified
 
 - A frontend or browser walk-through.
