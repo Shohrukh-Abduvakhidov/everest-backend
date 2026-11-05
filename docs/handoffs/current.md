@@ -1,8 +1,8 @@
 ---
 project: EVEREST Backend
-current_milestone: login failure diagnosis
+current_milestone: M11 attempts, timing and grading
 status: awaiting_review
-branch: fix/auth-login-diagnosis
+branch: feat/m11-attempts
 base_commit: 3c2f96c
 updated_at: 2026-11-05
 ---
@@ -11,33 +11,34 @@ updated_at: 2026-11-05
 
 ## State
 
-- PR #33 is merged. `fix/auth-login-diagnosis` has a PR open for review; the agent must not merge it.
+- `feat/m11-attempts` has a PR open for review; the agent must not merge it.
+- PR #34 (`fix/auth-login-diagnosis`) was still open when this branch started, so this branch lacks it. Expect a conflict in this file and `docs/progress.md`.
 
 ## Completed work
 
-- Login failure traced to configuration and data: the running API used `everest_demo2`, not the `everest_db` in `.env`, so accounts and passwords from other databases failed and then hit the `login.account` block.
-- `src/server.js` now rejects startup on listen errors and logs the database name.
-- `scripts/check-auth-setup.js` and frontend handoff section 5.4.
-
-## Verification (2026-11-05)
-
-- Disposable database, migrate plus seed: owner and student `200`, wrong password `401 INVALID_CREDENTIALS`, blocked account `403 ACCOUNT_NOT_ACTIVE`, phone without `+` `400 VALIDATION_ERROR`.
-- `test:server` failed without the fix and passed with it. `test:auth`: 282 tests, 281 passed, 0 failed, 1 skipped. `test:sources` passed.
+- Migration `20261105030000000_add-attempt-timing.js`: `test_assignments.personal_window_minutes`, `attempts_expiring_idx`.
+- Learner: assignments list, start or resume, attempt, autosave, submit, results. Staff: attempts list, detail, regrade.
+- Grading of all five types, result and reveal policies, `npm run worker:attempts`, lesson attempt state, seeded attempts.
 
 ## Not verified
 
-- A browser login, and the frontend's API target and cookie handling.
-- Which passwords were typed. Failures show only that verification returned false.
-- `test:integrity`, which uses the configured database.
+- A frontend or browser walk-through.
+- `npm run worker:attempts` as a separate process with signals; the loop was tested in-process.
+- Load, and concurrency beyond parallel starts of one student.
+- Cookie-session CSRF on the new mutations; the tests use Bearer tokens.
+
+## Decisions needed
+
+See `docs/decisions.md`, 2026-11-05 M11, in particular matching scoring, group teacher result scope, regrade under a read permission, and `after_submission` reveal when attempts remain.
 
 ## Next concrete tasks
 
-1. Stop the server on port 4000, set the intended `DB_NAME`, restart, and read the database name in the startup line.
-2. `everest_demo` is missing the two newest migrations; run `migrate:up` there if it stays in use.
-3. Handoff tasks from before remain: `migrate:up` state review on `everest_db`, then M11.
+1. Review and merge. Then run `migrate:up` on the local database, which is on 28 of 29 migrations once this merges.
+2. Start the sweep worker under PM2.
+3. M12: learning progress and analytics.
 
 ## Constraints
 
 - Preserve route → middleware → controller → service → repository → PostgreSQL.
 - Do not edit applied migrations. Never merge, force-push, or push to `main`.
-- Never delete data in `everest_db`.
+- `npm test` uses the configured database for `test:integrity`; point `DB_NAME` at a disposable database. Never delete data in `everest_db`.

@@ -62,6 +62,37 @@ Rules:
 - A section or parent from another subject returns `422 TAXONOMY_SUBJECT_MISMATCH`. A parent that would create a cycle (including the topic itself) returns `409 TOPIC_CYCLE`.
 - Other errors: `400 INVALID_SUBJECT_ID|INVALID_SECTION_ID|INVALID_TOPIC_ID`, `404 SUBJECT|SECTION|TOPIC_NOT_FOUND`, `409 SECTION_IN_USE|TOPIC_IN_USE`.
 
+## Test attempts (M11)
+
+Time is decided by the server. Every attempt response has `serverNow`; show the countdown from `deadlineAt - serverNow`, not from the device clock. All times are UTC.
+
+| Method and path | Who | Result |
+|---|---|---|
+| `GET /courses/:courseId/test-assignments?lessonId=` | learner | My assignments with `state` and `attempts` |
+| `POST /tests/assignments/:assignmentId/start` | learner | `201` new attempt, `200` resumed (`resumed: true`) |
+| `GET /tests/assignments/:assignmentId/result` | learner | Result chosen by `resultPolicy`, all attempts, remaining attempts |
+| `GET /tests/attempts/:attemptId` | owner | Attempt with questions, no keys; `questions: []` once finished |
+| `PUT /tests/attempts/:attemptId/answers/:attemptQuestionId` | owner | Autosave `{ answer, revision }` |
+| `POST /tests/attempts/:attemptId/submit` | owner | Grades and returns the result; repeating returns the same result |
+| `GET /tests/attempts/:attemptId/result` | owner | Result; details follow the reveal policy |
+| `GET /admin/tests/:testId/attempts` | `tests.results.read` | Filters `assignmentId`, `userId`, `status`, paging |
+| `GET /admin/tests/:testId/attempts/:attemptId` | `tests.results.read` | Answers, points, score revisions; never the key |
+| `POST /admin/tests/:testId/attempts/:attemptId/regrade` | `tests.results.read` | `{ reason, idempotencyKey, overrides: [{ attemptQuestionId, points }] }` |
+
+**Start** needs a published test, an active enrollment in the course, an active module grant when `tests.module_id` is set, and an active assignment (direct, or through an active group membership) whose window is open. `deadlineAt` is the earliest of start + time limit, `closesAt` and the personal window end, fixed at start. The personal window (`personalWindowMinutes` on assignment create and patch) begins at the student's first start and is shared by all their attempts. Errors: `ASSIGNMENT_NOT_FOUND`, `COURSE_ENROLLMENT_REQUIRED`, `MODULE_ACCESS_DENIED`, `TEST_NOT_AVAILABLE`, `ASSIGNMENT_NOT_OPEN`, `ASSIGNMENT_CLOSED`, `ATTEMPTS_EXHAUSTED`, `PERSONAL_WINDOW_ENDED`.
+
+**Answers by type:** `single_choice` `{ optionKey }`; `multiple_choice` `{ optionKeys }`; `matching` `{ pairs: [{ left, right }] }`; `numeric` `{ value }`; `short_text` `{ text }` (up to 500 characters); `null` clears.
+
+**Autosave:** send a higher `revision` each time, starting at 1. The current revision with the same answer is a no-op. An older one, or the same one with a different answer, returns `409 ANSWER_REVISION_CONFLICT` with the stored revision in `details[0].message`. After the deadline: `409 ATTEMPT_DEADLINE_PASSED`, and the attempt is submitted automatically. After submit: `409 ATTEMPT_NOT_IN_PROGRESS`.
+
+**Status:** `in_progress`, `graded` (submitted by the student), `expired` (submitted automatically at the deadline, also graded, `autoSubmitted: true`, `submittedAt` = the deadline). An expired attempt is finished on the owner's next access and by `npm run worker:attempts` (`ATTEMPT_SWEEP_INTERVAL_MS`, default 30000).
+
+**Grading:** single and numeric are exact; multiple is all-or-nothing; short text ignores case and outer spaces; matching earns a share per correct pair (`correct / max(key pairs, sent pairs)`), rounded down to 0.01. Unanswered questions earn 0.
+
+**Result:** `score`, `maxScore`, `percent` and `passed` (`null` without `passPercent`) always appear. `questions` with `correctAnswer` and `explanation` appear only when `revealed`: at once for `after_submission`, from `revealsAt` (`closesAt`) for `after_window`, never for `never`.
+
+**Regrade** works on finished attempts, sets `gradingStatus: manual`, recalculates the score and appends a revision. Repeating an `idempotencyKey` changes nothing; a key used for another attempt returns `409 IDEMPOTENCY_KEY_CONFLICT`. Teachers need `can_view_results` on the test's course; otherwise `404 TEST_NOT_FOUND`.
+
 ## Test authoring APIs (M10)
 
 All mutations need CSRF for cookie sessions, use the administrative rate limit, and write the change and its audit event in one transaction. Rules and their reasons are in `docs/decisions.md`.

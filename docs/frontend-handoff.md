@@ -366,6 +366,43 @@ Validation errors are `400` with `code: "VALIDATION_ERROR"` and one entry in `de
 - **Topic**: { id?: Id, subjectId?: Id, sectionId?: Id or null, parentId?: Id or null, code?: string, primaryLanguage?: LanguageCode, title?: string?, translations?: TitleTranslations }
 - **Upload**: { id?: Id, assetId?: Id, courseId?: Id, kind?: video/material, fileName?: string, mimeType?: string, sizeBytes?: integer, partSizeBytes?: integer, partCount?: integer, status?: initiated/completed/aborted/rejected/expired, rejectionCode?: string?, createdAt?: string, expiresAt?: string, completedAt?: string?, abortedAt?: string? }
 
+### Learner tests (M11)
+
+Prose rules and error codes: `docs/api.md`, section "Test attempts".
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/courses/:courseId/test-assignments?lessonId=` | My assignments, window state and attempt state |
+| POST | `/tests/assignments/:assignmentId/start` | `201` new, `200` resumed |
+| GET | `/tests/assignments/:assignmentId/result` | Result by policy, attempts, remaining attempts |
+| GET | `/tests/attempts/:attemptId` | Questions without keys |
+| PUT | `/tests/attempts/:attemptId/answers/:attemptQuestionId` | Autosave `{ answer, revision }` |
+| POST | `/tests/attempts/:attemptId/submit` | Submit; safe to repeat |
+| GET | `/tests/attempts/:attemptId/result` | Result; details follow the reveal policy |
+
+Screens should:
+
+- Run the countdown from `deadlineAt - serverNow`, and resync on each response. `deadlineAt: null` means no time limit.
+- Use the `id` of each question (the attempt question) in the autosave path, keep the order as returned, and raise `revision` on every save.
+- On `409 ATTEMPT_DEADLINE_PASSED`, open the result: the server has already submitted the attempt.
+- Handle `revealed: false` (score only) and `revealsAt`.
+
+The learner lesson `test` now has `assignment.id` and `attempts: { status, attemptId, deadlineAt, score, maxScore, submittedAt, remainingAttempts }`, where `status` is `not_started`, `in_progress` or `submitted`, and `remainingAttempts: null` means unlimited.
+
+Demo seed: `+992900000004` (Aziza) has a submitted attempt; `+992900000008` (Firuza) has one in progress without a deadline.
+
+### Admin: test results (M11)
+
+Permission `tests.results.read`; teachers need `canViewResults` on the course.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/admin/tests/:testId/attempts` | Filters `assignmentId`, `userId`, `status` |
+| GET | `/admin/tests/:testId/attempts/:attemptId` | Answers, points, revisions; no keys |
+| POST | `/admin/tests/:testId/attempts/:attemptId/regrade` | Override points with a reason and an `idempotencyKey` |
+
+Assignments gained an optional `personalWindowMinutes` on create, patch and read.
+
 ### Admin: tests (M10)
 
 | Method | Path | Permission | Purpose |
@@ -533,6 +570,7 @@ Names only; put values in `.env` (never commit it).
 | Server | `PORT`, `NODE_ENV`, `CORS_ORIGINS`, `SWAGGER_ENABLED`, `SHUTDOWN_TIMEOUT_MS` |
 | Auth (needed for any login; each ≥32 characters, different values; without them auth routes return `503`) | `JWT_ACCESS_SECRET`, `OTP_HMAC_SECRET` |
 | Auth tuning (optional) | `AUTH_SESSION_TTL_SECONDS`, `AUTH_REFRESH_TTL_SECONDS`, `AUTH_RATE_WINDOW_SECONDS`, `AUTH_RATE_BLOCK_SECONDS`, `AUTH_LOGIN_MAX_ATTEMPTS`, `AUTH_PUBLIC_RATE_LIMIT`, `AUTH_ADMIN_RATE_LIMIT`, `PLAYBACK_RATE_LIMIT` |
+| Attempts (optional) | `ATTEMPT_SWEEP_INTERVAL_MS` (30000), used by `npm run worker:attempts` |
 | Password recovery (optional) | `RECOVERY_CHALLENGE_TTL_SECONDS`, `RECOVERY_RESET_TTL_SECONDS`, `RECOVERY_RESEND_COOLDOWN_SECONDS`, `RECOVERY_MAX_ATTEMPTS`, `RECOVERY_MAX_REQUESTS_PER_HOUR` |
 | Telegram (optional; Telegram login, link, recovery) | `TELEGRAM_CLIENT_ID`, `TELEGRAM_CLIENT_SECRET`, `TELEGRAM_REDIRECT_URI`, `TELEGRAM_BOT_USERNAME`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `TELEGRAM_OIDC_STATE_TTL_SECONDS` |
 | Storage (optional; otherwise storage routes return `503 STORAGE_NOT_CONFIGURED`) | `S3_ENDPOINT`, `S3_PUBLIC_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE`, `STORAGE_PART_SIZE_BYTES`, `STORAGE_PRESIGN_TTL_SECONDS`, `STORAGE_UPLOAD_TTL_HOURS` |
@@ -541,9 +579,10 @@ Names only; put values in `.env` (never commit it).
 
 ```bash
 npm install
-npm run migrate:up          # applies src/migrations (28 today); never run migrate:down on a real DB
+npm run migrate:up          # applies src/migrations (30 today); never run migrate:down on a real DB
 npm run dev                 # or npm start; http://localhost:4000, Swagger at /api/docs
 npm run storage:configure   # only with S3/MinIO: bucket CORS/settings
+npm run worker:attempts     # optional locally: submits expired attempts in the background
 ```
 
 ### 5.3 Seed and demo accounts
@@ -681,11 +720,9 @@ The script prints pass or fail for the secrets, `CORS_ORIGINS`, `/health` and `/
 14e. **Published tests are fully frozen.** Only archive and copy work; show settings as read-only. Tests have no translations and no per-assignment time or attempt overrides. `moduleId` is optional; lessons link to tests through `testId`, so a published test used by a lesson cannot be archived (`409 TEST_LINKED_TO_LESSON`).
 14f. **Points and `totalPoints` are decimal strings** such as `"2.50"`. Do not treat them as numbers for display.
 14g. **`DELETE` on an assignment revokes it**, and the row stays in the list with `status: "revoked"`.
-14h. **`tests.results.read` has no endpoint yet.** Results arrive with attempts in M11.
 
 ### Not implemented (tables exist, no endpoints)
 
-15. Attempts, grading and results (M11).
 16. Progress analytics, notes, favorites and activity APIs.
 17. Notifications and inbox, broadcast campaigns, Web Push.
 18. AI chat and budgets.

@@ -1,5 +1,25 @@
 # Decisions
 
+## 2026-11-05 — M11 attempts, timing and grading
+
+The user set the access, time, attempt, autosave, grading, reveal and endpoint rules. The following were chosen here, unattended; please review.
+
+1. **`test_attempts.expires_at` is `deadline_at`.** The column exists with this meaning, so no second column was added. The API calls it `deadlineAt`.
+2. **Personal window needs no table.** Its start is the student's earliest `started_at` on the assignment. An advisory lock per student and assignment serializes starts. Changing `personalWindowMinutes` affects later starts only; running attempts keep their deadline.
+3. **`deadlineAt` is fixed at start.** Moving `closesAt` later does not extend a running attempt, and moving it earlier does not shorten one.
+4. **Attempt limits count per assignment**, as `UNIQUE (assignment_id, user_id, attempt_number)` implies. A student with both a direct and a group assignment gets both limits. Cancelled attempts do not count.
+5. **`expired` is a finished status** that carries a score, so auto-submission stays visible. `graded` means the student submitted. `submittedAt` of an expired attempt is the deadline.
+6. **Access is rechecked while an attempt runs.** Loading or saving an in-progress attempt needs the enrollment and module grant to remain active (`403`); submitting does not, so work is never trapped. A revoked assignment or a left group blocks new starts and resuming through `start`, but not an attempt already open by its id.
+7. **Matching scores per pair.** The request said "per pair rules" and nothing else defines them: `correct / max(key pairs, sent pairs)`, rounded down. Extra pairs lower the share. `requireAllLeft` is not an extra penalty. Multiple choice stays all-or-nothing, because no schema or decision defines partial credit.
+8. **`shuffleOptions` also shuffles both matching columns.**
+9. **Short text normalization** is Unicode NFC, trim and lower case. Inner spaces and punctuation are significant.
+10. **Reveal uses the policy stored at start** and the live `closesAt`. Score, percent and passed are always shown after submit; "reveal" covers question-level detail, keys and explanations.
+11. **`GET attempt` returns no questions once finished**, so review content follows the reveal policy in one place.
+12. **Staff never receive answer keys** in attempt detail, following the question bank rule that only bank managers see keys.
+13. **Results scope is `course_teachers.can_view_results`.** `group_teachers.can_view_results` is not used yet.
+14. **Regrade uses `tests.results.read`**, as requested, although it writes. It overrides points only; published keys are immutable, so automatic regrading could not change anything.
+15. **Audit events:** `test.attempt_started`, `test.attempt_submitted`, `test.attempt_expired` (no actor), `test.attempt_regraded`. Autosaves are not audited. Audit metadata has no answers or keys.
+
 ## 2026-11-04 — M10 test authoring and assignment
 
 Made without the user (the task ran unattended); please review. The learner side is M11.
