@@ -385,7 +385,8 @@ Screens should:
 - Run the countdown from `deadlineAt - serverNow`, and resync on each response. `deadlineAt: null` means no time limit.
 - Use the `id` of each question (the attempt question) in the autosave path, keep the order as returned, and raise `revision` on every save.
 - On `409 ATTEMPT_DEADLINE_PASSED`, open the result: the server has already submitted the attempt.
-- Handle `revealed: false` (score only) and `revealsAt`.
+- Handle `revealed: false` (score only), `revealsAt` and `remainingAttempts`. With `after_submission` the answers appear only after the last attempt or when the window closes.
+- A running attempt keeps working after its assignment is revoked.
 
 The learner lesson `test` now has `assignment.id` and `attempts: { status, attemptId, deadlineAt, score, maxScore, submittedAt, remainingAttempts }`, where `status` is `not_started`, `in_progress` or `submitted`, and `remainingAttempts: null` means unlimited.
 
@@ -393,7 +394,7 @@ Demo seed: `+992900000004` (Aziza) has a submitted attempt; `+992900000008` (Fir
 
 ### Admin: test results (M11)
 
-Permission `tests.results.read`; teachers need `canViewResults` on the course.
+Permission `tests.results.read` (regrade: `tests.results.regrade`, owner and admin only). Teachers need `canViewResults` on the course (all attempts) or on a group (only attempts of that group's assignments).
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -449,6 +450,7 @@ As seeded by the migrations:
 | `questions.read`, `questions.manage` | ✓ | ✓ | ✓ (own banks / staff-visible banks) | — |
 | `questions.review` | ✓ | ✓ | — | — |
 | `tests.read`, `tests.manage`, `tests.assign`, `tests.results.read` | ✓ | ✓ | ✓ scoped | — |
+| `tests.results.regrade` | ✓ | ✓ | — | — |
 | `tests.publish` | ✓ | ✓ | — | — |
 
 Notes:

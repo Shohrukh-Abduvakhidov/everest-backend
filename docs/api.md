@@ -77,9 +77,9 @@ Time is decided by the server. Every attempt response has `serverNow`; show the 
 | `GET /tests/attempts/:attemptId/result` | owner | Result; details follow the reveal policy |
 | `GET /admin/tests/:testId/attempts` | `tests.results.read` | Filters `assignmentId`, `userId`, `status`, paging |
 | `GET /admin/tests/:testId/attempts/:attemptId` | `tests.results.read` | Answers, points, score revisions; never the key |
-| `POST /admin/tests/:testId/attempts/:attemptId/regrade` | `tests.results.read` | `{ reason, idempotencyKey, overrides: [{ attemptQuestionId, points }] }` |
+| `POST /admin/tests/:testId/attempts/:attemptId/regrade` | `tests.results.regrade` (owner, admin) | `{ reason, idempotencyKey, overrides: [{ attemptQuestionId, points }] }` |
 
-**Start** needs a published test, an active enrollment in the course, an active module grant when `tests.module_id` is set, and an active assignment (direct, or through an active group membership) whose window is open. `deadlineAt` is the earliest of start + time limit, `closesAt` and the personal window end, fixed at start. The personal window (`personalWindowMinutes` on assignment create and patch) begins at the student's first start and is shared by all their attempts. Errors: `ASSIGNMENT_NOT_FOUND`, `COURSE_ENROLLMENT_REQUIRED`, `MODULE_ACCESS_DENIED`, `TEST_NOT_AVAILABLE`, `ASSIGNMENT_NOT_OPEN`, `ASSIGNMENT_CLOSED`, `ATTEMPTS_EXHAUSTED`, `PERSONAL_WINDOW_ENDED`.
+**Start** needs a published test, an active enrollment in the course, an active module grant when `tests.module_id` is set, and an active assignment (direct, or through an active group membership) whose window is open. `deadlineAt` is the earliest of start + time limit, `closesAt` and the personal window end, fixed at start. The personal window (`personalWindowMinutes` on assignment create and patch) begins at the student's first start and is shared by all their attempts. A running attempt survives the revocation of its assignment or leaving the group: `start` resumes it, and it ends at its deadline. Only new attempts are refused. Errors: `ASSIGNMENT_NOT_FOUND`, `COURSE_ENROLLMENT_REQUIRED`, `MODULE_ACCESS_DENIED`, `TEST_NOT_AVAILABLE`, `ASSIGNMENT_NOT_OPEN`, `ASSIGNMENT_CLOSED`, `ATTEMPTS_EXHAUSTED`, `PERSONAL_WINDOW_ENDED`.
 
 **Answers by type:** `single_choice` `{ optionKey }`; `multiple_choice` `{ optionKeys }`; `matching` `{ pairs: [{ left, right }] }`; `numeric` `{ value }`; `short_text` `{ text }` (up to 500 characters); `null` clears.
 
@@ -89,9 +89,9 @@ Time is decided by the server. Every attempt response has `serverNow`; show the 
 
 **Grading:** single and numeric are exact; multiple is all-or-nothing; short text ignores case and outer spaces; matching earns a share per correct pair (`correct / max(key pairs, sent pairs)`), rounded down to 0.01. Unanswered questions earn 0.
 
-**Result:** `score`, `maxScore`, `percent` and `passed` (`null` without `passPercent`) always appear. `questions` with `correctAnswer` and `explanation` appear only when `revealed`: at once for `after_submission`, from `revealsAt` (`closesAt`) for `after_window`, never for `never`.
+**Result:** `remainingAttempts` is returned too. `score`, `maxScore`, `percent` and `passed` (`null` without `passPercent`) always appear. `questions` with `correctAnswer` and `explanation` appear only when `revealed`: for `after_submission` only once no attempt remains on the assignment or the window has closed (with unlimited attempts, only when the window closes), for `after_window` from `closesAt`, never for `never`. `revealsAt` is `closesAt` while it applies. A student is never shown keys that a retake could still benefit from.
 
-**Regrade** works on finished attempts, sets `gradingStatus: manual`, recalculates the score and appends a revision. Repeating an `idempotencyKey` changes nothing; a key used for another attempt returns `409 IDEMPOTENCY_KEY_CONFLICT`. Teachers need `can_view_results` on the test's course; otherwise `404 TEST_NOT_FOUND`.
+**Regrade** works on finished attempts, sets `gradingStatus: manual`, recalculates the score and appends a revision. Repeating an `idempotencyKey` changes nothing; a key used for another attempt returns `409 IDEMPOTENCY_KEY_CONFLICT`. Teachers see attempts through `course_teachers.can_view_results` (every attempt of the course's tests) or `group_teachers.can_view_results` (only attempts of assignments made to that group); out of scope the test is `404 TEST_NOT_FOUND` and an attempt `404 ATTEMPT_NOT_FOUND`.
 
 ## Test authoring APIs (M10)
 

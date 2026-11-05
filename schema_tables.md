@@ -4402,4 +4402,5 @@ This check validates the self-contained SQL reference and dictionary consistency
 ## M11 additions
 
 - `test_assignments.personal_window_minutes` (optional, positive).
+- Permission `tests.results.regrade` (owner, admin).
 - Partial index `attempts_expiring_idx` on `test_attempts (expires_at)` for in-progress attempts.

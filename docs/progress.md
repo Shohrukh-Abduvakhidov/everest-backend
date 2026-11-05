@@ -8,6 +8,7 @@ M09 (indexed book import) is merged (PR #24). The M17 admin-accounts slice (acco
 
 ## 2026-11-05 — M11 attempts, timing and grading (`feat/m11-attempts`)
 
+- Review decisions applied: group-teacher result scope, permission `tests.results.regrade` (migration `20261105040000000`), keys held back while attempts remain, running attempts survive revocation.
 - Added: migration `20261105030000000_add-attempt-timing.js`, learner and staff attempt endpoints, grading of all five types, result and reveal policies, score revisions, `npm run worker:attempts`, lesson attempt state, seeded attempts.
 - Verified on disposable databases: see the handoff. Real browser flows and the worker as a separate process were not run.
 
