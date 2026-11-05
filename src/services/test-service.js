@@ -21,10 +21,11 @@ const settingFields = [
    'shuffleOptions',
    'passPercent',
 ]
-const assignmentFields = ['groupId', 'userId', 'opensAt', 'closesAt']
+const assignmentFields = ['groupId', 'userId', 'opensAt', 'closesAt', 'personalWindowMinutes']
 const maximumTitleLength = 200
 const maximumTimeLimitMinutes = 1440
 const maximumAttempts = 1000
+const maximumPersonalWindowMinutes = 525600
 const maximumQuestionsPerRequest = 100
 const maximumQuestionsPerTest = 500
 const defaultPoints = '1'
@@ -279,6 +280,7 @@ function safeAssignment(row) {
       status: row.status,
       opensAt: row.opens_at,
       closesAt: row.closes_at,
+      personalWindowMinutes: row.personal_window_minutes,
       assignedBy: row.assigned_by,
       createdAt: row.created_at,
    }
@@ -601,6 +603,9 @@ async function createAssignmentService(userId, testIdValue, body, overrides) {
    if (closesAt !== null && closesAt <= now) {
       throw validationError('closesAt', 'closesAt must be in the future')
    }
+   const personalWindowMinutes = body.personalWindowMinutes === undefined
+      ? null
+      : parseOptionalInteger(body.personalWindowMinutes, 'personalWindowMinutes', maximumPersonalWindowMinutes)
    return transaction(async (client) => {
       const test = await loadTest(repository, client, actorId, testId)
       requirePublished(test)
@@ -626,6 +631,7 @@ async function createAssignmentService(userId, testIdValue, body, overrides) {
          assignedBy: actorId,
          opensAt,
          closesAt,
+         personalWindowMinutes,
       }, client)
       await audit(auth, client, actorId, 'test.assignment_created', 'test_assignment', assignmentId, {
          testId,
@@ -640,7 +646,7 @@ async function updateAssignmentService(userId, testIdValue, assignmentIdValue, b
    const actorId = normalizeInternalId(userId)
    const testId = parseTestId(testIdValue)
    const assignmentId = parseAssignmentId(assignmentIdValue)
-   validateBody(body, ['opensAt', 'closesAt'])
+   validateBody(body, ['opensAt', 'closesAt', 'personalWindowMinutes'])
    if (!Object.keys(body).length) throw validationError('body')
    return transaction(async (client) => {
       const test = await loadTest(repository, client, actorId, testId)
@@ -656,7 +662,10 @@ async function updateAssignmentService(userId, testIdValue, assignmentIdValue, b
          closesAt = body.closesAt === null ? null : parseTimestamp(body.closesAt, 'closesAt')
       }
       requireWindow(test, opensAt, closesAt)
-      await repository.updateAssignmentWindow(assignmentId, { opensAt, closesAt }, client)
+      const personalWindowMinutes = body.personalWindowMinutes === undefined
+         ? assignment.personal_window_minutes
+         : parseOptionalInteger(body.personalWindowMinutes, 'personalWindowMinutes', maximumPersonalWindowMinutes)
+      await repository.updateAssignmentWindow(assignmentId, { opensAt, closesAt, personalWindowMinutes }, client)
       await audit(auth, client, actorId, 'test.assignment_updated', 'test_assignment', assignmentId, {
          testId,
          fields: Object.keys(body),
