@@ -123,6 +123,25 @@ function safeProgress(row) {
    }
 }
 
+// The best window wins when a student has several assignments: open, then upcoming, then closed.
+function safeLessonTest(row) {
+   if (!row || row.status !== 'published') return null
+   const rank = { open: 0, upcoming: 1, closed: 2 }
+   const [best] = [...row.assignments].sort((left, right) => rank[left.state] - rank[right.state])
+   return {
+      id: row.id,
+      title: row.title,
+      questionCount: row.question_count,
+      timeLimitMinutes: row.duration_seconds === null ? null : row.duration_seconds / 60,
+      maxAttempts: row.max_attempts,
+      assignment: {
+         state: best?.state ?? 'none',
+         opensAt: iso(best?.opens_at),
+         closesAt: iso(best?.closes_at),
+      },
+   }
+}
+
 function safeNote(row) {
    return {
       id: row.id,
@@ -156,16 +175,18 @@ async function getLearnerLessonService(userId, courseIdValue, lessonIdValue, ove
    const lesson = await requireLearnerLesson(deps, actorId, courseId, lessonId)
    if (!lesson.granted) return { lesson: safeLearnerLessonSummary(lesson) }
    await deps.requireAccess(actorId, lesson.module_id)
-   const [asset, chapters, resources, progress] = await Promise.all([
+   const [asset, chapters, resources, progress, test] = await Promise.all([
       lesson.video_asset_id ? deps.lessons.findAsset(lesson.video_asset_id) : null,
       deps.lessons.listChapters([lesson.id]),
       deps.lessons.listResources([lesson.id]),
       deps.learner.findProgress(actorId, lesson.id),
+      lesson.test_id ? deps.learner.findLearnerLessonTest(actorId, lesson.test_id) : null,
    ])
    return {
       lesson: {
          ...safeLearnerLessonSummary(lesson),
          content: lesson.content,
+         test: safeLessonTest(test),
          allowOffline: lesson.allow_offline,
          video: asset ? { durationSeconds: asset.duration_seconds, playable: videoPlayable(asset) } : null,
          chapters: chapters.map(safeChapter),

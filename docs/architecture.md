@@ -722,3 +722,7 @@ flowchart LR
 ```
 
 Detailed column-level schema remains in `../schema_tables.md`; implemented endpoint contracts remain in `api.md`; accepted decisions remain in `decisions.md`; execution history remains in `progress.md`.
+
+## Background jobs
+
+`src/jobs/question-import-worker.js` runs confirmed package uploads. It is started only by `npm run worker:imports`, never by importing the app. Claims use `SKIP LOCKED` with a renewed lease, so several processes are safe, but packages wait on local disk, so workers and the API must share a host.

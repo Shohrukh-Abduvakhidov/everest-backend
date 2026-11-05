@@ -31,5 +31,7 @@ import './integration/question-bank.test.js';
 import './integration/question-import.test.js';
 import './integration/tests-authoring.test.js';
 import './integration/learner-catalog.test.js';
+import './integration/lesson-tests.test.js';
+import './integration/question-import-upload.test.js';
 import './integration/real-storage.test.js';
 import './integration/telegram-auth.test.js';

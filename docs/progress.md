@@ -6,6 +6,12 @@ Updated: 2026-11-05.
 
 M09 (indexed book import) is merged (PR #24). The M17 admin-accounts slice (account list, role replacement, owner protection) is implemented on `feat/admin-accounts-api` and is awaiting review. Real-storage (MinIO/S3) import is still **not** verified.
 
+## 2026-11-05 — Lesson-test link and HTTP question import (`feat/lesson-tests-and-import`)
+
+- `test` and `mixed` lessons can link a test of the same course and be published; `tests.module_id` added; learner lessons return a safe test summary; archive and delete of linked tests are refused; course copy reports cleared links; the seed publishes 4 linked test lessons. Migration `20261105010000000_add-lesson-test-links.js`.
+- Package upload over HTTP with dry run, confirm, background worker (`npm run worker:imports`) and polling; `applyMatchingDefaults` for HTTP and CLI; total unpacked ZIP limit. Migration `20261105020000000_add-question-import-uploads.js`.
+- **Tests:** `tests/integration/lesson-tests.test.js`, `tests/integration/question-import-upload.test.js`. Results and the not-verified list are in `docs/handoffs/current.md`.
+
 ## 2026-11-05 — Rich demo content (`feat/demo-content`)
 
 - `npm run seed:demo` now also creates, through the existing services: 5 subjects with colors, sections and nested topics; 4 new published courses (Russian text with Tajik title translations; one draft and one archived module; draft video lessons); 5 question banks (4 staff, 1 private) with 145 published, 25 draft and 15 archived questions of all five types; 4 published tests, 1 draft and 1 archived with group and student assignments in open, upcoming and closed windows; groups B and the archived C with announcements; enrollments and module grants in every state; 18 more accounts including teachers, pending, blocked and rejected users. Phones `01` to `08` and the password handling are unchanged. The earlier English demo content is kept.

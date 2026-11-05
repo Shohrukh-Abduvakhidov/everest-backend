@@ -24,12 +24,12 @@ function findEndRecord(buffer) {
 }
 
 function isSafePath(name) {
-   return name.length > 0 && name.length <= 500 && !name.startsWith('/') && !name.includes('\\')
+   return name.length > 0 && name.length <= 500 && !name.startsWith('/') && !/[\\\x00-\x1f]/.test(name)
       && !/^[A-Za-z]:/.test(name) && !name.split('/').some((part) => part === '..' || part === '.')
 }
 
 // Returns Map<path, Buffer> of file entries; directories are skipped.
-function readZipEntries(buffer, { maxEntryBytes }) {
+function readZipEntries(buffer, { maxEntryBytes, maxTotalBytes = Infinity }) {
    if (buffer.length < 22) throw invalid('ZIP archive is too small')
    const end = findEndRecord(buffer)
    const count = buffer.readUInt16LE(end + 10)
@@ -40,6 +40,7 @@ function readZipEntries(buffer, { maxEntryBytes }) {
       throw invalid('ZIP64 or malformed central directory is not supported')
    }
    const entries = new Map()
+   let declaredTotal = 0
    let offset = directoryOffset
    for (let index = 0; index < count; index += 1) {
       if (offset + 46 > end || buffer.readUInt32LE(offset) !== centralEntry) {
@@ -63,6 +64,11 @@ function readZipEntries(buffer, { maxEntryBytes }) {
          throw new AppError(400, 'PACKAGE_ENTRY_TOO_LARGE', 'ZIP entry exceeds the size limit', [
             { field: name, message: 'entry is too large' },
          ])
+      }
+      // Declared sizes bound inflation below, so this total stops a decompression bomb.
+      declaredTotal += size
+      if (declaredTotal > maxTotalBytes) {
+         throw new AppError(400, 'PACKAGE_TOO_LARGE', 'Package exceeds the size limit when unpacked')
       }
       if (entries.has(name)) throw invalid('ZIP archive contains a duplicate path')
       if (localOffset + 30 > buffer.length || buffer.readUInt32LE(localOffset) !== localEntry) {

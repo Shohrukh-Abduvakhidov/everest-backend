@@ -276,7 +276,7 @@ test('lessons, playback, notes, progress and offline licenses integration', asyn
          const empty = await api('POST', adminLessons, manager, { title: 'Video soon', lessonType: 'video' })
          const quiz = await api('POST', adminLessons, manager, { title: 'Quiz', lessonType: 'test' })
          assert.equal((await api('POST', `${lessonPath(empty.body.data.id)}/publish`, manager)).body.error.code, 'LESSON_VIDEO_REQUIRED')
-         assert.equal((await api('POST', `${lessonPath(quiz.body.data.id)}/publish`, manager)).body.error.code, 'LESSON_TYPE_NOT_PUBLISHABLE')
+         assert.equal((await api('POST', `${lessonPath(quiz.body.data.id)}/publish`, manager)).body.error.code, 'LESSON_TEST_REQUIRED')
          for (const id of [videoLessonId, textLessonId]) {
             const published = await api('POST', `${lessonPath(id)}/publish`, manager)
             assert.equal(published.status, 200, JSON.stringify(published.body))
@@ -510,7 +510,7 @@ test('lessons, playback, notes, progress and offline licenses integration', asyn
          assert.equal(removeVideo.status, 409)
          assert.equal(removeVideo.body.error.code, 'LESSON_VIDEO_REQUIRED')
          const toTest = await api('PATCH', lessonPath(videoLessonId), manager, { lessonType: 'test', videoAssetId: null })
-         assert.equal(toTest.body.error.code, 'LESSON_TYPE_NOT_PUBLISHABLE')
+         assert.equal(toTest.body.error.code, 'LESSON_TEST_REQUIRED')
          const foreign = await api('PATCH', lessonPath(videoLessonId), manager, { videoAssetId: foreignVideoId })
          assert.equal(foreign.status, 400)
 

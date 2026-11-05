@@ -174,7 +174,21 @@ An image must be a `ready` PNG/JPEG asset that the actor uploaded, that is alrea
 
 ## Question import runs (M09)
 
-Packages are imported with the CLI (`npm run import:questions`, see `docs/import-runbook.md`). No HTTP route accepts a package upload. Dry runs are not stored. The API below is read-only and lists recorded real runs.
+Packages are imported with the CLI (`npm run import:questions`, see `docs/import-runbook.md`) or over HTTP (next section). Both use the same planner and writer. CLI dry runs are not stored. The API below lists recorded real runs.
+
+### Package upload (HTTP)
+
+All three routes need `questions.manage`. Mutations need CSRF for cookie sessions. The flow is upload (dry run), confirm, then poll. The worker must run: `npm run worker:imports`.
+
+- `POST /admin/question-imports/packages?applyMatchingDefaults&idempotencyKey`. The raw body is the ZIP with `Content-Type: application/zip` (or `application/x-zip-compressed`). Limit: `QUESTION_IMPORT_MAX_UPLOAD_MB` (default 256, at most 512). Rate: `QUESTION_IMPORT_RATE_LIMIT` uploads per user per window (default 20). Returns `201 { upload, duplicate: false }`. Nothing is imported yet.
+   - A package that fails the dry run is still `201`, with `status: "rejected"` and the report in `upload.dryRun`; its file is not kept.
+   - The same bytes already queued or running for you: `200 { upload, duplicate: true }`. For another user: `409 IMPORT_PACKAGE_IN_PROGRESS`. Your own unconfirmed upload of the same bytes is replaced, and the old one becomes `expired` with `errorCode: IMPORT_UPLOAD_SUPERSEDED`.
+   - An already imported package shows `previousRunId`; confirming it replays that run without writing.
+   - Errors: `415 PACKAGE_CONTENT_TYPE_INVALID`, `413 PACKAGE_TOO_LARGE`, `400 PACKAGE_ARCHIVE_INVALID` (not a ZIP, ZIP64, encrypted, unsafe path such as `../x`), `PACKAGE_TOO_LARGE` (unpacked total over 512 MiB), `PACKAGE_ENTRY_TOO_LARGE`, `PACKAGE_MANIFEST_MISSING`, `PACKAGE_JSON_INVALID`, `PACKAGE_UPLOAD_FAILED`.
+- `GET /admin/question-imports/packages/:uploadId` → `upload`, visible to the uploader and administrators. `status`: `rejected|validated|queued|running|completed|failed|expired`. `runId` is set when the upload finishes; use it with `GET /admin/question-imports/:importId` and `/errors`. `errorCode` explains `failed`, for example `STORAGE_NOT_CONFIGURED` or `IMPORT_WORKER_LOST`.
+- `POST /admin/question-imports/packages/:uploadId/confirm` → `202 upload`. Idempotent while queued or running. `409 IMPORT_UPLOAD_NOT_CONFIRMABLE` for any other status or after `expiresAt` (`QUESTION_IMPORT_UPLOAD_TTL_HOURS`, default 24). `503 STORAGE_NOT_CONFIGURED` when the package has new images and no storage is configured. Then nothing is written.
+
+`applyMatchingDefaults=true` (CLI: `--apply-matching-defaults`) sets only `null` matching rules to `requireAllLeft: true`, `allowRightReuse: false`, and adds a `MATCHING_DEFAULTS_APPLIED` warning per question. Without it the rules stay `null` with a `MATCHING_RULE_UNSPECIFIED` warning. The option changes the default idempotency key, so it can be applied to a package imported earlier without it; this updates drafts only.
 
 Permission: `questions.manage` **or** `questions.review`. Otherwise the response is `403 ACTION_FORBIDDEN`.
 
@@ -237,10 +251,11 @@ Mutations use the CSRF check and the administrative mutation rate limit, and are
 - `PUT /modules/:moduleId/lessons/order` → `{ lessonIds }`. Every lesson of the module must be listed exactly once, otherwise `409 LESSON_ORDER_MISMATCH`.
 - `GET /lessons/:lessonId` → detail plus `relationship.canManage`.
 - `PATCH /lessons/:lessonId` → partial update in any status (draft, published, archived). Learners see changes to a published lesson immediately.
-   - Published lessons must stay publishable: they cannot become `test` lessons (`409 LESSON_TYPE_NOT_PUBLISHABLE`) or lose the video of a `video`/`mixed` lesson (`409 LESSON_VIDEO_REQUIRED`).
+   - `testId` (nullable) links a test of the same course to a `test` or `mixed` lesson. Another course or lesson type: `400 VALIDATION_ERROR` on `testId`. An archived test: `409 TEST_ARCHIVED`. A draft test may be linked to a draft lesson. Use `GET /admin/tests?courseId=` (`tests.read`) as the picker.
+   - Published lessons must stay publishable: a `test` lesson must keep a test (`409 LESSON_TEST_REQUIRED`), a newly linked test must be published (`409 TEST_NOT_PUBLISHED`), and a lesson cannot lose the video of a `video`/`mixed` lesson (`409 LESSON_VIDEO_REQUIRED`).
    - A new video must be ready, seek-ready and from the same course. If existing chapters would start at or after the new video's end, the request fails with `409 CHAPTERS_EXCEED_VIDEO_DURATION` and nothing changes.
    - Replacing the video revokes active offline licenses for the old video in the same transaction. Their next check returns `403 OFFLINE_ACCESS_DENIED` with reason `video_unavailable`. Progress is kept.
-- `POST /lessons/:lessonId/publish`, `/archive`, `/restore` → `draft → published → archived → draft`. Other transitions return `409 INVALID_LESSON_TRANSITION`. Publication can also return `409 LESSON_VIDEO_REQUIRED`, `LESSON_TYPE_NOT_PUBLISHABLE` (test lessons) or `VIDEO_NOT_PLAYABLE`.
+- `POST /lessons/:lessonId/publish`, `/archive`, `/restore` → `draft → published → archived → draft`. Other transitions return `409 INVALID_LESSON_TRANSITION`. Publication can also return `409 LESSON_VIDEO_REQUIRED`, `LESSON_TEST_REQUIRED` (a `test` lesson without a test), `TEST_NOT_PUBLISHED` (a linked test that is not published) or `VIDEO_NOT_PLAYABLE`.
 - `DELETE /lessons/:lessonId` → empty drafts only (`409 LESSON_NOT_DELETABLE`).
 - `PUT /lessons/:lessonId/chapters` → atomically replaces `{ chapters: [{ startSeconds, title, translations? }] }` in any status.
    - `startSeconds` must be strictly increasing and below the video duration. There are at most 100 chapters, and a video is required (`409 LESSON_HAS_NO_VIDEO`).
@@ -723,3 +738,11 @@ Requires authentication and an active `telegram_connections` row. Sends a small 
 ```
 
 Missing messaging permission returns `409 TELEGRAM_CONNECTION_UNAVAILABLE`. Telegram delivery failures return a safe `502 TELEGRAM_MESSAGE_FAILED`; a blocked or unavailable chat changes the stored connection status to `blocked`.
+
+## Lesson and test links
+
+- `lessons.test_id` links a lesson to one test of its course; several lessons may share a test. `Lesson` DTOs have `testId`.
+- `tests.module_id` is optional: `POST`/`PATCH /admin/tests` accept `moduleId` (draft only, a module of the test's course, otherwise `400`), and `Test` has `moduleId`. A test copy keeps it. A module with tests cannot be deleted (`409 COURSE_MODULE_NOT_DELETABLE`).
+- Archiving a test used by a published lesson, or deleting a draft test used by any lesson, returns `409 TEST_LINKED_TO_LESSON`; `details[].message` holds the lesson ids. Copying a test changes no lesson. Publishing a test never depends on lessons.
+- `POST /admin/courses/:id/copy` does not copy tests, so copied lessons have no link; `copied.clearedTestLinks` counts them.
+- `GET` learner lesson with access adds `test: { id, title, questionCount, timeLimitMinutes, maxAttempts, assignment: { state, opensAt, closesAt } }` or `null`. `state` is `open|upcoming|closed|none`, taken from the student's own and group assignments, best window first. It never contains questions or answers. Starting an attempt arrives with M11.

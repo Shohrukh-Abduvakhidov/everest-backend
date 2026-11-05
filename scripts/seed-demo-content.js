@@ -613,6 +613,7 @@ const testCatalog = [
       bank: 'demo-biology',
       from: 0,
       count: 10,
+      lesson: { module: 0, title: 'Тест: клетка и её строение', tgTitle: 'Тест: ҳуҷайра ва сохтори он' },
       settings: { mode: 'practice', timeLimitMinutes: 20, maxAttempts: 3, resultPolicy: 'best', answerRevealPolicy: 'after_submission', shuffleQuestions: true, shuffleOptions: true, passPercent: 60 },
       assignments: [{ group: 'a', window: open }, { user: 'student1', window: open }],
    },
@@ -622,6 +623,7 @@ const testCatalog = [
       bank: 'demo-chemistry',
       from: 0,
       count: 15,
+      lesson: { module: 1, title: 'Контрольный тест по химии', tgTitle: 'Санҷиши назоратӣ аз химия' },
       settings: { mode: 'exam', timeLimitMinutes: 30, maxAttempts: 1, resultPolicy: 'first', answerRevealPolicy: 'after_window', shuffleQuestions: false, shuffleOptions: true, passPercent: 70 },
       assignments: [{ group: 'b', window: upcoming }, { user: 'student1', window: open }],
    },
@@ -631,6 +633,7 @@ const testCatalog = [
       bank: 'demo-physics',
       from: 0,
       count: 10,
+      lesson: { module: 0, title: 'Тест по механике', tgTitle: 'Тест аз механика' },
       settings: { mode: 'lesson', timeLimitMinutes: null, maxAttempts: 5, resultPolicy: 'best', answerRevealPolicy: 'after_submission', shuffleQuestions: false, shuffleOptions: false, passPercent: 50 },
       assignments: [{ group: 'a', window: closed }, { user: 'student5', window: openEnded }, { user: 'student3', window: upcoming }],
    },
@@ -640,6 +643,7 @@ const testCatalog = [
       bank: 'demo-math',
       from: 0,
       count: 15,
+      lesson: { module: 2, title: 'Пробный тест НЦТ', tgTitle: 'Тести озмоишӣ' },
       settings: { mode: 'exam', timeLimitMinutes: 45, maxAttempts: 2, resultPolicy: 'last', answerRevealPolicy: 'never', shuffleQuestions: true, shuffleOptions: true, passPercent: 55 },
       assignments: [{ group: 'b', window: open }, { user: 'student2', window: closed }, { user: 'student4', window: open }],
    },
@@ -691,6 +695,26 @@ async function ensureAssignment(context, test, assignment, groupIds) {
    note('test assignment', `${test.title} / ${assignment.group ? `group ${assignment.group}` : assignment.user}`, !exists)
 }
 
+// A published test lesson at the end of a module, linked to the published demo test.
+async function ensureTestLesson(context, course, testId, definition) {
+   const { actorId, note } = context
+   const moduleId = course.modules[definition.module].id
+   const { lessons } = await listModuleLessonsService(actorId, course.id, moduleId)
+   let lesson = lessons.find((item) => item.title === definition.title)
+   const created = !lesson
+   if (!lesson) {
+      lesson = await createLessonService(actorId, course.id, moduleId, {
+         title: definition.title,
+         lessonType: 'test',
+         testId,
+         content: { blocks: [{ type: 'paragraph', text: 'Проверьте себя: тест открывается в назначенное окно.' }] },
+         translations: { tg: { title: definition.tgTitle } },
+      })
+   }
+   if (lesson.status === 'draft') await publishLessonService(actorId, course.id, lesson.id)
+   note('test lesson', definition.title, created)
+}
+
 async function ensureTests(context, courses, bankQuestionIds, groupIds) {
    const { actorId, note } = context
    for (const plan of testCatalog) {
@@ -717,6 +741,7 @@ async function ensureTests(context, courses, bankQuestionIds, groupIds) {
       }
       if (test.status === 'published') {
          for (const assignment of plan.assignments) await ensureAssignment(context, test, assignment, groupIds)
+         if (plan.lesson) await ensureTestLesson(context, course, test.id, plan.lesson)
          if (plan.status === 'archived') await archiveTestService(actorId, test.id)
       }
    }

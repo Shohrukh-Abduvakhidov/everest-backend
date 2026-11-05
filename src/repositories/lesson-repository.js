@@ -10,7 +10,7 @@ const administratorSql = `
 
 const lessonColumns = `lesson.id, lesson.module_id, lesson.course_id, lesson.title,
    lesson.position, lesson.lesson_type, lesson.content, lesson.translations,
-   lesson.video_asset_id, lesson.allow_offline, lesson.status, lesson.created_by,
+   lesson.video_asset_id, lesson.test_id, lesson.allow_offline, lesson.status, lesson.created_by,
    lesson.created_at, lesson.updated_at`
 
 const assetColumns = `asset.id, asset.kind, asset.mime_type, asset.file_name, asset.size_bytes,
@@ -107,8 +107,8 @@ async function createLesson(lesson, client) {
    const result = await client.query(
       `INSERT INTO lessons AS lesson
          (module_id, course_id, title, position, lesson_type, content, translations,
-          video_asset_id, allow_offline, status, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'draft', $10)
+          video_asset_id, allow_offline, status, created_by, test_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'draft', $10, $11)
        RETURNING ${lessonColumns}`,
       [
          normalizeInternalId(lesson.moduleId),
@@ -121,6 +121,7 @@ async function createLesson(lesson, client) {
          lesson.videoAssetId,
          lesson.allowOffline,
          normalizeInternalId(lesson.actorId),
+         lesson.testId,
       ],
    )
    return result.rows[0]
@@ -135,6 +136,7 @@ async function updateLesson(lessonId, changes, client) {
          translations = CASE WHEN $6 THEN $7 ELSE translations END,
          video_asset_id = CASE WHEN $8 THEN $9 ELSE video_asset_id END,
          allow_offline = COALESCE($10, allow_offline),
+         test_id = CASE WHEN $11 THEN $12 ELSE test_id END,
          updated_at = CURRENT_TIMESTAMP
        WHERE id = $1
        RETURNING ${lessonColumns}`,
@@ -149,9 +151,21 @@ async function updateLesson(lessonId, changes, client) {
          changes.hasVideoAssetId,
          changes.videoAssetId,
          changes.allowOffline,
+         changes.hasTestId,
+         changes.testId,
       ],
    )
    return result.rows[0]
+}
+
+// Shared lock: an archive of the same test waits, so a lesson can never be published against
+// a test that is being archived.
+async function lockCourseTest(courseId, testId, client) {
+   const result = await client.query(
+      'SELECT id, status FROM tests WHERE id = $1 AND course_id = $2 FOR SHARE',
+      [normalizeInternalId(testId), normalizeInternalId(courseId)],
+   )
+   return result.rows[0] || null
 }
 
 async function updateLessonStatus(lessonId, status, client) {
@@ -331,6 +345,15 @@ async function copyLessons(moduleIdMap, targetCourseId, actorId, client) {
    return result.rows
 }
 
+// Tests are not part of a course copy, so copied lessons start without a test link.
+async function countLinkedLessons(sourceLessonIds, client) {
+   const result = await client.query(
+      'SELECT count(*)::integer AS count FROM lessons WHERE id = ANY($1::bigint[]) AND test_id IS NOT NULL',
+      [sourceLessonIds.map(normalizeInternalId)],
+   )
+   return result.rows[0].count
+}
+
 async function copyChapters(lessonIdMap, client) {
    if (!lessonIdMap.size) return 0
    const [sources, targets] = pairs(lessonIdMap)
@@ -361,6 +384,8 @@ async function copyResources(lessonIdMap, client) {
 }
 
 export {
+   countLinkedLessons,
+   lockCourseTest,
    applyLessonOrder,
    copyChapters,
    copyLessons,

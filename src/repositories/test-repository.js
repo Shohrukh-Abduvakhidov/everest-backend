@@ -23,7 +23,7 @@ const courseScopeSql = (courseColumn) => `(${administratorSql} OR (${teacherRole
      AND assignment.user_id = $1 AND assignment.can_manage_tests
 )))`
 
-const testColumns = `test.id, test.course_id, test.title, test.mode, test.status,
+const testColumns = `test.id, test.course_id, test.module_id, test.title, test.mode, test.status,
    test.duration_seconds, test.max_attempts, test.result_policy, test.answer_reveal_policy,
    test.shuffle_questions, test.shuffle_options, test.grading_policy, test.copied_from_id,
    test.created_by, test.created_at, test.updated_at,
@@ -92,8 +92,9 @@ async function createTest(test, client) {
    const result = await client.query(
       `INSERT INTO tests (
          course_id, title, mode, duration_seconds, max_attempts, result_policy,
-         answer_reveal_policy, shuffle_questions, shuffle_options, grading_policy, created_by
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         answer_reveal_policy, shuffle_questions, shuffle_options, grading_policy, created_by,
+         module_id
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        RETURNING id`,
       [
          normalizeInternalId(test.courseId),
@@ -107,6 +108,7 @@ async function createTest(test, client) {
          test.shuffleOptions,
          test.gradingPolicy,
          normalizeInternalId(test.createdBy),
+         test.moduleId,
       ],
    )
    return result.rows[0].id
@@ -117,7 +119,7 @@ async function updateTest(testId, test, client) {
       `UPDATE tests SET
          title = $2, mode = $3, duration_seconds = $4, max_attempts = $5, result_policy = $6,
          answer_reveal_policy = $7, shuffle_questions = $8, shuffle_options = $9,
-         grading_policy = $10, updated_at = CURRENT_TIMESTAMP
+         grading_policy = $10, module_id = $11, updated_at = CURRENT_TIMESTAMP
        WHERE id = $1`,
       [
          normalizeInternalId(testId),
@@ -130,6 +132,7 @@ async function updateTest(testId, test, client) {
          test.shuffleQuestions,
          test.shuffleOptions,
          test.gradingPolicy,
+         test.moduleId,
       ],
    )
 }
@@ -155,15 +158,34 @@ async function deleteDraftTest(testId, client) {
    await client.query('DELETE FROM tests WHERE id = $1', [id])
 }
 
+async function courseHasModule(courseId, moduleId, client) {
+   const result = await client.query(
+      'SELECT EXISTS (SELECT 1 FROM course_modules WHERE id = $1 AND course_id = $2) AS present',
+      [normalizeInternalId(moduleId), normalizeInternalId(courseId)],
+   )
+   return result.rows[0].present
+}
+
+// Lessons that hold a link to this test; publishedOnly narrows to links that must not break.
+async function listLinkedLessons(testId, { publishedOnly }, client) {
+   const result = await client.query(
+      `SELECT id, title, status FROM lessons
+       WHERE test_id = $1 AND ($2::boolean = FALSE OR status = 'published')
+       ORDER BY id`,
+      [normalizeInternalId(testId), publishedOnly],
+   )
+   return result.rows
+}
+
 async function copyTest(testId, title, actorId, client) {
    const id = normalizeInternalId(testId)
    const result = await client.query(
       `INSERT INTO tests (
-         course_id, title, mode, duration_seconds, max_attempts, result_policy,
+         course_id, module_id, title, mode, duration_seconds, max_attempts, result_policy,
          answer_reveal_policy, shuffle_questions, shuffle_options, grading_policy,
          generation_filters, copied_from_id, created_by
        )
-       SELECT course_id, $2, mode, duration_seconds, max_attempts, result_policy,
+       SELECT course_id, module_id, $2, mode, duration_seconds, max_attempts, result_policy,
          answer_reveal_policy, shuffle_questions, shuffle_options, grading_policy,
          generation_filters, id, $3
        FROM tests WHERE id = $1
@@ -377,6 +399,8 @@ async function revokeAssignment(assignmentId, client) {
 }
 
 export {
+   courseHasModule,
+   listLinkedLessons,
    addTestQuestions,
    copyTest,
    createAssignment,

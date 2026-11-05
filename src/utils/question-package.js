@@ -69,6 +69,13 @@ function parseManifest(files) {
    }
 }
 
+// Shared by the CLI and the HTTP upload: the same bytes give the same hash and the same files.
+function parseQuestionPackageBuffer(buffer) {
+   if (buffer.length > maxPackageBytes) throw new AppError(400, 'PACKAGE_TOO_LARGE', 'Package exceeds the size limit')
+   const files = unwrapSingleFolder(readZipEntries(buffer, { maxEntryBytes, maxTotalBytes: maxPackageBytes }))
+   return { sha256: sha256(buffer), manifest: parseManifest(files), files }
+}
+
 async function loadQuestionPackage(packagePath) {
    let info
    try {
@@ -76,19 +83,14 @@ async function loadQuestionPackage(packagePath) {
    } catch {
       throw new AppError(400, 'PACKAGE_NOT_FOUND', 'Package path does not exist')
    }
-   let files
-   let packageSha256
-   if (info.isDirectory()) {
-      files = await readDirectoryFiles(packagePath)
-      packageSha256 = directoryHash(files)
-   } else {
+   if (!info.isDirectory()) {
       if (info.size > maxPackageBytes) throw new AppError(400, 'PACKAGE_TOO_LARGE', 'Package exceeds the size limit')
-      const buffer = await readFile(packagePath)
-      packageSha256 = sha256(buffer)
-      files = readZipEntries(buffer, { maxEntryBytes })
+      return parseQuestionPackageBuffer(await readFile(packagePath))
    }
-   files = unwrapSingleFolder(files)
-   return { sha256: packageSha256, manifest: parseManifest(files), files }
+   const files = await readDirectoryFiles(packagePath)
+   const packageSha256 = directoryHash(files)
+   const unwrapped = unwrapSingleFolder(files)
+   return { sha256: packageSha256, manifest: parseManifest(unwrapped), files: unwrapped }
 }
 
 // Resolves a manifest-relative file reference without allowing escapes from the package.
@@ -99,4 +101,4 @@ function packageFile(files, reference) {
    return files.get(normalized) || null
 }
 
-export { loadQuestionPackage, packageFile, sha256 }
+export { loadQuestionPackage, packageFile, parseQuestionPackageBuffer, sha256 }

@@ -19,6 +19,7 @@ import {
    unblockUserAuthorizationMiddleware,
 } from '../middleware/admin-middleware.js'
 import { authMiddleware } from '../middleware/auth-middleware.js'
+import { questionPackageBodyMiddleware } from '../middleware/question-import-upload-middleware.js'
 import {
    copyCourseAuthorizationMiddleware,
    createCourseAuthorizationMiddleware,
@@ -104,6 +105,7 @@ import {
 import {
    adminMutationRateMiddleware,
    authenticatedCsrfMiddleware,
+   questionImportUploadRateMiddleware,
 } from '../middleware/auth-protection-middleware.js'
 import {
    manageQuestionsAuthorizationMiddleware,
@@ -147,6 +149,9 @@ import {
    getQuestionImportController,
    listQuestionImportErrorsController,
    listQuestionImportsController,
+   confirmQuestionPackageUploadController,
+   getQuestionPackageUploadController,
+   uploadQuestionPackageController,
 } from '../controllers/question-import-controller.js'
 import {
    addTestQuestionsController,
@@ -651,6 +656,26 @@ adminRouter.post(
    authenticatedCsrfMiddleware,
    adminMutationRateMiddleware,
    archiveQuestionController,
+)
+adminRouter.post(
+   '/question-imports/packages',
+   manageQuestionsAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   questionImportUploadRateMiddleware,
+   questionPackageBodyMiddleware,
+   uploadQuestionPackageController,
+)
+adminRouter.get(
+   '/question-imports/packages/:uploadId',
+   manageQuestionsAuthorizationMiddleware,
+   getQuestionPackageUploadController,
+)
+adminRouter.post(
+   '/question-imports/packages/:uploadId/confirm',
+   manageQuestionsAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   confirmQuestionPackageUploadController,
 )
 adminRouter.get(
    '/question-imports',
