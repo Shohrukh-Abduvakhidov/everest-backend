@@ -258,7 +258,16 @@ test('lesson and test links integration', async (t) => {
          questionCount: 1,
          timeLimitMinutes: 20,
          maxAttempts: 2,
-         assignment: { state: 'none', opensAt: null, closesAt: null },
+         assignment: { id: null, state: 'none', opensAt: null, closesAt: null },
+         attempts: {
+            status: 'not_started',
+            attemptId: null,
+            deadlineAt: null,
+            score: null,
+            maxScore: null,
+            submittedAt: null,
+            remainingAttempts: 2,
+         },
       })
 
       const assignment = await createAssignmentService(adminId, linked.id, { userId: studentId, opensAt: iso(2), closesAt: iso(3) })

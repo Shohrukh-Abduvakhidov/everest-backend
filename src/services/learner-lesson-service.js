@@ -2,6 +2,7 @@ import { getStorageProvider } from '../providers/storage/index.js'
 import * as authRepository from '../repositories/auth-repository.js'
 import * as learnerLessonRepository from '../repositories/learner-lesson-repository.js'
 import * as lessonRepository from '../repositories/lesson-repository.js'
+import * as attemptRepository from '../repositories/test-attempt-repository.js'
 import { withTransaction } from '../repositories/transaction-repository.js'
 import AppError from '../utils/app-error.js'
 import { parseCourseId, parseId, parseUserId, validateBody, validationError } from './course-service.js'
@@ -14,6 +15,7 @@ import {
    safeChapter,
    videoPlayable,
 } from './lesson-service.js'
+import { attemptStateSummary, finalizeExpiredAttemptsForUserService } from './test-attempt-service.js'
 
 const maximumNoteLength = 10000
 const maximumNotesPerLesson = 500
@@ -23,11 +25,13 @@ function dependencies(overrides = {}) {
    return {
       learner: overrides.learner || learnerLessonRepository,
       lessons: overrides.repository || lessonRepository,
+      attempts: overrides.attempts || attemptRepository,
       auth: overrides.auth || authRepository,
       transaction: overrides.transaction || withTransaction,
       storage: () => overrides.storage || getStorageProvider(),
       clock: overrides.clock || (() => new Date()),
       requireAccess: overrides.requireAccess || requireModuleAccessService,
+      attemptOverrides: overrides.attemptOverrides,
    }
 }
 
@@ -124,10 +128,14 @@ function safeProgress(row) {
 }
 
 // The best window wins when a student has several assignments: open, then upcoming, then closed.
-function safeLessonTest(row) {
-   if (!row || row.status !== 'published') return null
+function bestAssignment(row) {
    const rank = { open: 0, upcoming: 1, closed: 2 }
-   const [best] = [...row.assignments].sort((left, right) => rank[left.state] - rank[right.state])
+   return [...row.assignments].sort((left, right) => rank[left.state] - rank[right.state])[0]
+}
+
+function safeLessonTest(row, attempts) {
+   if (!row || row.status !== 'published') return null
+   const best = bestAssignment(row)
    return {
       id: row.id,
       title: row.title,
@@ -135,11 +143,23 @@ function safeLessonTest(row) {
       timeLimitMinutes: row.duration_seconds === null ? null : row.duration_seconds / 60,
       maxAttempts: row.max_attempts,
       assignment: {
+         id: best?.id ?? null,
          state: best?.state ?? 'none',
          opensAt: iso(best?.opens_at),
          closesAt: iso(best?.closes_at),
       },
+      attempts: attemptStateSummary(attempts, row.max_attempts, row.result_policy),
    }
+}
+
+// Expired attempts are finished first, so the summary never shows a stale running attempt.
+async function readLessonTest(deps, actorId, testId) {
+   await finalizeExpiredAttemptsForUserService(actorId, deps.attemptOverrides)
+   const test = await deps.learner.findLearnerLessonTest(actorId, testId)
+   if (!test) return null
+   const best = bestAssignment(test)
+   const attempts = best ? await deps.attempts.listUserAttempts(actorId, [best.id]) : []
+   return safeLessonTest(test, attempts)
 }
 
 function safeNote(row) {
@@ -180,13 +200,13 @@ async function getLearnerLessonService(userId, courseIdValue, lessonIdValue, ove
       deps.lessons.listChapters([lesson.id]),
       deps.lessons.listResources([lesson.id]),
       deps.learner.findProgress(actorId, lesson.id),
-      lesson.test_id ? deps.learner.findLearnerLessonTest(actorId, lesson.test_id) : null,
+      lesson.test_id ? readLessonTest(deps, actorId, lesson.test_id) : null,
    ])
    return {
       lesson: {
          ...safeLearnerLessonSummary(lesson),
          content: lesson.content,
-         test: safeLessonTest(test),
+         test,
          allowOffline: lesson.allow_offline,
          video: asset ? { durationSeconds: asset.duration_seconds, playable: videoPlayable(asset) } : null,
          chapters: chapters.map(safeChapter),
