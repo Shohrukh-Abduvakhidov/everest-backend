@@ -9,10 +9,13 @@ async function start({ port = env.port, registerSignals = true } = {}) {
   await healthService.getReadiness();
 
   const server = await new Promise((resolve, reject) => {
-    const listener = app.listen(port, () => resolve(listener));
-    listener.once('error', reject);
+    // Express 5 passes listen errors such as EADDRINUSE to this callback.
+    const listener = app.listen(port, (error) => {
+      if (error) reject(error);
+      else resolve(listener);
+    });
   });
-  console.log(`EVEREST API listening on port ${server.address().port}`);
+  console.log(`EVEREST API listening on port ${server.address().port} (database ${env.database.database})`);
 
   let shutdownPromise;
   function shutdown(signal) {

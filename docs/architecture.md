@@ -77,7 +77,7 @@ everest-backend/
 
 `src/app.js` creates Express, disables `x-powered-by`, enables credentialed CORS for configured origins, installs a 1 MiB JSON parser, mounts `/api/v1`, then installs not-found and global error handlers. Importing it constructs an app and Pool-backed service objects but does not listen, migrate, query the database, or launch work.
 
-`src/server.js` is the executable entry point. `start()` first calls the readiness service, then listens on `env.port`. It optionally registers `SIGTERM` and `SIGINT`. Graceful shutdown stops accepting requests, waits up to `SHUTDOWN_TIMEOUT_MS`, closes all connections on timeout, and calls `pool.end()`. Startup failure also closes the pool. Jobs are not started because no job runtime exists.
+`src/server.js` is the executable entry point. `start()` first calls the readiness service, then listens on `env.port` and logs the database name; a listen failure such as `EADDRINUSE` rejects startup. It optionally registers `SIGTERM` and `SIGINT`. Graceful shutdown stops accepting requests, waits up to `SHUTDOWN_TIMEOUT_MS`, closes all connections on timeout, and calls `pool.end()`. Startup failure also closes the pool. Jobs are not started because no job runtime exists.
 
 Routes under `/api/v1` are:
 

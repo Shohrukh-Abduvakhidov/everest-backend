@@ -541,7 +541,7 @@ Names only; put values in `.env` (never commit it).
 
 ```bash
 npm install
-npm run migrate:up          # applies src/migrations (25 today); never run migrate:down on a real DB
+npm run migrate:up          # applies src/migrations (28 today); never run migrate:down on a real DB
 npm run dev                 # or npm start; http://localhost:4000, Swagger at /api/docs
 npm run storage:configure   # only with S3/MinIO: bucket CORS/settings
 ```
@@ -618,6 +618,20 @@ The 22 active accounts have a completed onboarding profile; the original eight u
 **Tests:** `npm test` runs the whole suite in a disposable database and never touches your local data. `tests/integration/seed-demo.test.js` creates its own database, runs the seed twice and compares counts per entity and access state.
 
 ---
+
+### 5.4 Login fails: check the setup
+
+```bash
+node scripts/check-auth-setup.js                        # optional: --phone +992900000001
+DB_NAME=everest_demo node scripts/check-auth-setup.js   # PowerShell: $env:DB_NAME = 'everest_demo'
+```
+
+The script prints pass or fail for the secrets, `CORS_ORIGINS`, `/health` and `/ready`, the database clock, migrations, the account (status, password row, hash format, roles) and active rate-limit blocks. It never prints secret values, reads the database in a `READ ONLY` transaction, and refuses `NODE_ENV=production`.
+
+- **The script checks the database of its own shell, not the one the running server uses.** `DB_NAME` set in a shell overrides `.env` and stays with that server process until it stops. Read the startup line `EVEREST API listening on port ... (database ...)`.
+- **One server on a port.** A second start fails with `EADDRINUSE` and the old server keeps answering from its old database. Stop the old process first.
+- **Each `seed:demo` run on a new database generates its own password.** A password printed for one database does not work on another. A phone that exists only in another database always returns `401 INVALID_CREDENTIALS`.
+- **`429 AUTH_RATE_LIMITED`:** after `AUTH_LOGIN_MAX_ATTEMPTS` tries for one phone, wait for `Retry-After` (default 900 seconds). To clear it sooner on a local database, run `DELETE FROM auth_security_counters WHERE scope = 'login.account'` in **the database the server uses**.
 
 ## 6. Database (short)
 

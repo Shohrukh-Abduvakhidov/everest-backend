@@ -6,6 +6,13 @@ Updated: 2026-11-05.
 
 M09 (indexed book import) is merged (PR #24). The M17 admin-accounts slice (account list, role replacement, owner protection) is implemented on `feat/admin-accounts-api` and is awaiting review. Real-storage (MinIO/S3) import is still **not** verified.
 
+## 2026-11-05 — Login failure diagnosis (`fix/auth-login-diagnosis`)
+
+- Cause: configuration and data, not a login regression. The API on port 4000 used `everest_demo2` while `.env` names `everest_db`; all recorded failures were there, and repeated tries reached the `login.account` block. No auth file changed in PR #33.
+- Fixed: `src/server.js` ignored the Express 5 listen error, so `EADDRINUSE` appeared as a `null` port crash. Startup now rejects with `EADDRINUSE` and logs the database name.
+- Added `scripts/check-auth-setup.js` (read-only) and frontend handoff section 5.4.
+- Verified: fresh migrate and seed login returned 200 on a disposable database; `test:server` failed without the fix and passed with it; `test:auth` 282 tests, 281 passed, 0 failed, 1 skipped; `test:sources` passed. `test:integrity` was not run.
+
 ## 2026-11-05 — Lesson-test link and HTTP question import (`feat/lesson-tests-and-import`)
 
 - `test` and `mixed` lessons can link a test of the same course and be published; `tests.module_id` added; learner lessons return a safe test summary; archive and delete of linked tests are refused; course copy reports cleared links; the seed publishes 4 linked test lessons. Migration `20261105010000000_add-lesson-test-links.js`.
