@@ -279,21 +279,39 @@ async function finishAttempt(attemptId, result, client) {
 
 // ---------------------------------------------------------------- staff results
 
-const resultsScopeSql = `(
-   EXISTS (
-      SELECT 1 FROM user_roles AS membership JOIN roles AS role ON role.id = membership.role_id
-      WHERE membership.user_id = $1 AND role.code IN ('owner', 'admin')
-   ) OR (
-      EXISTS (
-         SELECT 1 FROM user_roles AS membership JOIN roles AS role ON role.id = membership.role_id
-         WHERE membership.user_id = $1 AND role.code = 'teacher'
-      ) AND EXISTS (
-         SELECT 1 FROM course_teachers AS assignment
-         WHERE assignment.course_id = test.course_id
-           AND assignment.user_id = $1 AND assignment.can_view_results
-      )
-   )
+const administratorSql = `EXISTS (
+   SELECT 1 FROM user_roles AS membership JOIN roles AS role ON role.id = membership.role_id
+   WHERE membership.user_id = $1 AND role.code IN ('owner', 'admin')
 )`
+
+const teacherSql = `EXISTS (
+   SELECT 1 FROM user_roles AS membership JOIN roles AS role ON role.id = membership.role_id
+   WHERE membership.user_id = $1 AND role.code = 'teacher'
+)`
+
+const courseResultsSql = `EXISTS (
+   SELECT 1 FROM course_teachers AS grant_row
+   WHERE grant_row.course_id = test.course_id
+     AND grant_row.user_id = $1 AND grant_row.can_view_results
+)`
+
+// A group teacher sees only attempts of assignments made to a group they have the flag for.
+const groupResultsSql = (condition) => `EXISTS (
+   SELECT 1 FROM test_assignments AS group_assignment
+   JOIN group_teachers AS grant_row ON grant_row.group_id = group_assignment.group_id
+   WHERE ${condition} AND grant_row.user_id = $1 AND grant_row.can_view_results
+)`
+
+// A test is visible when the actor can read at least some of its attempts.
+const resultsScopeSql = `(${administratorSql} OR (${teacherSql} AND (
+   ${courseResultsSql} OR ${groupResultsSql('group_assignment.test_id = test.id')}
+)))`
+
+const attemptScopeSql = `(${administratorSql} OR (${teacherSql} AND (
+   ${courseResultsSql} OR ${groupResultsSql('group_assignment.id = attempt.assignment_id')}
+)))`
+
+const attemptJoinSql = 'JOIN tests AS test ON test.id = attempt.test_id'
 
 const staffAttemptColumns = `${attemptColumns},
    (SELECT concat_ws(' ', first_name, last_name) FROM user_profiles
@@ -308,16 +326,17 @@ async function findResultsTest(userId, testId, db = pool) {
    return result.rows[0] || null
 }
 
-async function listTestAttempts(testId, filters, db = pool) {
+async function listTestAttempts(userId, testId, filters, db = pool) {
    const result = await db.query(
-      `SELECT ${staffAttemptColumns} FROM test_attempts AS attempt
-       WHERE attempt.test_id = $1
-         AND ($2::bigint IS NULL OR attempt.assignment_id = $2)
-         AND ($3::bigint IS NULL OR attempt.user_id = $3)
-         AND ($4::text IS NULL OR attempt.status = $4)
+      `SELECT ${staffAttemptColumns} FROM test_attempts AS attempt ${attemptJoinSql}
+       WHERE attempt.test_id = $2 AND ${attemptScopeSql}
+         AND ($3::bigint IS NULL OR attempt.assignment_id = $3)
+         AND ($4::bigint IS NULL OR attempt.user_id = $4)
+         AND ($5::text IS NULL OR attempt.status = $5)
        ORDER BY attempt.id DESC
-       LIMIT $5 OFFSET $6`,
+       LIMIT $6 OFFSET $7`,
       [
+         normalizeInternalId(userId),
          normalizeInternalId(testId),
          filters.assignmentId,
          filters.userId,
@@ -329,21 +348,21 @@ async function listTestAttempts(testId, filters, db = pool) {
    return result.rows
 }
 
-async function findTestAttempt(testId, attemptId, db = pool) {
+async function findTestAttempt(userId, testId, attemptId, db = pool) {
    const result = await db.query(
-      `SELECT ${staffAttemptColumns} FROM test_attempts AS attempt
-       WHERE attempt.test_id = $1 AND attempt.id = $2`,
-      [normalizeInternalId(testId), normalizeInternalId(attemptId)],
+      `SELECT ${staffAttemptColumns} FROM test_attempts AS attempt ${attemptJoinSql}
+       WHERE attempt.test_id = $2 AND attempt.id = $3 AND ${attemptScopeSql}`,
+      [normalizeInternalId(userId), normalizeInternalId(testId), normalizeInternalId(attemptId)],
    )
    return result.rows[0] || null
 }
 
-async function lockTestAttempt(testId, attemptId, client) {
+async function lockTestAttempt(userId, testId, attemptId, client) {
    const result = await client.query(
-      `SELECT ${attemptColumns} FROM test_attempts AS attempt
-       WHERE attempt.test_id = $1 AND attempt.id = $2
+      `SELECT ${attemptColumns} FROM test_attempts AS attempt ${attemptJoinSql}
+       WHERE attempt.test_id = $2 AND attempt.id = $3 AND ${attemptScopeSql}
        FOR UPDATE OF attempt`,
-      [normalizeInternalId(testId), normalizeInternalId(attemptId)],
+      [normalizeInternalId(userId), normalizeInternalId(testId), normalizeInternalId(attemptId)],
    )
    return result.rows[0] || null
 }

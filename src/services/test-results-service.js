@@ -98,15 +98,15 @@ async function listTestAttemptsService(userId, testIdValue, query = {}, override
    }
    if (filters.status !== null && !attemptStatuses.includes(filters.status)) throw validationError('status')
    await requireResultsTest(repository, actorId, testId)
-   const rows = await repository.listTestAttempts(testId, filters)
+   const rows = await repository.listTestAttempts(actorId, testId, filters)
    return {
       attempts: rows.slice(0, filters.limit).map(safeStaffAttempt),
       pagination: { limit: filters.limit, offset: filters.offset, hasMore: rows.length > filters.limit },
    }
 }
 
-async function readDetail(repository, testId, attemptId) {
-   const attempt = await repository.findTestAttempt(testId, attemptId)
+async function readDetail(repository, actorId, testId, attemptId) {
+   const attempt = await repository.findTestAttempt(actorId, testId, attemptId)
    if (!attempt) throw attemptNotFound()
    const [questions, revisions] = await Promise.all([
       repository.listAttemptQuestions(attemptId),
@@ -125,7 +125,7 @@ async function getTestAttemptService(userId, testIdValue, attemptIdValue, overri
    const testId = parseTestId(testIdValue)
    const attemptId = parseAttemptId(attemptIdValue)
    await requireResultsTest(repository, actorId, testId)
-   return readDetail(repository, testId, attemptId)
+   return readDetail(repository, actorId, testId, attemptId)
 }
 
 function parseOverrides(value) {
@@ -158,7 +158,7 @@ async function regradeAttemptService(userId, testIdValue, attemptIdValue, body, 
    await requireResultsTest(repository, actorId, testId)
    await transaction(async (client) => {
       const now = clock()
-      const attempt = await repository.lockTestAttempt(testId, attemptId, client)
+      const attempt = await repository.lockTestAttempt(actorId, testId, attemptId, client)
       if (!attempt) throw attemptNotFound()
       if (!isFinished(attempt)) {
          throw new AppError(409, 'ATTEMPT_NOT_FINISHED', 'Only finished attempts can be regraded')
@@ -203,7 +203,7 @@ async function regradeAttemptService(userId, testIdValue, attemptIdValue, body, 
          metadata: { testId, previousScore: attempt.score, newScore },
       }, client)
    })
-   return readDetail(repository, testId, attemptId)
+   return readDetail(repository, actorId, testId, attemptId)
 }
 
 export { getTestAttemptService, listTestAttemptsService, regradeAttemptService }

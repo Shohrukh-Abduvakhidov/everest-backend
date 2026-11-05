@@ -182,6 +182,7 @@ import {
    publishTestsAuthorizationMiddleware,
    readTestResultsAuthorizationMiddleware,
    readTestsAuthorizationMiddleware,
+   regradeTestResultsAuthorizationMiddleware,
 } from '../middleware/test-admin-middleware.js'
 
 const adminRouter = express.Router()
@@ -857,7 +858,7 @@ adminRouter.get(
 )
 adminRouter.post(
    '/tests/:testId/attempts/:attemptId/regrade',
-   readTestResultsAuthorizationMiddleware,
+   regradeTestResultsAuthorizationMiddleware,
    authenticatedCsrfMiddleware,
    adminMutationRateMiddleware,
    regradeAttemptController,

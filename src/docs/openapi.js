@@ -420,6 +420,7 @@ const schemas = {
       answerRevealPolicy: enumOf(testRevealPolicies),
       revealed: bool(),
       revealsAt: nullable(dt()),
+      remainingAttempts: nullable(int()),
       questions: arr(anyObject('Question with answer, awardedPoints, gradingStatus, correctAnswer and explanation'), { description: 'Empty until the reveal policy allows it.' }),
       serverNow: dt(),
    }, ['attempt', 'percent', 'revealed', 'questions', 'serverNow']),
@@ -1645,7 +1646,7 @@ const routes = [
       errors: { 400: ['VALIDATION_ERROR', 'INVALID_TEST_ID', 'INVALID_ATTEMPT_ID'], 404: ['TEST_NOT_FOUND', 'ATTEMPT_NOT_FOUND'] },
    }],
    ['post', '/admin/tests/:testId/attempts/:attemptId/regrade', {
-      tag: 'Admin: tests', ...admin('tests.results.read'), summary: 'Override points of a finished attempt',
+      tag: 'Admin: tests', ...admin('tests.results.regrade'), summary: 'Override points of a finished attempt (owner and admin)',
       description: 'Stores a score revision. Repeating an idempotencyKey changes nothing.',
       body: body({ reason: str(), idempotencyKey: str(), overrides: arr(obj({ attemptQuestionId: id(), points: testPoints() }, ['attemptQuestionId', 'points'], { strict: true }), { minItems: 1 }) }, ['reason', 'idempotencyKey', 'overrides']),
       response: ref('StaffAttemptDetail'),
