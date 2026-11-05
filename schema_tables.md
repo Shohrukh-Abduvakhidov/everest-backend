@@ -4398,3 +4398,9 @@ Consult the installed tool version before copying configuration or CLI options. 
 On 2026-10-24, the SQL block extracted from this Markdown was compared byte-for-byte with the source baseline and applied successfully to a fresh PGlite embedded PostgreSQL database. The resulting column, constraint and index definitions matched the reference catalog. Observed counts: 81 application tables, 641 columns, 156 foreign keys, 290 indexes, 7 functions, 11 user-defined triggers and the four intended role seed rows. All 81 table headings have corresponding dictionary entries.
 
 This check validates the self-contained SQL reference and dictionary consistency. No JavaScript migration files were generated or executed in this documentation task, and no live server database was changed. Migration up/down and application integration tests remain the responsibility of the subsequent implementation task.
+
+## M11 additions
+
+- `test_assignments.personal_window_minutes` (optional, positive).
+- Permission `tests.results.regrade` (owner, admin).
+- Partial index `attempts_expiring_idx` on `test_attempts (expires_at)` for in-progress attempts.

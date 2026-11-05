@@ -172,10 +172,17 @@ import {
    updateTestQuestionPointsController,
 } from '../controllers/test-controller.js'
 import {
+   getTestAttemptController,
+   listTestAttemptsController,
+   regradeAttemptController,
+} from '../controllers/test-attempt-controller.js'
+import {
    assignTestsAuthorizationMiddleware,
    manageTestsAuthorizationMiddleware,
    publishTestsAuthorizationMiddleware,
+   readTestResultsAuthorizationMiddleware,
    readTestsAuthorizationMiddleware,
+   regradeTestResultsAuthorizationMiddleware,
 } from '../middleware/test-admin-middleware.js'
 
 const adminRouter = express.Router()
@@ -838,6 +845,23 @@ adminRouter.delete(
    authenticatedCsrfMiddleware,
    adminMutationRateMiddleware,
    revokeAssignmentController,
+)
+adminRouter.get(
+   '/tests/:testId/attempts',
+   readTestResultsAuthorizationMiddleware,
+   listTestAttemptsController,
+)
+adminRouter.get(
+   '/tests/:testId/attempts/:attemptId',
+   readTestResultsAuthorizationMiddleware,
+   getTestAttemptController,
+)
+adminRouter.post(
+   '/tests/:testId/attempts/:attemptId/regrade',
+   regradeTestResultsAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   regradeAttemptController,
 )
 
 export default adminRouter

@@ -80,6 +80,7 @@ const env = Object.freeze({
   ),
   questionImportUploadTtlHours: readInteger('QUESTION_IMPORT_UPLOAD_TTL_HOURS', 24, { max: 720 }),
   questionImportWorkerIntervalMs: readInteger('QUESTION_IMPORT_WORKER_INTERVAL_MS', 5000),
+  attemptSweepIntervalMs: readInteger('ATTEMPT_SWEEP_INTERVAL_MS', 30000),
   otpHmacSecret: readString('OTP_HMAC_SECRET'),
   recoveryChallengeTtlSeconds: readInteger('RECOVERY_CHALLENGE_TTL_SECONDS', 600),
   recoveryResetTtlSeconds: readInteger('RECOVERY_RESET_TTL_SECONDS', 600),

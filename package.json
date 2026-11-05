@@ -20,6 +20,7 @@
     "video:faststart": "node scripts/remux-faststart.js",
     "import:questions": "node scripts/import-question-package.js",
     "worker:imports": "node scripts/question-import-worker.js",
+    "worker:attempts": "node scripts/attempt-sweep-worker.js",
     "test:sources": "node scripts/verify-migration-sources.js",
     "test:integrity": "node scripts/test-schema-integrity.js",
     "test:server": "node scripts/test-server.js",

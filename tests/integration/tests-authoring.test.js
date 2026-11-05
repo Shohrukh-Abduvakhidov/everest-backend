@@ -395,8 +395,8 @@ test('test authoring, publication and assignment integration', async (t) => {
           GROUP BY role.code ORDER BY role.code`,
       )
       assert.deepEqual(seeded.rows, [
-         { code: 'admin', count: 5 },
-         { code: 'owner', count: 5 },
+         { code: 'admin', count: 6 },
+         { code: 'owner', count: 6 },
          { code: 'teacher', count: 4 },
       ])
    })

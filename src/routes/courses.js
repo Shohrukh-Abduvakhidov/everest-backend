@@ -20,6 +20,7 @@ import {
    updateLessonNoteController,
 } from '../controllers/learner-lesson-controller.js'
 import { issueOfflineLicenseController } from '../controllers/offline-license-controller.js'
+import { listMyAssignmentsController } from '../controllers/test-attempt-controller.js'
 import { authMiddleware } from '../middleware/auth-middleware.js'
 import {
    authenticatedCsrfMiddleware,
@@ -36,6 +37,7 @@ coursesRouter.put('/:courseId/favorite', authenticatedCsrfMiddleware, addCourseF
 coursesRouter.delete('/:courseId/favorite', authenticatedCsrfMiddleware, removeCourseFavoriteController)
 coursesRouter.get('/:courseId/modules', listLearnerCourseModulesController)
 coursesRouter.get('/:courseId/modules/:moduleId/lessons', listLearnerLessonsController)
+coursesRouter.get('/:courseId/test-assignments', listMyAssignmentsController)
 coursesRouter.get(lessonPath, getLearnerLessonController)
 coursesRouter.get(`${lessonPath}/playback`, learnerMediaRateMiddleware, getLessonPlaybackController)
 coursesRouter.get(

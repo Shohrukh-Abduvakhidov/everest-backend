@@ -34,7 +34,8 @@ const testColumns = `test.id, test.course_id, test.module_id, test.title, test.m
     WHERE test_id = test.id AND status = 'active') AS active_assignment_count`
 
 const assignmentColumns = `assignment.id, assignment.test_id, assignment.group_id, assignment.user_id,
-   assignment.status, assignment.opens_at, assignment.closes_at, assignment.assigned_by,
+   assignment.status, assignment.opens_at, assignment.closes_at, assignment.personal_window_minutes,
+   assignment.assigned_by,
    assignment.created_at,
    (SELECT title FROM groups WHERE id = assignment.group_id) AS group_title,
    (SELECT concat_ws(' ', first_name, last_name) FROM user_profiles
@@ -369,8 +370,8 @@ async function hasActiveAssignment(testId, audience, client) {
 
 async function createAssignment(assignment, client) {
    const result = await client.query(
-      `INSERT INTO test_assignments (test_id, group_id, user_id, assigned_by, opens_at, closes_at)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO test_assignments (test_id, group_id, user_id, assigned_by, opens_at, closes_at, personal_window_minutes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING id`,
       [
          normalizeInternalId(assignment.testId),
@@ -379,6 +380,7 @@ async function createAssignment(assignment, client) {
          normalizeInternalId(assignment.assignedBy),
          assignment.opensAt,
          assignment.closesAt,
+         assignment.personalWindowMinutes ?? null,
       ],
    )
    return result.rows[0].id
@@ -386,8 +388,8 @@ async function createAssignment(assignment, client) {
 
 async function updateAssignmentWindow(assignmentId, window, client) {
    await client.query(
-      'UPDATE test_assignments SET opens_at = $2, closes_at = $3 WHERE id = $1',
-      [normalizeInternalId(assignmentId), window.opensAt, window.closesAt],
+      'UPDATE test_assignments SET opens_at = $2, closes_at = $3, personal_window_minutes = $4 WHERE id = $1',
+      [normalizeInternalId(assignmentId), window.opensAt, window.closesAt, window.personalWindowMinutes],
    )
 }
 

@@ -50,13 +50,14 @@ async function findLearnerLesson(userId, courseId, lessonId, db = pool) {
 async function findLearnerLessonTest(userId, testId, db = pool) {
    const test = await db.query(
       `SELECT test.id, test.title, test.status, test.duration_seconds, test.max_attempts,
+         test.result_policy,
          (SELECT count(*)::integer FROM test_questions WHERE test_id = test.id) AS question_count
        FROM tests AS test WHERE test.id = $1`,
       [normalizeInternalId(testId)],
    )
    if (!test.rows[0]) return null
    const assignments = await db.query(
-      `SELECT assignment.opens_at, assignment.closes_at,
+      `SELECT assignment.id, assignment.opens_at, assignment.closes_at,
          CASE
             WHEN assignment.opens_at > CURRENT_TIMESTAMP THEN 'upcoming'
             WHEN assignment.closes_at IS NOT NULL AND assignment.closes_at <= CURRENT_TIMESTAMP THEN 'closed'

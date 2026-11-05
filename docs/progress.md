@@ -6,6 +6,12 @@ Updated: 2026-11-05.
 
 M09 (indexed book import) is merged (PR #24). The M17 admin-accounts slice (account list, role replacement, owner protection) is implemented on `feat/admin-accounts-api` and is awaiting review. Real-storage (MinIO/S3) import is still **not** verified.
 
+## 2026-11-05 — M11 attempts, timing and grading (`feat/m11-attempts`)
+
+- Review decisions applied: group-teacher result scope, permission `tests.results.regrade` (migration `20261105040000000`), keys held back while attempts remain, running attempts survive revocation.
+- Added: migration `20261105030000000_add-attempt-timing.js`, learner and staff attempt endpoints, grading of all five types, result and reveal policies, score revisions, `npm run worker:attempts`, lesson attempt state, seeded attempts.
+- Verified on disposable databases: see the handoff. Real browser flows and the worker as a separate process were not run.
+
 ## 2026-11-05 — Login failure diagnosis (`fix/auth-login-diagnosis`)
 
 - Cause: configuration and data, not a login regression. The API on port 4000 used `everest_demo2` while `.env` names `everest_db`; all recorded failures were there, and repeated tries reached the `login.account` block. No auth file changed in PR #33.

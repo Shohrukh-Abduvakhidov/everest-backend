@@ -1,9 +1,9 @@
 ---
 project: EVEREST Backend
 roadmap_version: 1
-current_milestone: M10
+current_milestone: M11
 current_status: in_progress
-updated_at: 2026-11-04
+updated_at: 2026-11-05
 architecture: docs/architecture.md
 ---
 
@@ -301,7 +301,7 @@ This roadmap orders implementation; it does not replace the [current architectur
 
 ## M11 — Attempts, autosave and grading
 
-- **Status:** Planned
+- **Status:** In progress (implemented on `feat/m11-attempts`, awaiting review)
 - **Goal:** Run durable, timed, safely graded attempts.
 - **Dependencies:** M06, M08, M10, M19 for expiry work.
 - **Deliverables:** Start, immutable snapshots, revision autosave, server timer, submit/expiry, grading, score revisions, idempotency, reveal policy, and student-safe serialization.

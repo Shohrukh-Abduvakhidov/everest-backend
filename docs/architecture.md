@@ -612,7 +612,7 @@ Actual response envelopes:
 | Courses/access | Partial | M05-A catalog/lifecycle/teachers, M05-B modules/preview/copy and M06 enrollments/module grants/learner locks and M07-B lessons/playback/offline done against a storage double |
 | Media storage | Partial | M07-A S3 multipart uploads and content/codec/seek-ready verification done against a storage double; real MinIO/S3 and Range-seek verification pending |
 | Question bank | Partial | M08 taxonomy, banks, draft authoring, answer keys, review, publication and copy done; M09 CLI package import (dry run, idempotent runs, batches, image dedup/aliases, duplicate suggestions) and read-only run API done; real-storage import not verified |
-| Test engine | Partial | M10 authoring, publication and assignment done; attempts and grading planned (M11) |
+| Test engine | Partial | M10 authoring and M11 attempts, timing and grading implemented; later work planned |
 | Progress | Planned | Schema only |
 | Notifications | Partial | Telegram connection/test only |
 | AI | Planned | Schema only |
