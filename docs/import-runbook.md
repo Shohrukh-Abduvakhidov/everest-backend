@@ -101,3 +101,7 @@ Common codes:
 - Review the drafts in the admin API.
 - Questions with `answerKey.status = proposed` still need `POST /admin/questions/:id/answer-key/verify` by a reviewer before they can be published.
 - `counters.duplicates.suggested` counts possible duplicates recorded in `question_duplicate_links`. They are suggestions only; nothing was merged.
+
+## HTTP upload
+
+The same importer is reachable over HTTP; see "Package upload (HTTP)" in `docs/api.md`. Run the worker with `npm run worker:imports` on the host that serves the API, because packages wait on its local disk (`QUESTION_IMPORT_UPLOAD_DIR`, default `uploads/question-imports`). Use the CLI for packages above the upload limit. `--apply-matching-defaults` sets missing matching rules explicitly; each affected question gets a warning.

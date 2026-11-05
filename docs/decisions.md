@@ -265,7 +265,7 @@ User decision. It replaces M07-A items 5 and 7 and the "remux job" bullet below 
    - Deletion is still allowed only for empty drafts. Ordering is allowed in every status.
 3. Publication rules:
    - A `video` lesson needs a playable video (`LESSON_VIDEO_REQUIRED` / `VIDEO_NOT_PLAYABLE`).
-   - `test` lessons cannot be published until the test engine exists (M10, `LESSON_TYPE_NOT_PUBLISHABLE`).
+   - `test` lessons could not be published until tests existed (superseded on 2026-11-05: see the lesson-test link decision; `LESSON_TYPE_NOT_PUBLISHABLE` is gone).
    - Only `video` and `mixed` lessons may have a video.
    - A lesson can be published inside a draft module, but learners see it only when the course, module and lesson are all published.
 4. Content blocks are a closed set of plain-text types: `heading` (`level` 1–3), `paragraph`, `list` (`items`, `ordered`), `quote`, `code` (`language`), `callout` (`tone` info/warning/success), `divider`. The limits are 200 blocks, 20,000 characters per text field and 256 KB of JSON. Blocks cannot contain HTML or asset references; images are materials.
@@ -502,3 +502,25 @@ Password login uses a generic invalid-credentials response for unknown phones an
 - **Reruns.** Every record is found by phone, code, title or external id. An archived group is skipped as a whole because archived groups refuse members and announcements. Enrollments are skipped when any enrollment row exists, so a revoked demo enrollment is never reinstated by a rerun. A module or question that a person moved back to draft after seeding would be published again.
 - **Video lessons** stay drafts because there is no real storage to hold a video.
 - **Report.** The run prints a summary per entity (created / existing) and a checklist of accounts and screens; `--verbose` prints every record.
+
+## 2026-11-05 — Lesson-test link and HTTP question import
+
+**Link direction.** `lessons.test_id`, not `tests.lesson_id`: `guard_test()` rejects any column change on a published test, so a link stored on the test could not be set after publication. It also lets several lessons share a test. Composite foreign keys `(test_id, course_id)` and `(module_id, course_id)` make cross-course links impossible in the database; a CHECK limits links to `test` and `mixed` lessons.
+
+- A `mixed` lesson may have no test. A `test` lesson needs one to publish. Draft lessons may hold a draft test.
+- Lesson link and publish take `FOR SHARE` on the test; test archive takes `FOR UPDATE` and then reads the lessons, so the two cannot interleave.
+- An archived test may stay linked to a draft or archived lesson; only published lessons block archiving. Publishing that lesson later returns `TEST_NOT_PUBLISHED`.
+- New codes: `LESSON_TEST_REQUIRED`, `TEST_ARCHIVED`, `TEST_LINKED_TO_LESSON`. `TEST_NOT_PUBLISHED` is reused.
+- Course copy has no test copying, so links are cleared and counted. `tests.module_id` is stored and validated, but nothing enforces it yet; M11 decides how it affects a start.
+- Permissions are unchanged: `lessons.manage` to link. The picker is `GET /admin/tests`, with its `tests.read` scope. The lesson routes do not check `tests.read` themselves, because the link is limited to the lesson's own course.
+
+**HTTP import.**
+
+- Transport is a raw `application/zip` body read after auth, CSRF, permission and rate checks; no new dependency and no presigned flow. Storage may be unconfigured, and a package must be readable by the importer anyway.
+- Packages wait on local disk in `QUESTION_IMPORT_UPLOAD_DIR` under server-generated names, never names from the archive. The API and the worker must therefore share a disk: one host only.
+- New table `question_import_uploads` holds the state between dry run and run, because `question_imports.bank_id` is NOT NULL and the bank may not exist before the run. Polling therefore uses `GET /packages/:uploadId` until `runId` is set, then the existing run endpoints.
+- The worker (`npm run worker:imports`) is a separate process, started explicitly. Claims use `SKIP LOCKED`; a 5-minute lease is renewed by a heartbeat. A lost worker is failed (`IMPORT_WORKER_LOST`), not retried, and its `importing` run is marked `failed`; a retry needs a new `idempotencyKey`, the existing rule for failed runs.
+- Idempotency stays on `(bank, idempotency_key)`, default `package-<sha256>`. `applyMatchingDefaults` adds a suffix, because it changes what is written.
+- All-or-nothing on storage means: no database write and no run when storage is missing. It is checked at confirm and again in the shared importer. A storage failure partway through image uploads can leave unreferenced content-addressed objects, as before; the database stays untouched.
+- The ZIP reader gained a total unpacked limit (512 MiB, from declared sizes that also bound inflation) and rejects control characters in paths.
+- Matching defaults are an import option rather than a bulk endpoint: they apply to drafts only, reuse the importer and are reported per question.

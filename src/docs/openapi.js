@@ -334,6 +334,7 @@ const schemas = {
       lessonType: enumOf(['video', 'text', 'test', 'mixed']),
       translations: ref('TitleTranslations'),
       videoAssetId: nullable(id()),
+      testId: nullable(id()),
       allowOffline: bool(),
       status: enumOf(['draft', 'published', 'archived']),
       createdAt: dt(),
@@ -356,6 +357,18 @@ const schemas = {
       revision: int(),
       updatedAt: dt(),
    }),
+   LearnerLessonTest: obj({
+      id: id(),
+      title: str(),
+      questionCount: int(),
+      timeLimitMinutes: nullable(int()),
+      maxAttempts: nullable(int()),
+      assignment: obj({
+         state: enumOf(['open', 'upcoming', 'closed', 'none']),
+         opensAt: nullable(dt()),
+         closesAt: nullable(dt()),
+      }),
+   }, ['id', 'title', 'questionCount', 'assignment'], { description: 'Safe summary of the linked test. Never contains questions or answers.' }),
    LearnerLesson: obj({
       id: id(),
       moduleId: id(),
@@ -365,6 +378,7 @@ const schemas = {
       translations: ref('TitleTranslations'),
       access: obj({ granted: bool() }),
       content: ref('RichContent'),
+      test: nullable(ref('LearnerLessonTest')),
       allowOffline: bool(),
       video: nullable(obj({ durationSeconds: nullable(int()), playable: bool() })),
       chapters: arr(ref('Chapter')),
@@ -465,9 +479,34 @@ const schemas = {
       bookSectionTitle: str(), bookRubric: str(), isSample: bool(), reviewRequired: bool(),
       examPart: arr(str({ maxLength: 20 }), { minItems: 1, maxItems: 10 }),
    }),
+   QuestionImportUpload: obj({
+      id: id(),
+      uploadedBy: id(),
+      packageSha256: str(),
+      sizeBytes: int(),
+      status: enumOf(['rejected', 'validated', 'queued', 'running', 'completed', 'failed', 'expired']),
+      options: obj({ applyMatchingDefaults: bool(), idempotencyKey: str() }),
+      dryRun: obj({
+         valid: bool(),
+         idempotencyKey: str(),
+         counters: anyObject('Planned counters'),
+         topErrorCodes: arr(anyObject()),
+         topWarningCodes: arr(anyObject()),
+         errors: arr(anyObject(), { description: 'First 200 entries' }),
+         warnings: arr(anyObject(), { description: 'First 200 entries' }),
+      }),
+      previousRunId: nullable(id()),
+      runId: nullable(id()),
+      errorCode: nullable(str()),
+      expiresAt: dt(),
+      createdAt: dt(),
+      confirmedAt: nullable(dt()),
+      finishedAt: nullable(dt()),
+   }),
    Test: obj({
       id: id(),
       courseId: id(),
+      moduleId: nullable(id()),
       title: str(),
       mode: enumOf(testModes),
       timeLimitMinutes: nullable(int()),
@@ -621,6 +660,7 @@ const lessonFields = {
    content: ref('RichContent'),
    translations: ref('TitleTranslations'),
    videoAssetId: nullable(id()),
+   testId: nullable(id()),
    allowOffline: bool(),
 }
 const teacherFlags = {
@@ -658,6 +698,7 @@ const questionFields = {
 }
 const testFields = {
    title: str({ minLength: 1, maxLength: 200 }),
+   moduleId: nullable(id()),
    mode: enumOf(testModes, { description: 'Default practice. exam needs a time limit.' }),
    timeLimitMinutes: nullable(int({ minimum: 1, maximum: 1440 })),
    maxAttempts: nullable(int({ minimum: 1, maximum: 1000, description: 'Default 1; null means unlimited' })),
@@ -751,6 +792,12 @@ function operation(method, path, spec) {
       operationId: `${method}${path.replace(/:([A-Za-z]+)/g, 'By-$1').split(/[^A-Za-z0-9]+/).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join('')}`,
       security: auth === 'public' ? [] : [{ cookieAuth: [] }, { bearerAuth: [] }],
       ...(parameters.length ? { parameters } : {}),
+      ...(spec.binaryBody ? {
+         requestBody: {
+            required: true,
+            content: { [spec.binaryBody]: { schema: str({ format: 'binary' }) } },
+         },
+      } : {}),
       ...(spec.body ? {
          requestBody: {
             required: spec.bodyRequired ?? true,
@@ -1087,7 +1134,7 @@ const routes = [
    ['post', '/admin/courses/:courseId/copy', {
       tag: 'Admin: courses', ...admin('courses.copy'), created: true, summary: 'Copy a course as a draft',
       body: body({ title: str({ maxLength: 200 }) }), bodyRequired: false,
-      response: obj({ course: ref('Course'), sourceCourseId: id(), copied: obj({ modules: int(), lessons: int(), chapters: int(), resources: int() }) }),
+      response: obj({ course: ref('Course'), sourceCourseId: id(), copied: obj({ modules: int(), lessons: int(), chapters: int(), resources: int(), clearedTestLinks: int({ description: 'Copied lessons whose source had a test link; tests are not copied, so the link is cleared' }) }) }),
       errors: { 404: ['COURSE_NOT_FOUND'] },
    }],
    ['get', '/admin/courses/:courseId/preview', {
@@ -1181,11 +1228,11 @@ const routes = [
    ['patch', '/admin/courses/:courseId/lessons/:lessonId', {
       tag: 'Admin: lessons', ...admin('lessons.manage'), summary: 'Edit a lesson in any status',
       body: body(lessonFields), response: ref('LessonDetail'),
-      errors: { 404: ['LESSON_NOT_FOUND'], 409: ['LESSON_VIDEO_REQUIRED', 'LESSON_TYPE_NOT_PUBLISHABLE', 'CHAPTERS_EXCEED_VIDEO_DURATION'] },
+      errors: { 404: ['LESSON_NOT_FOUND'], 409: ['LESSON_VIDEO_REQUIRED', 'LESSON_TEST_REQUIRED', 'TEST_NOT_PUBLISHED', 'TEST_ARCHIVED', 'CHAPTERS_EXCEED_VIDEO_DURATION'] },
    }],
    ...[['publish', 'draft → published'], ['archive', 'published → archived'], ['restore', 'archived → draft']].map(([action, summary]) => ['post', `/admin/courses/:courseId/lessons/:lessonId/${action}`, {
       tag: 'Admin: lessons', ...admin('lessons.manage'), summary, response: ref('LessonDetail'),
-      errors: { 404: ['LESSON_NOT_FOUND'], 409: ['INVALID_LESSON_TRANSITION', 'LESSON_VIDEO_REQUIRED', 'LESSON_TYPE_NOT_PUBLISHABLE', 'VIDEO_NOT_PLAYABLE'] },
+      errors: { 404: ['LESSON_NOT_FOUND'], 409: ['INVALID_LESSON_TRANSITION', 'LESSON_VIDEO_REQUIRED', 'LESSON_TEST_REQUIRED', 'TEST_NOT_PUBLISHED', 'VIDEO_NOT_PLAYABLE'] },
    }]),
    ['delete', '/admin/courses/:courseId/lessons/:lessonId', {
       tag: 'Admin: lessons', ...admin('lessons.manage'), summary: 'Delete an empty draft lesson', response: deleted(),
@@ -1375,7 +1422,27 @@ const routes = [
       response: ref('QuestionDetail'), errors: { 404: ['QUESTION_NOT_FOUND'], 409: ['INVALID_QUESTION_TRANSITION'] },
    }],
 
-   // Admin: question imports (runs are started by the CLI, read here)
+   // Admin: question imports (runs start from the CLI or a confirmed upload, read here)
+   ['post', '/admin/question-imports/packages', {
+      tag: 'Admin: question imports', permission: 'questions.manage', rate: 'per-user package upload limit', created: true,
+      summary: 'Upload a ZIP package and dry-run it',
+      description: 'The raw request body is the ZIP (`Content-Type: application/zip`). Nothing is imported yet. A package that fails its dry run returns 201 with `status: rejected` and the report. Re-sending a package that is already queued or running returns 200 with `duplicate: true`.',
+      binaryBody: 'application/zip',
+      query: [{ name: 'applyMatchingDefaults', schema: enumOf(['true', 'false'], { description: 'Explicitly set null matching rules to requireAllLeft=true, allowRightReuse=false; each affected question gets a warning' }) }, { name: 'idempotencyKey', schema: str() }],
+      response: obj({ upload: ref('QuestionImportUpload'), duplicate: bool() }),
+      errors: { 400: ['VALIDATION_ERROR', 'PACKAGE_ARCHIVE_INVALID', 'PACKAGE_TOO_LARGE', 'PACKAGE_ENTRY_TOO_LARGE', 'PACKAGE_MANIFEST_MISSING', 'PACKAGE_JSON_INVALID', 'PACKAGE_UPLOAD_FAILED'], 403: ['IMPORT_ACTOR_FORBIDDEN', 'IMPORT_ACTOR_INACTIVE'], 409: ['IMPORT_PACKAGE_IN_PROGRESS'], 413: ['PACKAGE_TOO_LARGE'], 415: ['PACKAGE_CONTENT_TYPE_INVALID'] },
+   }],
+   ['get', '/admin/question-imports/packages/:uploadId', {
+      tag: 'Admin: question imports', ...adminRead('questions.manage'), summary: 'Upload status; poll it after confirming',
+      response: ref('QuestionImportUpload'),
+      errors: { 400: ['VALIDATION_ERROR', 'INVALID_IMPORT_UPLOAD_ID'], 404: ['QUESTION_IMPORT_UPLOAD_NOT_FOUND'] },
+   }],
+   ['post', '/admin/question-imports/packages/:uploadId/confirm', {
+      tag: 'Admin: question imports', ...admin('questions.manage'), status: 202, summary: 'Queue a validated upload for the background worker',
+      description: 'Idempotent while queued or running. `npm run worker:imports` must be running. When the upload finishes, `runId` points to the run in `GET /admin/question-imports/:importId`.',
+      response: ref('QuestionImportUpload'),
+      errors: { 400: ['VALIDATION_ERROR', 'INVALID_IMPORT_UPLOAD_ID'], 404: ['QUESTION_IMPORT_UPLOAD_NOT_FOUND'], 409: ['IMPORT_UPLOAD_NOT_CONFIRMABLE'], 503: ['STORAGE_NOT_CONFIGURED'] },
+   }],
    ['get', '/admin/question-imports', {
       tag: 'Admin: question imports', ...adminRead('questions.manage'), permissionError: 'ACTION_FORBIDDEN',
       summary: 'Visible import runs (administrators: all; others: own banks and own runs)',

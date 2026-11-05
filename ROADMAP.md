@@ -296,6 +296,8 @@ This roadmap orders implementation; it does not replace the [current architectur
 - **Verification:** Construction, audience exclusivity, permission, publication immutability, and assignment tests.
 - **Documentation updates:** API, decisions, architecture, progress, roadmap.
 - **Exclusions:** Unapproved NCT scope, scoring, timing, or reveal rules.
+- **Follow-up (2026-11-05, `feat/lesson-tests-and-import`, awaiting review):** lesson-test link, optional `tests.module_id`, HTTP package upload with worker. `npm run test:auth`: 281 passed, 0 failed, 1 skipped.
+
 
 ## M11 — Attempts, autosave and grading
 
