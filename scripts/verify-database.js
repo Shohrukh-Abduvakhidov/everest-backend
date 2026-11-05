@@ -13,7 +13,7 @@ const expected = {
   functions: 7,
   triggers: 11,
   roles: 4,
-  migrations: 29,
+  migrations: 30,
   identityColumns: 68,
 };
 
