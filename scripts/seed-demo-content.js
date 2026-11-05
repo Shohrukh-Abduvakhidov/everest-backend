@@ -66,6 +66,12 @@ import {
    publishTestService,
    updateAssignmentService,
 } from '../src/services/test-service.js'
+import {
+   listMyAssignmentsService,
+   saveAnswerService,
+   startAttemptService,
+   submitAttemptService,
+} from '../src/services/test-attempt-service.js'
 import { withClosing } from './seed-demo-data/lesson-extras.js'
 import biologyCourse from './seed-demo-data/course-biology.js'
 import chemistryCourse from './seed-demo-data/course-chemistry.js'
@@ -747,6 +753,57 @@ async function ensureTests(context, courses, bankQuestionIds, groupIds) {
    }
 }
 
+function demoAnswer(question) {
+   switch (question.questionType) {
+      case 'single_choice': return { optionKey: question.options[0].key }
+      case 'multiple_choice': return { optionKeys: [question.options[0].key] }
+      case 'matching': return {
+         pairs: question.matching.left.map((item, index) => ({
+            left: item.key,
+            right: question.matching.right[index].key,
+         })),
+      }
+      case 'numeric': return { value: 1 }
+      default: return { text: 'demo' }
+   }
+}
+
+// Runs through the attempt services, so deadlines and grading are real. A student who already
+// has any attempt is skipped, which keeps a rerun from adding more.
+async function ensureDemoAttempt(context, courses, studentKey, finish) {
+   const { userIds, note } = context
+   const userId = userIds[studentKey]
+   for (const course of courses.values()) {
+      const { assignments } = await listMyAssignmentsService(userId, course.id)
+      if (assignments.some((item) => item.attempts.status !== 'not_started')) {
+         note('test attempt', `${studentKey} (${finish ? 'submitted' : 'in progress'})`, false)
+         return
+      }
+   }
+   for (const course of courses.values()) {
+      const { assignments } = await listMyAssignmentsService(userId, course.id)
+      for (const assignment of assignments.filter((item) => item.state === 'open')) {
+         let view
+         try {
+            view = await startAttemptService(userId, assignment.id)
+         } catch (error) {
+            if (error.status === 403) continue
+            throw error
+         }
+         const answered = finish ? view.questions : view.questions.slice(0, 1)
+         for (const question of answered) {
+            await saveAnswerService(userId, view.attempt.id, question.id, {
+               answer: demoAnswer(question),
+               revision: 1,
+            })
+         }
+         if (finish) await submitAttemptService(userId, view.attempt.id)
+         note('test attempt', `${studentKey} (${finish ? 'submitted' : 'in progress'})`, true)
+         return
+      }
+   }
+}
+
 // ---------------------------------------------------------------- entry point
 
 // Creates the taxonomy and returns the subject map; the original seed uses it for its own
@@ -769,4 +826,6 @@ export async function seedRichDemoContent(context, { subjects, groupAId }) {
    const groupIds = await ensureGroups(context, groupAId)
    await ensureAccess(context, courses)
    await ensureTests(context, courses, bankQuestionIds, groupIds)
+   await ensureDemoAttempt(context, courses, 'student1', true)
+   await ensureDemoAttempt(context, courses, 'student5', false)
 }
