@@ -6,7 +6,9 @@ import { findOwnerAssignment, findUserRoles } from '../src/repositories/account-
 import { findPasswordAccountByPhone } from '../src/repositories/user-repository.js'
 import {
    approveUserService,
+   blockUserService,
    bootstrapOwnerService,
+   rejectUserService,
    replaceUserRolesService,
 } from '../src/services/account-admin-service.js'
 import {
@@ -57,7 +59,7 @@ import {
    listTestsService,
    publishTestService,
 } from '../src/services/test-service.js'
-import { createSubjectService, listSubjectsService } from '../src/services/taxonomy-service.js'
+import { ensureTaxonomy, seedRichDemoContent } from './seed-demo-content.js'
 
 // Development seed: demo accounts and content created through the same services the API
 // uses, so validation rules and audit events apply. Re-running skips whatever exists.
@@ -71,17 +73,49 @@ const accountDefinitions = [
    { key: 'student3', label: 'student', phone: '+992900000006', firstName: 'Dilnoza', roles: ['student'] },
    { key: 'student4', label: 'student', phone: '+992900000007', firstName: 'Eraj', roles: ['student'] },
    { key: 'student5', label: 'student', phone: '+992900000008', firstName: 'Firuza', roles: ['student'] },
+   // Extra students for the users page, group rosters and test assignments.
+   ...[
+      ['Рустам', 'Назаров'],
+      ['Нигина', 'Рахимова'],
+      ['Фаррух', 'Исмоилов'],
+      ['Сарвар', 'Каримов'],
+      ['Зарина', 'Саидова'],
+      ['Умед', 'Холов'],
+      ['Мехрона', 'Бобоева'],
+      ['Достон', 'Юсупов'],
+      ['Парвина', 'Шарипова'],
+      ['Бахтиёр', 'Одинаев'],
+      ['Гулнора', 'Мирзоева'],
+      ['Сухроб', 'Давлатов'],
+   ].map(([firstName, lastName], index) => ({
+      key: `student${index + 6}`,
+      label: 'student',
+      phone: `+9929000000${String(index + 9).padStart(2, '0')}`,
+      firstName,
+      lastName,
+      roles: ['student'],
+   })),
+   // Two more teachers so course and group permissions can differ.
+   { key: 'teacher2', label: 'teacher', phone: '+992900000021', firstName: 'Шоира', lastName: 'Кодирова', roles: ['student', 'teacher'] },
+   { key: 'teacher3', label: 'teacher', phone: '+992900000022', firstName: 'Икбол', lastName: 'Рахмонов', roles: ['student', 'teacher'] },
+   // Accounts that are not active, so the users page shows every status.
+   { key: 'pending1', label: 'pending', phone: '+992900000023', firstName: 'Тимур', lastName: 'Азизов', roles: ['student'], state: 'pending' },
+   { key: 'pending2', label: 'pending', phone: '+992900000024', firstName: 'Лола', lastName: 'Сафарова', roles: ['student'], state: 'pending' },
+   { key: 'blocked', label: 'blocked', phone: '+992900000025', firstName: 'Анвар', lastName: 'Ташев', roles: ['student'], state: 'blocked' },
+   { key: 'rejected', label: 'rejected', phone: '+992900000026', firstName: 'Санавбар', lastName: 'Расулова', roles: ['student'], state: 'rejected' },
 ]
 const demoLastName = 'Demo'
 
 class SeedRefusal extends Error {}
 
 function parseArguments(argv) {
-   const options = { force: false, password: undefined }
+   const options = { force: false, password: undefined, verbose: false }
    for (let index = 0; index < argv.length; index += 1) {
       const argument = argv[index]
       if (argument === '--force') {
          options.force = true
+      } else if (argument === '--verbose') {
+         options.verbose = true
       } else if (argument === '--password') {
          options.password = argv[index + 1]
          index += 1
@@ -152,7 +186,7 @@ async function ensureOwner(definition, password) {
          phone: definition.phone,
          password,
          firstName: definition.firstName,
-         lastName: demoLastName,
+         lastName: definition.lastName || demoLastName,
       })
    }
    const { userId } = await bootstrapOwnerService(definition.phone)
@@ -169,41 +203,34 @@ async function ensureAccount(definition, password, actorId) {
          phone: definition.phone,
          password,
          firstName: definition.firstName,
-         lastName: demoLastName,
+         lastName: definition.lastName || demoLastName,
       })
       account = await findPasswordAccountByPhone(definition.phone)
    }
    const userId = account.user_id
-   if (account.status === 'pending') await approveUserService(actorId, userId)
+   const desiredState = definition.state
+   if (account.status === 'pending' && desiredState === 'rejected') {
+      await rejectUserService(actorId, userId)
+   } else if (account.status === 'pending' && desiredState !== 'pending') {
+      await approveUserService(actorId, userId)
+      // Only a newly approved account is blocked, so a later manual unblock is kept.
+      if (desiredState === 'blocked') await blockUserService(actorId, userId)
+   }
    // Roles are only raised from the bare student role, so later manual changes are kept.
    const currentRoles = await findUserRoles(userId)
    if (definition.roles.length > 1 && currentRoles.join() === 'student') {
       await replaceUserRolesService(actorId, userId, { roles: definition.roles })
    }
-   if (account.status !== 'blocked' && account.status !== 'rejected') await ensureProfileReady(userId)
+   if (!desiredState && account.status !== 'blocked' && account.status !== 'rejected') {
+      await ensureProfileReady(userId)
+   }
    report.accounts.push({
       role: definition.label,
       phone: definition.phone,
       result: created ? 'created' : `exists (${account.status})`,
+      ...(created && desiredState ? { status: desiredState } : {}),
    })
    return userId
-}
-
-async function ensureSubject(actorId, { code, color, titles }) {
-   const { subjects } = await listSubjectsService()
-   const found = subjects.find((subject) => subject.code === code)
-   if (found) {
-      note('subject', code, false)
-      return found.id
-   }
-   const subject = await createSubjectService(actorId, {
-      code,
-      color,
-      primaryLanguage: 'en',
-      translations: titles,
-   })
-   note('subject', code, true)
-   return subject.id
 }
 
 async function ensureCourse(actorId, { title, description, subjectId }) {
@@ -472,16 +499,10 @@ async function ensureEnrollments(actorId, courseId, moduleIds, studentIds) {
 }
 
 async function seedContent(actorId, userIds) {
-   const biologyId = await ensureSubject(actorId, {
-      code: 'demo-biology',
-      color: 'green',
-      titles: { en: { title: 'Biology' }, ru: { title: 'Биология' } },
-   })
-   const chemistryId = await ensureSubject(actorId, {
-      code: 'demo-chemistry',
-      color: 'blue',
-      titles: { en: { title: 'Chemistry' }, ru: { title: 'Химия' } },
-   })
+   const context = { actorId, userIds, note, createOnce, collectPages }
+   const subjects = await ensureTaxonomy(context)
+   const biologyId = subjects.get('demo-biology').id
+   const chemistryId = subjects.get('demo-chemistry').id
 
    const course = await ensureCourse(actorId, {
       title: 'Biology Fundamentals (demo)',
@@ -518,13 +539,57 @@ async function seedContent(actorId, userIds) {
    const questionIds = await ensureQuestionBank(actorId, biologyId)
    await ensureDemoTest(actorId, course.id, questionIds, groupId)
    await ensureEnrollments(actorId, course.id, moduleIds, studentIds.slice(0, 2))
+
+   // Rich Russian/Tajik content: courses, banks, tests, groups and access states.
+   await seedRichDemoContent(context, { subjects, groupAId: groupId })
 }
 
-function printReport(password, passwordGenerated) {
+function summarize() {
+   const totals = new Map()
+   for (const row of report.content) {
+      const total = totals.get(row.kind) || { kind: row.kind, created: 0, existing: 0 }
+      if (row.result === 'created') total.created += 1
+      else total.existing += 1
+      totals.set(row.kind, total)
+   }
+   return [...totals.values()]
+}
+
+const checklist = [
+   ['+992900000001 owner', 'Everything: users page (all statuses), settings, any course, bank, test or group.'],
+   ['+992900000002 admin', 'The same admin screens as the owner, without owner-only actions.'],
+   ['+992900000003 teacher', 'Teacher view: "Биология 9 класс" (all permissions), "Химия 9 класс" (content only), group A.'],
+   ['+992900000021 teacher', 'Teacher with all rights in "Химия 9 класс", assessment rights in the math course, group B (can assign tests).'],
+   ['+992900000022 teacher', 'Teacher with assessment rights in physics, results-only in math, group B and the archived group C.'],
+   ['+992900000004 student 1', 'Full access to "Биология 9 класс" (two modules); chemistry with one module ending in 3 days.'],
+   ['+992900000005 student 2', 'Scheduled biology enrollment (starts in 7 days); active math with three modules.'],
+   ['+992900000006 student 3', 'Expired biology enrollment; physics with an active and a revoked module grant.'],
+   ['+992900000007 student 4', 'Revoked chemistry enrollment; math enrollment reinstated after revocation.'],
+   ['+992900000008 student 5', 'Full physics access; scheduled math enrollment.'],
+   ['+992900000009..20 students', 'Group B and the archived group C rosters, user pickers, enrollment search.'],
+   ['+992900000023, 024', 'Pending accounts: approve or reject them on the approvals screen.'],
+   ['+992900000025 / 026', 'A blocked and a rejected account (cannot log in).'],
+]
+
+const screens = [
+   'Subjects and taxonomy: 5 subjects with colors, sections and nested topics.',
+   'Courses: 5 published, 1 draft; a draft module in biology, an archived module in chemistry.',
+   'Lessons: text, mixed and draft video lessons (video storage is not configured).',
+   'Question banks: 5 banks (four staff, one private) with published, draft and archived questions of every type, in ru, tg and en.',
+   'Tests: 4 published (open now, upcoming and closed windows), 1 draft, 1 archived; group and student assignments.',
+   'Groups: A, B and one archived group C, with representatives, teachers and announcements (draft, published, pinned, archived).',
+   'Access: enrollments in every state and module grants (active, scheduled, expired, revoked).',
+]
+
+function printReport(password, passwordGenerated, verbose) {
    console.log('\nAccounts')
    console.table(report.accounts)
-   console.log('Content')
-   console.table(report.content)
+   if (verbose) {
+      console.log('Content (every record)')
+      console.table(report.content)
+   }
+   console.log('Summary of content (created in this run / already existed)')
+   console.table(summarize())
    const createdAccounts = report.accounts.filter((account) => account.result === 'created').length
    if (createdAccounts) {
       console.log(
@@ -534,6 +599,10 @@ function printReport(password, passwordGenerated) {
       )
    }
    console.log('Accounts that already existed keep their original password.')
+   console.log('\nWhat to look at: accounts')
+   console.table(checklist.map(([account, screen]) => ({ account, screen })))
+   console.log('What to look at: screens')
+   for (const line of screens) console.log(`- ${line}`)
 }
 
 async function main() {
@@ -553,7 +622,7 @@ async function main() {
       userIds[definition.key] = await ensureAccount(definition, password, ownerId)
    }
    await seedContent(ownerId, userIds)
-   printReport(password, passwordGenerated)
+   printReport(password, passwordGenerated, options.verbose)
 }
 
 try {

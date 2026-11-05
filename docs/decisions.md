@@ -493,3 +493,12 @@ Password login uses a generic invalid-credentials response for unknown phones an
 - **Passwords.** `--password`, else `SEED_PASSWORD`, else a random password printed once. It is never stored. Reruns do not reset the password of an existing account.
 - **Roles.** They are raised only from the bare `student` role, so manual role changes after seeding are kept.
 - **Test.** `tests/integration/seed-demo.test.js` creates its own database, because a seeded owner would otherwise leak into the shared disposable database used by the other tests.
+
+## 2026-11-05 — Rich demo content in the seed
+
+- **Old content kept.** The English "Biology Fundamentals (demo)" course, its bank, quiz and group A stay; the new content is added beside them and reuses the subject codes `demo-biology` and `demo-chemistry` and the bank `demo-biology-bank`, so a rerun on an older database adds Tajik and Russian titles and the new records instead of duplicating subjects. The original draft chemistry course is the one draft course.
+- **Extra accounts.** Phones `09` to `20` are students; `21` and `22` are two more teachers (group and course permissions need teachers to differ, and only the `teacher` role is eligible); `23` and `24` pending, `25` blocked, `26` rejected.
+- **Past states.** The API refuses access windows that have already ended and assignments that close in the past. The seed passes the services' existing `clock` parameter for expired enrollments and module grants, and moves assignment windows into the past with the update API. No SQL and no new code paths in services.
+- **Reruns.** Every record is found by phone, code, title or external id. An archived group is skipped as a whole because archived groups refuse members and announcements. Enrollments are skipped when any enrollment row exists, so a revoked demo enrollment is never reinstated by a rerun. A module or question that a person moved back to draft after seeding would be published again.
+- **Video lessons** stay drafts because there is no real storage to hold a video.
+- **Report.** The run prints a summary per entity (created / existing) and a checklist of accounts and screens; `--verbose` prints every record.
