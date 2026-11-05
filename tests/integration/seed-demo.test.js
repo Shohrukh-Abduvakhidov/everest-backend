@@ -25,35 +25,67 @@ function run(args, databaseName, extraEnv = {}) {
    })
 }
 
+const accessState = (table) => `CASE
+   WHEN ${table}.revoked_at IS NOT NULL THEN 'revoked'
+   WHEN ${table}.begins_at > CURRENT_TIMESTAMP THEN 'scheduled'
+   WHEN ${table}.expires_at IS NOT NULL AND ${table}.expires_at <= CURRENT_TIMESTAMP THEN 'expired'
+   ELSE 'active' END`
+const assignmentWindow = `CASE
+   WHEN opens_at > CURRENT_TIMESTAMP THEN 'upcoming'
+   WHEN closes_at IS NOT NULL AND closes_at < CURRENT_TIMESTAMP THEN 'closed'
+   ELSE 'open' END`
+
 async function counts(databaseName) {
    const client = new Client({ ...env.database, database: databaseName })
    await client.connect()
    try {
       const scalar = async (sql) => Number((await client.query(sql)).rows[0].count)
+      const distribution = async (sql) => Object.fromEntries(
+         (await client.query(sql)).rows.map((row) => [row.state, Number(row.count)]),
+      )
+      const role = (code) => scalar(`SELECT count(*) FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE r.code = '${code}'`)
       return {
          users: await scalar(`SELECT count(*) FROM user_phones WHERE phone_e164 LIKE '+9929000000%'`),
-         owners: await scalar(`SELECT count(*) FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE r.code = 'owner'`),
-         admins: await scalar(`SELECT count(*) FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE r.code = 'admin'`),
-         teachers: await scalar(`SELECT count(*) FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE r.code = 'teacher'`),
-         activeUsers: await scalar(`SELECT count(*) FROM users WHERE status = 'active' AND onboarding_completed_at IS NOT NULL`),
+         owners: await role('owner'),
+         admins: await role('admin'),
+         teachers: await role('teacher'),
+         userStatuses: await distribution(`SELECT status AS state, count(*) FROM users GROUP BY status`),
+         onboardedUsers: await scalar(`SELECT count(*) FROM users WHERE status = 'active' AND onboarding_completed_at IS NOT NULL`),
          subjects: await scalar(`SELECT count(*) FROM subjects`),
-         publishedCourses: await scalar(`SELECT count(*) FROM courses WHERE status = 'published'`),
-         draftCourses: await scalar(`SELECT count(*) FROM courses WHERE status = 'draft'`),
-         modules: await scalar(`SELECT count(*) FROM course_modules WHERE status = 'published'`),
-         lessons: await scalar(`SELECT count(*) FROM lessons WHERE status = 'published'`),
-         groups: await scalar(`SELECT count(*) FROM groups`),
+         subjectColors: await scalar(`SELECT count(DISTINCT color) FROM subjects`),
+         sections: await scalar(`SELECT count(*) FROM sections`),
+         topics: await scalar(`SELECT count(*) FROM topics`),
+         nestedTopics: await scalar(`SELECT count(*) FROM topics WHERE parent_id IS NOT NULL`),
+         minTopicsPerSubject: await scalar(`SELECT min(total) AS count FROM (SELECT count(*) AS total FROM topics GROUP BY subject_id) AS per_subject`),
+         courses: await distribution(`SELECT status AS state, count(*) FROM courses GROUP BY status`),
+         courseTeachers: await scalar(`SELECT count(*) FROM course_teachers`),
+         modules: await distribution(`SELECT status AS state, count(*) FROM course_modules GROUP BY status`),
+         lessons: await distribution(`SELECT lesson_type || '/' || status AS state, count(*) FROM lessons GROUP BY 1`),
+         groups: await distribution(`SELECT status AS state, count(*) FROM groups GROUP BY status`),
          members: await scalar(`SELECT count(*) FROM group_members WHERE status = 'active'`),
+         representatives: await scalar(`SELECT count(*) FROM group_members WHERE is_representative`),
          groupTeachers: await scalar(`SELECT count(*) FROM group_teachers`),
-         announcements: await scalar(`SELECT count(*) FROM group_announcements WHERE status = 'published'`),
-         banks: await scalar(`SELECT count(*) FROM question_banks`),
-         publishedQuestions: await scalar(`SELECT count(*) FROM questions WHERE status = 'published'`),
-         questionTypes: await scalar(`SELECT count(DISTINCT question_type) FROM questions WHERE status = 'published'`),
+         announcements: await distribution(`SELECT status || CASE WHEN is_pinned THEN '/pinned' ELSE '' END AS state, count(*) FROM group_announcements GROUP BY 1`),
+         banks: await distribution(`SELECT visibility AS state, count(*) FROM question_banks GROUP BY visibility`),
+         questions: await distribution(`SELECT status AS state, count(*) FROM questions GROUP BY status`),
+         publishedPerBank: await scalar(`SELECT min(total) AS count FROM (SELECT count(*) AS total FROM questions WHERE status = 'published' GROUP BY bank_id) AS per_bank`),
+         publishedTypes: await scalar(`SELECT count(DISTINCT question_type) FROM questions WHERE status = 'published'`),
+         questionLanguages: await distribution(`SELECT language_code AS state, count(*) FROM questions GROUP BY language_code`),
+         difficulties: await scalar(`SELECT count(DISTINCT difficulty) FROM questions WHERE status = 'published'`),
+         publishedMatching: await scalar(`SELECT count(*) FROM questions WHERE question_type = 'matching' AND status = 'published'`),
+         matchingWithRules: await scalar(`SELECT count(*) FROM questions WHERE question_type = 'matching' AND status = 'published' AND interaction_settings ? 'requireAllLeft' AND interaction_settings ? 'allowRightReuse'`),
+         topicLinks: await scalar(`SELECT count(*) FROM question_topics`),
          verifiedKeys: await scalar(`SELECT count(*) FROM question_answer_keys WHERE status = 'verified'`),
-         enrollments: await scalar(`SELECT count(*) FROM course_enrollments`),
-         moduleGrants: await scalar(`SELECT count(*) FROM module_access_grants`),
-         publishedTests: await scalar(`SELECT count(*) FROM tests WHERE status = 'published'`),
+         draftsWithKeys: await scalar(`SELECT count(*) FROM questions q JOIN question_answer_keys k ON k.question_id = q.id WHERE q.status = 'draft' AND k.status <> 'unknown'`),
+         publishedWithoutVerifiedKey: await scalar(`SELECT count(*) FROM questions q LEFT JOIN question_answer_keys k ON k.question_id = q.id AND k.status = 'verified' WHERE q.status <> 'draft' AND k.question_id IS NULL`),
+         tests: await distribution(`SELECT status AS state, count(*) FROM tests GROUP BY status`),
          testQuestions: await scalar(`SELECT count(*) FROM test_questions`),
          groupAssignments: await scalar(`SELECT count(*) FROM test_assignments WHERE group_id IS NOT NULL AND status = 'active'`),
+         userAssignments: await scalar(`SELECT count(*) FROM test_assignments WHERE user_id IS NOT NULL AND status = 'active'`),
+         assignmentWindows: await distribution(`SELECT ${assignmentWindow} AS state, count(*) FROM test_assignments GROUP BY 1`),
+         enrollmentStates: await distribution(`SELECT ${accessState('course_enrollments')} AS state, count(*) FROM course_enrollments GROUP BY 1`),
+         moduleGrantStates: await distribution(`SELECT ${accessState('module_access_grants')} AS state, count(*) FROM module_access_grants GROUP BY 1`),
+         fullAccessStudent: await scalar(`SELECT count(*) FROM course_enrollments e JOIN courses c ON c.id = e.course_id JOIN user_phones p ON p.user_id = e.user_id WHERE p.phone_e164 = '+992900000004' AND c.title = 'Биология 9 класс' AND e.revoked_at IS NULL AND e.expires_at IS NULL AND e.begins_at <= CURRENT_TIMESTAMP`),
       }
    } finally {
       await client.end()
@@ -90,29 +122,47 @@ test('demo seed is idempotent and refuses unsafe targets', async (t) => {
          assert.ok(!first.output.includes(seedPassword), 'a supplied password is not echoed')
          const afterFirst = await counts(databaseName)
          assert.deepEqual(afterFirst, {
-            users: 8,
+            users: 26,
             owners: 1,
             admins: 1,
-            teachers: 1,
-            activeUsers: 8,
-            subjects: 2,
-            publishedCourses: 1,
-            draftCourses: 1,
-            modules: 2,
-            lessons: 6,
-            groups: 1,
-            members: 3,
-            groupTeachers: 1,
-            announcements: 2,
-            banks: 1,
-            publishedQuestions: 5,
-            questionTypes: 5,
-            verifiedKeys: 5,
-            enrollments: 2,
-            moduleGrants: 4,
-            publishedTests: 1,
-            testQuestions: 5,
-            groupAssignments: 1,
+            teachers: 3,
+            userStatuses: { active: 22, pending: 2, blocked: 1, rejected: 1 },
+            onboardedUsers: 22,
+            subjects: 5,
+            subjectColors: 5,
+            sections: 15,
+            topics: 50,
+            nestedTopics: 12,
+            minTopicsPerSubject: 9,
+            courses: { published: 5, draft: 1 },
+            courseTeachers: 7,
+            modules: { published: 12, draft: 1, archived: 1 },
+            lessons: { 'text/published': 32, 'mixed/published': 4, 'text/draft': 2, 'video/draft': 9 },
+            groups: { active: 2, archived: 1 },
+            members: 14,
+            representatives: 3,
+            groupTeachers: 4,
+            announcements: { draft: 3, published: 4, 'published/pinned': 3, archived: 1 },
+            banks: { staff: 4, private: 1 },
+            questions: { published: 145, draft: 25, archived: 15 },
+            publishedPerBank: 28,
+            publishedTypes: 5,
+            questionLanguages: { ru: 160, tg: 20, en: 5 },
+            difficulties: 5,
+            publishedMatching: 16,
+            matchingWithRules: 16,
+            topicLinks: 180,
+            verifiedKeys: 160,
+            draftsWithKeys: 0,
+            publishedWithoutVerifiedKey: 0,
+            tests: { published: 5, draft: 1, archived: 1 },
+            testQuestions: 66,
+            groupAssignments: 5,
+            userAssignments: 6,
+            assignmentWindows: { open: 7, upcoming: 2, closed: 2 },
+            enrollmentStates: { active: 8, scheduled: 2, expired: 1, revoked: 1 },
+            moduleGrantStates: { active: 17, scheduled: 1, expired: 1, revoked: 3 },
+            fullAccessStudent: 1,
          })
 
          const second = await run(['scripts/seed-demo.js', '--password', seedPassword], databaseName)
