@@ -74,6 +74,9 @@ services:
         API_ORIGIN: http://backend:4100
         NEXT_PUBLIC_DATA_SOURCE: api
         NEXT_PUBLIC_APP_URL_STUDENT: ${APP_URL_STUDENT:-}
+        # Next truncates proxied request bodies at 10 MB and times out after 30 s unless raised (matches nginx 512m).
+        PROXY_CLIENT_MAX_BODY_SIZE: ${PROXY_CLIENT_MAX_BODY_SIZE:-512mb}
+        PROXY_TIMEOUT_MS: ${PROXY_TIMEOUT_MS:-600000}
     image: everest-frontend:temp-vps
     restart: unless-stopped
     environment:
