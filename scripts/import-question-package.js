@@ -11,11 +11,12 @@ import { loadQuestionPackage } from '../src/utils/question-package.js';
 // Usage:
 //   npm run import:questions -- --package <dir|zip> --actor-phone +992... [--dry-run]
 //     [--idempotency-key <key>] [--batch-size <1-100>] [--report <file.json>]
+//     [--apply-matching-defaults]
 // Exit codes: 0 success, 1 failure, 2 package rejected by validation.
 // Output contains counts, codes and record paths only; question text is never printed.
 
 const usage = 'Usage: npm run import:questions -- --package <path> --actor-phone +992... '
-  + '[--dry-run] [--idempotency-key <key>] [--batch-size <n>] [--report <file>]';
+  + '[--dry-run] [--idempotency-key <key>] [--batch-size <n>] [--report <file>] [--apply-matching-defaults]';
 
 function readArguments(argv) {
   const options = { dryRun: false };
@@ -33,6 +34,7 @@ function readArguments(argv) {
     else if (name === '--batch-size') options.batchSize = Number(value());
     else if (name === '--report') options.reportPath = value();
     else if (name === '--dry-run') options.dryRun = true;
+    else if (name === '--apply-matching-defaults') options.applyMatchingDefaults = true;
     else throw new Error(`Unknown argument ${name}. ${usage}`);
   }
   if (!options.packagePath || !options.actorPhone) throw new Error(usage);
@@ -60,7 +62,11 @@ try {
   const options = readArguments(process.argv.slice(2));
   const pkg = await loadQuestionPackage(options.packagePath);
   const actorId = await resolveImportActorService(options.actorPhone);
-  const serviceOptions = { idempotencyKey: options.idempotencyKey, batchSize: options.batchSize };
+  const serviceOptions = {
+    idempotencyKey: options.idempotencyKey,
+    batchSize: options.batchSize,
+    applyMatchingDefaults: options.applyMatchingDefaults,
+  };
   const result = options.dryRun
     ? await dryRunQuestionImportService(actorId, pkg, serviceOptions)
     : await runQuestionImportService(actorId, pkg, serviceOptions, {

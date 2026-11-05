@@ -70,7 +70,7 @@ function dependencies(overrides = {}) {
       authorization: overrides.authorization || authorizationRepository,
       auth: overrides.auth || authRepository,
       transaction: overrides.transaction || withTransaction,
-      storage: overrides.storage,
+      storage: () => overrides.storage || getStorageProvider(),
       log: overrides.log || (() => {}),
    }
 }
@@ -639,7 +639,7 @@ function parseTopicCodes(value) {
 
 // Converts one package question into the M08 API body and runs the M08 parsers on it.
 // Called by the planner (placeholder asset IDs) and again by the writer (real IDs).
-function prepareQuestion(raw, { resolveAsset, topicIds, warn }) {
+function prepareQuestion(raw, { resolveAsset, topicIds, warn, applyMatchingDefaults = false }) {
    requireFields(raw, questionPackageFields, '')
    if (!questionTypes.includes(raw.type)) throw validationError('type')
    if (raw.translations !== undefined) {
@@ -667,8 +667,16 @@ function prepareQuestion(raw, { resolveAsset, topicIds, warn }) {
          : raw.matching
    }
    const values = parseQuestionBody(body, raw.type, false)
-   if (raw.type === 'matching' && (values.interactionSettings.requireAllLeft === null
-      || values.interactionSettings.allowRightReuse === null)) {
+   const rulesMissing = raw.type === 'matching' && (values.interactionSettings.requireAllLeft === null
+      || values.interactionSettings.allowRightReuse === null)
+   if (rulesMissing && applyMatchingDefaults) {
+      // Only on explicit request, and reported for every question it touched.
+      values.interactionSettings = {
+         requireAllLeft: values.interactionSettings.requireAllLeft ?? true,
+         allowRightReuse: values.interactionSettings.allowRightReuse ?? false,
+      }
+      warn('MATCHING_DEFAULTS_APPLIED', 'requireAllLeft/allowRightReuse was not stated; requested defaults were applied')
+   } else if (rulesMissing) {
       warn('MATCHING_RULE_UNSPECIFIED', 'requireAllLeft/allowRightReuse is not stated; a reviewer must set it before publication')
    }
    const shape = keyShape(
@@ -739,6 +747,7 @@ async function planQuestions(deps, manifest, context, report) {
             throw packageError('REFERENCE_UNKNOWN', `topic ${unknownTopic} is not in the bank subject`, 'topicCodes')
          }
          const prepared = prepareQuestion(raw, {
+            applyMatchingDefaults: context.applyMatchingDefaults,
             resolveAsset: (reference, assetNamespace) => {
                if (assetNamespace !== undefined && assetNamespace !== context.namespace) {
                   throw packageError('REFERENCE_UNKNOWN', 'image references an asset of another sourceNamespace', 'content')
@@ -798,11 +807,17 @@ function parseOptions(options = {}) {
    if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > maxBatchSize) {
       throw validationError('batchSize', `batchSize must be 1-${maxBatchSize}`)
    }
-   return { batchSize }
+   if (options.applyMatchingDefaults !== undefined && typeof options.applyMatchingDefaults !== 'boolean') {
+      throw validationError('applyMatchingDefaults')
+   }
+   return { batchSize, applyMatchingDefaults: options.applyMatchingDefaults === true }
 }
 
-function parseIdempotencyKey(value, packageSha256) {
-   if (value === undefined || value === null) return `package-${packageSha256}`
+// The defaults change what is written, so the same bytes with them are a different run.
+function parseIdempotencyKey(value, packageSha256, applyMatchingDefaults = false) {
+   if (value === undefined || value === null) {
+      return `package-${packageSha256}${applyMatchingDefaults ? '-matching-defaults' : ''}`
+   }
    if (typeof value !== 'string' || !idempotencyKeyPattern.test(value)) {
       throw validationError('idempotencyKey', 'idempotencyKey must match [A-Za-z0-9._:-]{1,200}')
    }
@@ -852,7 +867,7 @@ function parseDeclaredDuplicates(manifest, plannedIds, report) {
    return duplicates
 }
 
-async function planImport(deps, actor, pkg, report) {
+async function planImport(deps, actor, pkg, report, { applyMatchingDefaults = false } = {}) {
    let manifest = pkg.manifest
    let paths = null
    if (isEntityPackage(pkg)) {
@@ -902,6 +917,7 @@ async function planImport(deps, actor, pkg, report) {
       bankId: bank?.existing?.id || null,
       namespace,
       paths,
+      applyMatchingDefaults,
    }, report)
    const allIds = new Set((Array.isArray(manifest.questions) ? manifest.questions : [])
       .map((question) => (isPlainObject(question) ? parseExternalId(question.externalId) : null)).filter(Boolean))
@@ -952,14 +968,14 @@ async function existingRunOutcome(deps, actor, bankCode, idempotencyKey, package
 async function dryRunQuestionImportService(actorIdValue, pkg, options = {}, overrides) {
    const deps = dependencies(overrides)
    const actor = await loadActor(deps, actorIdValue)
-   const idempotencyKey = parseIdempotencyKey(options.idempotencyKey, pkg.sha256)
-   const { batchSize } = parseOptions(options)
+   const { batchSize, applyMatchingDefaults } = parseOptions(options)
+   const idempotencyKey = parseIdempotencyKey(options.idempotencyKey, pkg.sha256, applyMatchingDefaults)
    const report = createReport()
    report.counters.batches.size = batchSize
    let previousRun = null
    try {
       previousRun = await existingRunOutcome(deps, actor, pkg.manifest?.bank?.code, idempotencyKey, pkg.sha256)
-      await planImport(deps, actor, pkg, report)
+      await planImport(deps, actor, pkg, report, { applyMatchingDefaults })
    } catch (error) {
       issueFromError(report, error, '')
    }
@@ -1125,6 +1141,7 @@ async function writeQuestion(deps, actor, context, item, client, local) {
       resolveAsset: (reference) => context.assets.get(reference).assetId,
       topicIds: item.topicCodes.map((code) => context.topicId(code)),
       warn: () => {},
+      applyMatchingDefaults: context.applyMatchingDefaults,
    })
    let questionId
    if (stored) {
@@ -1190,8 +1207,8 @@ function replayResult(run) {
 async function runQuestionImportService(actorIdValue, pkg, options = {}, overrides) {
    const deps = dependencies(overrides)
    const actor = await loadActor(deps, actorIdValue)
-   const idempotencyKey = parseIdempotencyKey(options.idempotencyKey, pkg.sha256)
-   const { batchSize } = parseOptions(options)
+   const { batchSize, applyMatchingDefaults } = parseOptions(options)
+   const idempotencyKey = parseIdempotencyKey(options.idempotencyKey, pkg.sha256, applyMatchingDefaults)
    const previous = await existingRunOutcome(deps, actor, pkg.manifest?.bank?.code, idempotencyKey, pkg.sha256)
    if (previous) return replayResult(previous)
 
@@ -1199,7 +1216,7 @@ async function runQuestionImportService(actorIdValue, pkg, options = {}, overrid
    report.counters.batches.size = batchSize
    let plan
    try {
-      plan = await planImport(deps, actor, pkg, report)
+      plan = await planImport(deps, actor, pkg, report, { applyMatchingDefaults })
    } catch (error) {
       issueFromError(report, error, '')
    }
@@ -1211,7 +1228,7 @@ async function runQuestionImportService(actorIdValue, pkg, options = {}, overrid
    // idempotent: a failed run leaves at most an unreferenced object under the same key.
    const uploads = [...plan.assets.values()].filter((asset) => asset.action === 'upload')
    if (uploads.length) {
-      const storage = deps.storage || getStorageProvider()
+      const storage = deps.storage()
       for (const asset of uploads) {
          await storage.uploadObject({ key: storageKey(asset), body: asset.bytes, contentType: asset.mimeType })
       }
@@ -1222,6 +1239,7 @@ async function runQuestionImportService(actorIdValue, pkg, options = {}, overrid
       bankId: null,
       subjectId: null,
       assets: plan.assets,
+      applyMatchingDefaults,
       topicId: null,
       pendingDuplicates: plan.duplicates.map((link) => ({ ...link, done: false })),
    }
