@@ -570,27 +570,52 @@ npm run dev
 - **Safety:** the script prints the target database first. It refuses to run when `NODE_ENV=production` (even with `--force`) or when `DB_NAME` contains none of `dev`, `test`, `demo` (override with `--force`). It is idempotent: a second run skips what exists and creates nothing.
 - **Never** run it against a real or shared database. There is no `--reset` flag; drop and recreate the database instead.
 
-| Phone | Role | Roles in the API |
-|---|---|---|
-| `+992900000001` | owner | `owner` |
-| `+992900000002` | admin | `["student","admin"]` |
-| `+992900000003` | teacher | `["student","teacher"]` |
-| `+992900000004` to `+992900000008` | 5 students (Aziza, Bahrom, Dilnoza, Eraj, Firuza) | `["student"]` |
+| Phone | Account | Roles in the API | What it shows |
+|---|---|---|---|
+| `+992900000001` | owner (Farhod) | `owner` | Everything: all admin screens, any course, bank, test or group |
+| `+992900000002` | admin (Madina) | `["student","admin"]` | The same admin screens without owner-only actions |
+| `+992900000003` | teacher (Jamshed) | `["student","teacher"]` | All five permissions in "Биология 9 класс", content-only in "Химия 9 класс", group A |
+| `+992900000021` | teacher (Шоира Кодирова) | `["student","teacher"]` | All permissions in chemistry, assessment permissions in math, group B (can assign tests) |
+| `+992900000022` | teacher (Икбол Рахмонов) | `["student","teacher"]` | Assessment permissions in physics, results-only in math, group B and the archived group C |
+| `+992900000004` | student Aziza | `["student"]` | **Full access** to "Биология 9 класс" (both published modules); chemistry with one module ending in 3 days |
+| `+992900000005` | student Bahrom | `["student"]` | Biology enrollment **scheduled** (starts in 7 days); active math with three modules |
+| `+992900000006` | student Dilnoza | `["student"]` | Biology enrollment **expired**; physics with one active and one **revoked** module grant |
+| `+992900000007` | student Eraj | `["student"]` | Chemistry enrollment **revoked**; math enrollment **reinstated** after revocation |
+| `+992900000008` | student Firuza | `["student"]` | Full physics access; math enrollment scheduled |
+| `+992900000009` to `+992900000020` | 12 students | `["student"]` | Rosters of groups B and C, user pickers, search |
+| `+992900000023`, `+992900000024` | 2 **pending** accounts | `["student"]` | The approvals screen (approve or reject) |
+| `+992900000025` | **blocked** account | `["student"]` | Cannot log in (`403 ACCOUNT_NOT_ACTIVE`) |
+| `+992900000026` | **rejected** account | `["student"]` | Cannot log in |
 
-All eight accounts are `active` with a completed onboarding profile (last name `Demo`). The owner is created by the same service as `bootstrap:owner`. If the database already has an owner, the script skips the demo owner, says so, and uses that existing owner to approve and configure everything else.
+The 22 active accounts have a completed onboarding profile; the original eight use the last name `Demo`, the others have realistic names. The owner is created by the same service as `bootstrap:owner`. If the database already has an owner, the script skips the demo owner, says so, and uses that existing owner to approve and configure everything else. Phones `01` to `08` are unchanged from earlier versions of the seed.
 
-**Content created:**
+**Content created on a fresh database** (counts are printed at the end of the run; `--verbose` also lists every record):
 
-- 2 subjects (`demo-biology`, `demo-chemistry`).
-- Course "Biology Fundamentals (demo)": **published**, 2 published modules with 3 published text lessons each. The teacher is assigned to the course.
-- Course "Chemistry Basics (draft demo)": **draft**.
-- Group "Demo Group A" (`demo-group-a`) with students 1 to 3 as members, the teacher assigned, and 2 published announcements.
-- Question bank `demo-biology-bank` with 5 published questions, one per type (`single_choice`, `multiple_choice`, `matching`, `numeric`, `short_text`), each with a verified answer key.
-- Students 1 and 2 are enrolled in the published course with grants for both modules. Students 3 to 5 have no enrollment, so they appear in `GET /admin/users?notEnrolledInCourse=:courseId`.
+| Area | What exists |
+|---|---|
+| Subjects | 5 with colors: Биология (green), Химия (blue), Физика (orange), Математика (purple), Русский язык (neutral); Russian, Tajik and English titles. 15 sections and 50 topics, 12 of them nested (at least 9 topics per subject). |
+| Courses | **5 published** and **1 draft**. New: "Биология 9 класс", "Химия 9 класс", "Физика 9 класс", "Математика: подготовка к НЦТ" (Russian text, Tajik title translations). Kept from the earlier seed: "Biology Fundamentals (demo)" and the draft "Chemistry Basics (draft demo)". |
+| Modules | 3 per new course. Biology module 3 is **draft** (its lessons are drafts); chemistry module 3 is **archived**; the rest are published. |
+| Lessons | 41 new: text lessons of 150 to 400 words with headings, paragraphs, lists, dividers, callouts; 4 `mixed` lessons; 9 `video` lessons left as **draft** (no real storage, so they cannot be published). |
+| Course teachers | 7 assignments with different permission sets (see the account table). |
+| Question banks | 5, one per subject: 4 `staff`, 1 `private` (`demo-russian-bank`, only the owner sees it). 145 published questions in total (28 to 31 per bank) of all five types, with verified keys and explanations, topic links, difficulty 1 to 5, languages `ru`, `tg` and `en`; 25 drafts without keys; 15 archived. Matching questions have both `requireAllLeft` and `allowRightReuse` set. External ids look like `bio-q-01`. |
+| Tests | 4 **published** (10 or 15 questions, varied points, time limits and attempts, modes `practice`, `exam`, `lesson`), 1 **draft**, 1 **archived**, plus the original demo quiz. Assigned to groups and students with windows that are open now, upcoming and closed. |
+| Groups | 3: A (`demo-group-a`), B (`demo-group-b`) and the **archived** C (`demo-group-c-2025`), each with a representative, teachers with different permissions and 3 to 4 announcements (draft, published, pinned; one archived in C). |
+| Access | 12 enrollments: active, **scheduled**, **expired**, **revoked** and **reinstated**; 22 module grants: active, **scheduled**, **expired** and **revoked**. |
+
+**What the demo is for, screen by screen**
+
+- Users page: every status (`active`, `pending`, `blocked`, `rejected`) and the filters `notInGroup`, `notEnrolledInCourse`.
+- Course editor: sort order of modules, a draft module, an archived module, draft video lessons, translations.
+- Question bank: filters by type, status, language, topic, key status; read-only versus manage (the private bank).
+- Test admin: draft (editable), published and archived (read-only) tests; assignments in three window states; `after_window` reveal needs `closesAt`.
+- Access: the enrollment list shows all states; `PATCH`/extend/revoke/regrant flows can be tried on student 4 to 8.
+
+**Rerun behavior and limits.** A rerun creates nothing that exists (matched by phone, code, title or external id). A group that is already archived is left untouched. Past access windows (expired, closed) cannot be created through the public API, so the seed uses the services' own clock parameter for them and moves assignment windows into the past with the update API; this is for demo data only. Running it against an old seed adds the new content next to the old one.
 
 **Manual setup without the script** (the same result through the API): register with `POST /auth/register`, `npm run bootstrap:owner -- --phone +992XXXXXXXXX` (works once per database), then `POST /admin/users/:id/approve`, `PUT /admin/users/:id/roles`, `POST /admin/courses/:id/teachers`, `POST /admin/groups/:id/teachers` and `POST /admin/courses/:id/enrollments` plus module grants.
 
-**Tests:** `npm test` runs the whole suite in a disposable database and never touches your local data. `tests/integration/seed-demo.test.js` creates its own database, runs the seed twice and compares counts.
+**Tests:** `npm test` runs the whole suite in a disposable database and never touches your local data. `tests/integration/seed-demo.test.js` creates its own database, runs the seed twice and compares counts per entity and access state.
 
 ---
 
