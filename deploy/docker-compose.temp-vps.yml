@@ -1,0 +1,109 @@
+# Temporary single-host deployment: database, migrations, backend and frontend.
+# MinIO and the background workers are intentionally not included yet (see the notes at the bottom).
+#
+# Layout on the server:  /opt/everest/backend/deploy/ (this file + .env)  and  /opt/everest/frontend
+#
+#   cp .env.example .env   # then fill in the secrets and set the file mode to 600
+#   docker compose -f docker-compose.temp-vps.yml build backend      # one image at a time
+#   docker compose -f docker-compose.temp-vps.yml build frontend
+#   docker compose -f docker-compose.temp-vps.yml up -d
+
+name: everest
+
+x-backend-build: &backend-build
+  context: ..
+  dockerfile: Dockerfile
+
+services:
+  db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - everest-db:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+  migrate:
+    build: *backend-build
+    image: everest-backend:temp-vps
+    command: ["npm", "run", "migrate:up"]
+    restart: "no"
+    env_file: .env
+    environment:
+      DB_HOST: db
+    depends_on:
+      db:
+        condition: service_healthy
+
+  backend:
+    build: *backend-build
+    image: everest-backend:temp-vps
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: "4100"
+      DB_HOST: db
+    ports:
+      - "127.0.0.1:4100:4100"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:4100/api/v1/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  frontend:
+    build:
+      context: ${FRONTEND_CONTEXT:-../../frontend}
+      dockerfile: Dockerfile
+      args:
+        API_ORIGIN: http://backend:4100
+        NEXT_PUBLIC_DATA_SOURCE: api
+        NEXT_PUBLIC_APP_URL_STUDENT: ${APP_URL_STUDENT:-}
+    image: everest-frontend:temp-vps
+    restart: unless-stopped
+    environment:
+      API_ORIGIN: http://backend:4100
+      STUDENT_HOSTS: ${STUDENT_HOSTS:-}
+    ports:
+      - "127.0.0.1:3100:3100"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3100/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  everest-db:
+
+# Not deployed yet:
+#  - MinIO / object storage. The backend starts without S3_* (storage is created lazily and uploads answer
+#    503 STORAGE_NOT_CONFIGURED until S3_ENDPOINT, S3_BUCKET, S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY are set).
+#  - Workers. To enable them later, add two services that reuse the backend image and .env, for example:
+#      worker-imports:
+#        image: everest-backend:temp-vps
+#        restart: unless-stopped
+#        env_file: .env
+#        environment: { DB_HOST: db }
+#        command: ["npm", "run", "worker:imports"]
+#        depends_on: { backend: { condition: service_healthy } }
+#    and the same for worker-attempts with command ["npm", "run", "worker:attempts"], then run
+#    docker compose -f docker-compose.temp-vps.yml up -d worker-imports worker-attempts
