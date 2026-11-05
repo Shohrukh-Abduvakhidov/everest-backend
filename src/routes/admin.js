@@ -172,9 +172,15 @@ import {
    updateTestQuestionPointsController,
 } from '../controllers/test-controller.js'
 import {
+   getTestAttemptController,
+   listTestAttemptsController,
+   regradeAttemptController,
+} from '../controllers/test-attempt-controller.js'
+import {
    assignTestsAuthorizationMiddleware,
    manageTestsAuthorizationMiddleware,
    publishTestsAuthorizationMiddleware,
+   readTestResultsAuthorizationMiddleware,
    readTestsAuthorizationMiddleware,
 } from '../middleware/test-admin-middleware.js'
 
@@ -838,6 +844,23 @@ adminRouter.delete(
    authenticatedCsrfMiddleware,
    adminMutationRateMiddleware,
    revokeAssignmentController,
+)
+adminRouter.get(
+   '/tests/:testId/attempts',
+   readTestResultsAuthorizationMiddleware,
+   listTestAttemptsController,
+)
+adminRouter.get(
+   '/tests/:testId/attempts/:attemptId',
+   readTestResultsAuthorizationMiddleware,
+   getTestAttemptController,
+)
+adminRouter.post(
+   '/tests/:testId/attempts/:attemptId/regrade',
+   readTestResultsAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   regradeAttemptController,
 )
 
 export default adminRouter
