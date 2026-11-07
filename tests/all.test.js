@@ -36,6 +36,7 @@ import './integration/learner-catalog.test.js';
 import './integration/lesson-tests.test.js';
 import './integration/test-attempts.test.js';
 import './integration/m11-gaps.test.js';
+import './integration/extra-attempts.test.js';
 import './integration/question-import-upload.test.js';
 import './integration/real-storage.test.js';
 import './integration/telegram-auth.test.js';

@@ -99,6 +99,7 @@ test('readResult reports passPercent from the snapshot', async () => {
       lockNextExpiredAttempt: async () => null,
       findAttempt: async () => row,
       listUserAttempts: async () => [row],
+      sumExtraAttempts: async () => new Map(),
    }
    const result = await getAttemptResultService('2', '10', { ...noExpiry, repository })
    assert.equal(result.percent, 75)
@@ -131,6 +132,7 @@ test('assignments kept for history are marked revoked', async () => {
       lockNextExpiredAttempt: async () => null,
       listLearnerAssignments: async () => [assignment({ available: true }), assignment({ id: '21', available: false })],
       listUserAttempts: async () => [],
+      sumExtraAttempts: async () => new Map(),
       findLearnerAssignmentHistory: async () => assignment({ available: false }),
    }
    const { assignments } = await listMyAssignmentsService('2', '5', {}, { ...noExpiry, repository })

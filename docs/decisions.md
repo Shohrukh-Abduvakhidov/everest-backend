@@ -1,5 +1,40 @@
 # Decisions
 
+## 2026-11-07 — Extra attempts per student (M11)
+
+**Owner's decisions (given on 2026-11-07):**
+
+1. Extra attempts are granted by the roles that can regrade, through the new permission `tests.attempts.grant`: owner and admin everywhere, a group teacher only for their own group (as in results scope).
+2. A grant applies to one (assignment, student) pair. A group assignment stays shared; the grant is for one student.
+3. A grant only adds attempts and cannot be withdrawn. Existing attempts and scores are not edited.
+4. Effective limit = the assignment's `max_attempts` plus the sum of that student's grants on it. The original limit and other students are unchanged. With `max_attempts = null`, a grant is a validation error.
+5. A grant never reopens a window: a revoked or closed assignment, or a passed `closes_at`, refuses new attempts with a clear code. The window is not extended.
+6. Keys stay hidden while the student has attempts left, counting grants.
+7. Lesson completion is unchanged (`lesson-completion-service`).
+
+**Choices made here, unattended; please review:**
+
+- **Who holds the permission.** The task says both "the same roles as `tests.results.regrade`" (owner and admin only) and "a group teacher for their own group". The migration follows the first: only owner and admin hold `tests.attempts.grant`.
+   - The scope rule is built in: a teacher with the permission can grant only on assignments to a group they teach with `can_view_results`.
+   - Course teachers and direct assignments are out of scope for teachers (`404`).
+   - Giving teachers the permission is one `role_permissions` row. It was not added because of the contradiction.
+- **Snapshot.** `policy_snapshot.maxAttempts` keeps the test's own limit, and new attempts store it the same way. Grants are read live and added in `effectiveMaxAttempts` (`utils/attempt-policy.js`, the single formula). Attempts created before a grant therefore need no rewrite.
+   - Consequence: after a grant, an `after_submission` result that was already revealed becomes hidden again until the extra attempts are used.
+- **Where the limit lives.** The limit is on the test (`tests.max_attempts`, joined as `assignment.max_attempts`). Published tests are immutable, so it cannot drift.
+- **Student check.** The student must be the direct assignee or an active member of the assigned group (`409 STUDENT_NOT_ASSIGNED`). A student who left the group cannot start, so a grant would be useless.
+- **Codes.**
+   - `400 ATTEMPTS_UNLIMITED` is the validation error.
+   - `409 ASSIGNMENT_REVOKED` is new.
+   - `409 ASSIGNMENT_CLOSED` and `409 TEST_NOT_AVAILABLE` are reused.
+   - An upcoming assignment can receive a grant.
+- **Idempotency.**
+   - As in regrade, the key is checked first, so a replay returns the current state even if the assignment has closed since.
+   - `ON CONFLICT (idempotency_key) DO NOTHING` turns a concurrent duplicate into a replay or an `IDEMPOTENCY_KEY_CONFLICT`.
+- **Races.** The grant takes the start's advisory lock for (student, assignment) plus `FOR SHARE` on the assignment. `createNewAttempt` reads the grants under that same lock.
+- **Reads.** `GET` on the grant path uses the same permission and scope. The learner's `maxAttempts` also shows the effective limit, so it matches `remainingAttempts`.
+- **Append-only** is enforced in code (there is no update or delete method), not by a trigger.
+- **Catalog script.** `verify-database.js` still expected 34 permissions and 81 role grants, from before the regrade migration. It now expects 36 and 85, plus the new table.
+
 ## 2026-11-07 — M11 gaps: lesson completion by test, passPercent, history, testId, course progress
 
 **Owner's decision on lesson completion (given by the owner on 2026-11-07):**

@@ -8,7 +8,9 @@ import {
    submitAttemptService,
 } from '../services/test-attempt-service.js'
 import {
+   getExtraAttemptsService,
    getTestAttemptService,
+   grantExtraAttemptsService,
    listTestAttemptsService,
    regradeAttemptService,
 } from '../services/test-results-service.js'
@@ -119,7 +121,40 @@ async function regradeAttemptController(req, res, next) {
    }
 }
 
+async function getExtraAttemptsController(req, res, next) {
+   try {
+      const data = await getExtraAttemptsService(
+         req.auth.userId,
+         req.params.testId,
+         req.params.assignmentId,
+         req.params.userId,
+         overrides(req),
+      )
+      res.json({ data })
+   } catch (error) {
+      next(error)
+   }
+}
+
+async function grantExtraAttemptsController(req, res, next) {
+   try {
+      const data = await grantExtraAttemptsService(
+         req.auth.userId,
+         req.params.testId,
+         req.params.assignmentId,
+         req.params.userId,
+         req.body,
+         overrides(req),
+      )
+      res.json({ data })
+   } catch (error) {
+      next(error)
+   }
+}
+
 export {
+   getExtraAttemptsController,
+   grantExtraAttemptsController,
    getAssignmentResultController,
    getAttemptController,
    getAttemptResultController,
