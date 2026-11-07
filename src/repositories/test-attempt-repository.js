@@ -351,6 +351,118 @@ const staffAttemptColumns = `${attemptColumns},
    (SELECT concat_ws(' ', first_name, last_name) FROM user_profiles
     WHERE user_id = attempt.user_id) AS user_display_name`
 
+// ---------------------------------------------------------------- extra attempts
+
+// Sum of extra attempts per assignment for one student. Missing assignments have none.
+async function sumExtraAttempts(userId, assignmentIds, db = pool) {
+   const result = await db.query(
+      `SELECT assignment_id, sum(extra_attempts)::integer AS extra
+       FROM test_attempt_grants
+       WHERE user_id = $1 AND assignment_id = ANY($2::bigint[])
+       GROUP BY assignment_id`,
+      [normalizeInternalId(userId), assignmentIds.map(normalizeInternalId)],
+   )
+   return new Map(result.rows.map((row) => [row.assignment_id, row.extra]))
+}
+
+// Who may grant: owner and admin for any assignment; a teacher only for an assignment made
+// to a group they teach with can_view_results (the results scope of group teachers).
+const grantScopeSql = `(${administratorSql} OR EXISTS (
+   SELECT 1 FROM group_teachers AS grant_row
+   JOIN user_roles AS membership ON membership.user_id = grant_row.user_id
+   JOIN roles AS role ON role.id = membership.role_id AND role.code = 'teacher'
+   WHERE grant_row.group_id = assignment.group_id AND grant_row.user_id = $1
+     AND grant_row.can_view_results
+))`
+
+const grantAssignmentColumns = `assignment.id, assignment.test_id, assignment.status,
+   assignment.group_id, assignment.user_id, assignment.closes_at, test.status AS test_status,
+   test.max_attempts`
+
+async function findGrantAssignment(actorId, testId, assignmentId, db = pool) {
+   const result = await db.query(
+      `SELECT ${grantAssignmentColumns}
+       FROM test_assignments AS assignment JOIN tests AS test ON test.id = assignment.test_id
+       WHERE assignment.id = $3 AND assignment.test_id = $2 AND ${grantScopeSql}`,
+      [normalizeInternalId(actorId), normalizeInternalId(testId), normalizeInternalId(assignmentId)],
+   )
+   return result.rows[0] || null
+}
+
+// FOR SHARE keeps a concurrent revoke or window change from interleaving with the grant.
+async function lockGrantAssignment(actorId, testId, assignmentId, client) {
+   const result = await client.query(
+      `SELECT ${grantAssignmentColumns}
+       FROM test_assignments AS assignment JOIN tests AS test ON test.id = assignment.test_id
+       WHERE assignment.id = $3 AND assignment.test_id = $2 AND ${grantScopeSql}
+       FOR SHARE OF assignment`,
+      [normalizeInternalId(actorId), normalizeInternalId(testId), normalizeInternalId(assignmentId)],
+   )
+   return result.rows[0] || null
+}
+
+// The student is the direct assignee, or an active member of the assigned group.
+async function isAssignmentStudent(assignmentId, userId, db = pool) {
+   const result = await db.query(
+      `SELECT EXISTS (
+         SELECT 1 FROM test_assignments AS assignment
+         WHERE assignment.id = $1 AND (
+            assignment.user_id = $2 OR EXISTS (
+               SELECT 1 FROM group_members AS member
+               WHERE member.group_id = assignment.group_id AND member.user_id = $2
+                 AND member.status = 'active'
+            )
+         )
+       ) AS assigned`,
+      [normalizeInternalId(assignmentId), normalizeInternalId(userId)],
+   )
+   return result.rows[0].assigned
+}
+
+const attemptGrantColumns = `grant_row.id, grant_row.assignment_id, grant_row.user_id,
+   grant_row.extra_attempts, grant_row.reason, grant_row.granted_by, grant_row.created_at,
+   (SELECT concat_ws(' ', first_name, last_name) FROM user_profiles
+    WHERE user_id = grant_row.granted_by) AS granted_by_name`
+
+async function findAttemptGrantByKey(idempotencyKey, client) {
+   const result = await client.query(
+      `SELECT ${attemptGrantColumns} FROM test_attempt_grants AS grant_row
+       WHERE grant_row.idempotency_key = $1`,
+      [idempotencyKey],
+   )
+   return result.rows[0] || null
+}
+
+// Append-only. A concurrent request with the same key inserts nothing and returns null.
+async function insertAttemptGrant(grant, client) {
+   const result = await client.query(
+      `INSERT INTO test_attempt_grants
+         (assignment_id, user_id, extra_attempts, reason, granted_by, idempotency_key)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (idempotency_key) DO NOTHING
+       RETURNING id`,
+      [
+         normalizeInternalId(grant.assignmentId),
+         normalizeInternalId(grant.userId),
+         grant.extraAttempts,
+         grant.reason,
+         normalizeInternalId(grant.grantedBy),
+         grant.idempotencyKey,
+      ],
+   )
+   return result.rows[0] || null
+}
+
+async function listAttemptGrants(assignmentId, userId, db = pool) {
+   const result = await db.query(
+      `SELECT ${attemptGrantColumns} FROM test_attempt_grants AS grant_row
+       WHERE grant_row.assignment_id = $1 AND grant_row.user_id = $2
+       ORDER BY grant_row.id`,
+      [normalizeInternalId(assignmentId), normalizeInternalId(userId)],
+   )
+   return result.rows
+}
+
 async function findResultsTest(userId, testId, db = pool) {
    const result = await db.query(
       `SELECT test.id, test.title, test.course_id FROM tests AS test
@@ -461,7 +573,9 @@ export {
    addScoreRevision,
    createAttempt,
    findAttempt,
+   findAttemptGrantByKey,
    findAttemptQuestion,
+   findGrantAssignment,
    findLearnerAssignment,
    findLearnerAssignmentHistory,
    findResultsTest,
@@ -471,6 +585,9 @@ export {
    hasActiveEnrollment,
    hasActiveModuleGrant,
    hasSavedAnswer,
+   insertAttemptGrant,
+   isAssignmentStudent,
+   listAttemptGrants,
    listAttemptQuestions,
    listAttemptSource,
    listGradingRows,
@@ -480,10 +597,12 @@ export {
    listUserAttempts,
    lockAttempt,
    lockAttemptSlot,
+   lockGrantAssignment,
    lockNextExpiredAttempt,
    lockTestAttempt,
    saveAnswer,
    saveGrades,
    saveManualGrade,
    setAttemptScore,
+   sumExtraAttempts,
 }

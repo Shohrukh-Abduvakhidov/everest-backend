@@ -307,7 +307,12 @@ This roadmap orders implementation; it does not replace the [current architectur
 - **Deliverables:** Start, immutable snapshots, revision autosave, server timer, submit/expiry, grading, score revisions, idempotency, reveal policy, and student-safe serialization.
 - **Verification:** Ownership, timer, concurrent revision, finalization, expiry, grading, idempotency, and private-key/snapshot redaction tests.
 - **Documentation updates:** API, decisions, architecture, progress, roadmap.
-- **Open:** extra attempts granted by a teacher are not implemented: no code, migration, permission or decision exists. Rules needed from the owner before building (who may grant, per assignment or per student, audit).
+- **Extra attempts (2026-11-07, `feat/m11-extra-attempts`, awaiting review):**
+   - Append-only `test_attempt_grants` and the permission `tests.attempts.grant` (owner and admin; group-teacher scope).
+   - `GET|POST /admin/tests/:testId/assignments/:assignmentId/users/:userId/extra-attempts`.
+   - The effective limit applies to starts, learner counts and reveal.
+   - Migrations `20261107010000000` and `20261107020000000`.
+   - `npm test` on a disposable database: 339 tests, 338 passed, 0 failed, 1 skipped. `test:migrations`: 32/32/31/32.
 - **Exclusions:** Unapproved partial scoring or reveal policy.
 - **Follow-up (2026-11-07, merged in PR #36):** server-side lesson completion by test (submit, expiry, worker, regrade) by the owner's rule; `passPercent` in results; attempt history after revocation; `testId` in lesson lists; course `progress`. `npm test` on a disposable database: 330 tests, 329 passed, 0 failed, 1 skipped. No migration.
 

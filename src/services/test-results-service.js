@@ -3,7 +3,12 @@ import * as attemptRepository from '../repositories/test-attempt-repository.js'
 import { withTransaction } from '../repositories/transaction-repository.js'
 import AppError from '../utils/app-error.js'
 import { sumPoints, toHundredths } from '../utils/attempt-grading.js'
-import { isFinished } from '../utils/attempt-policy.js'
+import {
+   attemptsUsed,
+   effectiveMaxAttempts,
+   isFinished,
+   remainingAttempts,
+} from '../utils/attempt-policy.js'
 import { normalizeInternalId } from '../utils/internal-id.js'
 import { parsePagination, parseText, validateBody, validationError } from './course-service.js'
 import { completeTestLessonsService } from './lesson-completion-service.js'
@@ -13,6 +18,7 @@ const attemptStatuses = ['in_progress', 'graded', 'expired', 'cancelled']
 const pointsPattern = /^[0-9]{1,8}(\.[0-9]{1,2})?$/
 const maximumReasonLength = 1000
 const maximumKeyLength = 100
+const maximumExtraAttempts = 10
 
 function dependencies(overrides = {}) {
    return {
@@ -212,4 +218,153 @@ async function regradeAttemptService(userId, testIdValue, attemptIdValue, body, 
    return readDetail(repository, actorId, testId, attemptId)
 }
 
-export { getTestAttemptService, listTestAttemptsService, regradeAttemptService }
+// ---------------------------------------------------------------- extra attempts
+
+function parseAssignmentId(value) {
+   return parseId(value, 'INVALID_ASSIGNMENT_ID', 'Assignment identifier is invalid')
+}
+
+function parseStudentId(value) {
+   return parseId(value, 'INVALID_USER_ID', 'User identifier is invalid')
+}
+
+function parseExtraCount(value) {
+   if (!Number.isSafeInteger(value) || value < 1 || value > maximumExtraAttempts) {
+      throw validationError('count', `count must be an integer from 1 to ${maximumExtraAttempts}`)
+   }
+   return value
+}
+
+function assignmentNotFound() {
+   return new AppError(404, 'ASSIGNMENT_NOT_FOUND', 'Assignment was not found')
+}
+
+function safeGrant(row) {
+   return {
+      id: row.id,
+      extraAttempts: row.extra_attempts,
+      reason: row.reason,
+      grantedBy: row.granted_by,
+      grantedByName: row.granted_by_name,
+      createdAt: new Date(row.created_at).toISOString(),
+   }
+}
+
+async function readExtraAttempts(repository, assignment, studentId, db) {
+   const [grants, attempts] = await Promise.all([
+      repository.listAttemptGrants(assignment.id, studentId, db),
+      repository.listUserAttempts(studentId, [assignment.id], db),
+   ])
+   const extraAttempts = grants.reduce((total, row) => total + row.extra_attempts, 0)
+   const limit = effectiveMaxAttempts(assignment.max_attempts, extraAttempts)
+   return {
+      assignmentId: assignment.id,
+      userId: studentId,
+      maxAttempts: assignment.max_attempts,
+      extraAttempts,
+      effectiveMaxAttempts: limit,
+      attemptsUsed: attemptsUsed(attempts),
+      remainingAttempts: remainingAttempts(limit, attempts),
+      grants: grants.map(safeGrant),
+   }
+}
+
+async function requireAssignmentStudent(repository, assignment, studentId, db) {
+   if (!await repository.isAssignmentStudent(assignment.id, studentId, db)) {
+      throw new AppError(409, 'STUDENT_NOT_ASSIGNED', 'This student does not belong to the assignment')
+   }
+}
+
+async function getExtraAttemptsService(userId, testIdValue, assignmentIdValue, studentIdValue, overrides) {
+   const { repository } = dependencies(overrides)
+   const actorId = normalizeInternalId(userId)
+   const testId = parseTestId(testIdValue)
+   const assignmentId = parseAssignmentId(assignmentIdValue)
+   const studentId = parseStudentId(studentIdValue)
+   const assignment = await repository.findGrantAssignment(actorId, testId, assignmentId)
+   if (!assignment) throw assignmentNotFound()
+   await requireAssignmentStudent(repository, assignment, studentId)
+   return readExtraAttempts(repository, assignment, studentId)
+}
+
+// Extra attempts for one student on one assignment. Append-only: a grant is never changed or
+// withdrawn, and no attempt or score is touched. The same idempotencyKey returns the earlier
+// state without a second grant.
+async function grantExtraAttemptsService(
+   userId,
+   testIdValue,
+   assignmentIdValue,
+   studentIdValue,
+   body,
+   overrides,
+) {
+   const { repository, auth, transaction, clock } = dependencies(overrides)
+   const actorId = normalizeInternalId(userId)
+   const testId = parseTestId(testIdValue)
+   const assignmentId = parseAssignmentId(assignmentIdValue)
+   const studentId = parseStudentId(studentIdValue)
+   validateBody(body, ['count', 'reason', 'idempotencyKey'])
+   const count = parseExtraCount(body.count)
+   const reason = parseText(body.reason, 'reason', maximumReasonLength)
+   const idempotencyKey = parseText(body.idempotencyKey, 'idempotencyKey', maximumKeyLength)
+   return transaction(async (client) => {
+      // The same lock as a start of this student and assignment, so the two serialize.
+      await repository.lockAttemptSlot(studentId, assignmentId, client)
+      const assignment = await repository.lockGrantAssignment(actorId, testId, assignmentId, client)
+      if (!assignment) throw assignmentNotFound()
+      const replay = async () => {
+         const existing = await repository.findAttemptGrantByKey(idempotencyKey, client)
+         if (!existing) return null
+         if (existing.assignment_id !== assignmentId || existing.user_id !== studentId) {
+            throw new AppError(409, 'IDEMPOTENCY_KEY_CONFLICT', 'This key was used for another grant')
+         }
+         return readExtraAttempts(repository, assignment, studentId, client)
+      }
+      const repeated = await replay()
+      if (repeated) return repeated
+      await requireAssignmentStudent(repository, assignment, studentId, client)
+      if (assignment.max_attempts === null) {
+         throw new AppError(400, 'ATTEMPTS_UNLIMITED', 'This test has no attempt limit; extra attempts are not needed')
+      }
+      if (assignment.status !== 'active') {
+         throw new AppError(409, 'ASSIGNMENT_REVOKED', 'This assignment is revoked')
+      }
+      if (assignment.test_status !== 'published') {
+         throw new AppError(409, 'TEST_NOT_AVAILABLE', 'This test is not available')
+      }
+      if (assignment.closes_at && new Date(assignment.closes_at) <= clock()) {
+         throw new AppError(409, 'ASSIGNMENT_CLOSED', 'This assignment is closed')
+      }
+      const inserted = await repository.insertAttemptGrant({
+         assignmentId,
+         userId: studentId,
+         extraAttempts: count,
+         reason,
+         grantedBy: actorId,
+         idempotencyKey,
+      }, client)
+      if (!inserted) {
+         // Another request inserted the same key first.
+         const raced = await replay()
+         if (raced) return raced
+         throw new AppError(409, 'IDEMPOTENCY_KEY_CONFLICT', 'This key was used for another grant')
+      }
+      await auth.appendAuditEvent({
+         actorUserId: actorId,
+         subjectUserId: studentId,
+         code: 'test.attempts_granted',
+         entityType: 'test_assignment',
+         entityId: assignmentId,
+         metadata: { testId, grantId: inserted.id, extraAttempts: count },
+      }, client)
+      return readExtraAttempts(repository, assignment, studentId, client)
+   })
+}
+
+export {
+   getExtraAttemptsService,
+   getTestAttemptService,
+   grantExtraAttemptsService,
+   listTestAttemptsService,
+   regradeAttemptService,
+}

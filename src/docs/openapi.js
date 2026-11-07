@@ -451,6 +451,16 @@ const schemas = {
       maxScore: nullable(testPoints()),
       passPercent: nullable(num({ description: 'From the attempt policy snapshot.' })),
    }, ['id', 'userId', 'status'], { description: 'TestAttempt plus the student.' }),
+   ExtraAttempts: obj({
+      assignmentId: id(),
+      userId: id(),
+      maxAttempts: nullable(int({ description: 'The test limit, unchanged by grants.' })),
+      extraAttempts: int({ description: 'Sum of grants to this student on this assignment.' }),
+      effectiveMaxAttempts: nullable(int({ description: 'maxAttempts + extraAttempts; null when unlimited.' })),
+      attemptsUsed: int(),
+      remainingAttempts: nullable(int()),
+      grants: arr(obj({ id: id(), extraAttempts: int(), reason: str(), grantedBy: id(), grantedByName: nullable(str()), createdAt: dt() })),
+   }, ['assignmentId', 'userId', 'extraAttempts', 'attemptsUsed', 'grants']),
    StaffAttemptDetail: obj({
       attempt: ref('StaffAttempt'),
       questions: arr(anyObject('Question with answer, awardedPoints and gradingStatus. Never contains the key.')),
@@ -1661,6 +1671,19 @@ const routes = [
       body: body({ reason: str(), idempotencyKey: str(), overrides: arr(obj({ attemptQuestionId: id(), points: testPoints() }, ['attemptQuestionId', 'points'], { strict: true }), { minItems: 1 }) }, ['reason', 'idempotencyKey', 'overrides']),
       response: ref('StaffAttemptDetail'),
       errors: { 400: ['VALIDATION_ERROR', 'INVALID_TEST_ID', 'INVALID_ATTEMPT_ID'], 404: ['TEST_NOT_FOUND', 'ATTEMPT_NOT_FOUND', 'ATTEMPT_QUESTION_NOT_FOUND'], 409: ['ATTEMPT_NOT_FINISHED', 'IDEMPOTENCY_KEY_CONFLICT'] },
+   }],
+   ['get', '/admin/tests/:testId/assignments/:assignmentId/users/:userId/extra-attempts', {
+      tag: 'Admin: tests', ...adminRead('tests.attempts.grant'), summary: 'Effective attempt limit and extra-attempt grants of one student',
+      description: 'Owner and admin for any assignment; a teacher only for an assignment to a group they teach with canViewResults.',
+      response: ref('ExtraAttempts'),
+      errors: { 400: ['INVALID_TEST_ID', 'INVALID_ASSIGNMENT_ID', 'INVALID_USER_ID'], 404: ['ASSIGNMENT_NOT_FOUND'], 409: ['STUDENT_NOT_ASSIGNED'] },
+   }],
+   ['post', '/admin/tests/:testId/assignments/:assignmentId/users/:userId/extra-attempts', {
+      tag: 'Admin: tests', ...admin('tests.attempts.grant'), summary: 'Grant a student extra attempts (append-only)',
+      description: 'Adds count (1-10) to the limit of this student on this assignment. Repeating an idempotencyKey returns the earlier state without a second grant. Never reopens a closed or revoked assignment.',
+      body: body({ count: int({ minimum: 1, maximum: 10 }), reason: str(), idempotencyKey: str() }, ['count', 'reason', 'idempotencyKey']),
+      response: ref('ExtraAttempts'),
+      errors: { 400: ['VALIDATION_ERROR', 'INVALID_TEST_ID', 'INVALID_ASSIGNMENT_ID', 'INVALID_USER_ID', 'ATTEMPTS_UNLIMITED'], 404: ['ASSIGNMENT_NOT_FOUND'], 409: ['STUDENT_NOT_ASSIGNED', 'ASSIGNMENT_REVOKED', 'ASSIGNMENT_CLOSED', 'TEST_NOT_AVAILABLE', 'IDEMPOTENCY_KEY_CONFLICT'] },
    }],
    ['get', '/courses/:courseId/test-assignments', {
       tag: 'Learner tests', summary: 'My test assignments in a course, optionally for one lesson',

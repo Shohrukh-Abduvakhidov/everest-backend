@@ -95,6 +95,21 @@ Time is decided by the server. Every attempt response has `serverNow`; show the 
 
 **Lesson completion (2026-11-07):** finishing an attempt (submit, the deadline on next access, `worker:attempts`) and a regrade complete every lesson whose `test_id` is the attempt's test, in the same transaction. With `passPercent` set, only `passed = true` completes; without it, any finished attempt does. An attempt closed by the timer without one saved answer never completes. A completed lesson keeps `completedAt`; worse retakes and lower regrades never undo it. `maxAttempts` plays no part. The written `lesson_progress` row gains a revision, so a player holding an older revision gets `409 PROGRESS_REVISION_CONFLICT` and reloads.
 
+**Extra attempts (2026-11-07):** `POST /admin/tests/:testId/assignments/:assignmentId/users/:userId/extra-attempts` grants extra attempts and `GET` on the same path reads them.
+
+- **Access.** `tests.attempts.grant`; the `POST` also needs CSRF and is under the admin rate limit.
+- **Request.** `POST` body: `{ count: 1..10, reason, idempotencyKey }`.
+- **Response.** Both return `{ assignmentId, userId, maxAttempts, extraAttempts, effectiveMaxAttempts, attemptsUsed, remainingAttempts, grants: [{ id, extraAttempts, reason, grantedBy, grantedByName, createdAt }] }`.
+- **Scope.** Owner and admin may grant on any assignment. A teacher holding the permission may grant only on an assignment to a group they teach with `canViewResults`. Out of scope, or an assignment of another test: `404 ASSIGNMENT_NOT_FOUND`.
+- **Student.** The student must be the direct assignee or an active member of the assigned group, otherwise `409 STUDENT_NOT_ASSIGNED`.
+- **Errors.**
+   - `400 ATTEMPTS_UNLIMITED` when the test has no limit.
+   - `409 ASSIGNMENT_REVOKED`, `409 ASSIGNMENT_CLOSED` (`closesAt` passed) and `409 TEST_NOT_AVAILABLE`.
+   - `400 VALIDATION_ERROR` for `count`, `reason` or `idempotencyKey`.
+- **Window.** A grant never reopens or extends a window.
+- **Append-only.** Grants cannot be withdrawn. The same `idempotencyKey` returns the current state without a second grant. A key used for another student or assignment is `409 IDEMPOTENCY_KEY_CONFLICT`. Audit code: `test.attempts_granted`.
+- **Effective limit.** It is the test's `maxAttempts` plus the sum of the student's grants on that assignment. The learner's `maxAttempts` and `remainingAttempts` use it in the assignment list, the lesson test, the assignment result and the attempt result. `after_submission` reveal uses it too, so keys are hidden again while granted attempts remain.
+
 **Regrade** works on finished attempts, sets `gradingStatus: manual`, recalculates the score and appends a revision. Repeating an `idempotencyKey` changes nothing; a key used for another attempt returns `409 IDEMPOTENCY_KEY_CONFLICT`. Teachers see attempts through `course_teachers.can_view_results` (every attempt of the course's tests) or `group_teachers.can_view_results` (only attempts of assignments made to that group); out of scope the test is `404 TEST_NOT_FOUND` and an attempt `404 ATTEMPT_NOT_FOUND`.
 
 ## Test authoring APIs (M10)

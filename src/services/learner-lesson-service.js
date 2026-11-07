@@ -15,6 +15,7 @@ import {
    safeChapter,
    videoPlayable,
 } from './lesson-service.js'
+import { effectiveMaxAttempts } from '../utils/attempt-policy.js'
 import { attemptStateSummary, finalizeExpiredAttemptsForUserService } from './test-attempt-service.js'
 
 const maximumNoteLength = 10000
@@ -137,22 +138,23 @@ function bestAssignment(row) {
    return [...row.assignments].sort((left, right) => rank[left.state] - rank[right.state])[0]
 }
 
-function safeLessonTest(row, attempts) {
+function safeLessonTest(row, attempts, extraAttempts = 0) {
    if (!row || row.status !== 'published') return null
    const best = bestAssignment(row)
+   const maxAttempts = effectiveMaxAttempts(row.max_attempts, extraAttempts)
    return {
       id: row.id,
       title: row.title,
       questionCount: row.question_count,
       timeLimitMinutes: row.duration_seconds === null ? null : row.duration_seconds / 60,
-      maxAttempts: row.max_attempts,
+      maxAttempts,
       assignment: {
          id: best?.id ?? null,
          state: best?.state ?? 'none',
          opensAt: iso(best?.opens_at),
          closesAt: iso(best?.closes_at),
       },
-      attempts: attemptStateSummary(attempts, row.max_attempts, row.result_policy),
+      attempts: attemptStateSummary(attempts, maxAttempts, row.result_policy),
    }
 }
 
@@ -163,7 +165,8 @@ async function readLessonTest(deps, actorId, testId) {
    if (!test) return null
    const best = bestAssignment(test)
    const attempts = best ? await deps.attempts.listUserAttempts(actorId, [best.id]) : []
-   return safeLessonTest(test, attempts)
+   const extra = best ? (await deps.attempts.sumExtraAttempts(actorId, [best.id])).get(best.id) ?? 0 : 0
+   return safeLessonTest(test, attempts, extra)
 }
 
 function safeNote(row) {

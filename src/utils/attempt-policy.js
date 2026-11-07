@@ -55,6 +55,12 @@ function attemptsUsed(attempts) {
    return attempts.filter((attempt) => attempt.status !== 'cancelled').length
 }
 
+// The one place the effective limit is computed: the test's limit plus the extra attempts
+// granted to this student on this assignment. No limit (null) stays unlimited.
+function effectiveMaxAttempts(maxAttempts, extraAttempts = 0) {
+   return maxAttempts === null || maxAttempts === undefined ? null : maxAttempts + (extraAttempts || 0)
+}
+
 function remainingAttempts(maxAttempts, attempts) {
    return maxAttempts === null ? null : Math.max(0, maxAttempts - attemptsUsed(attempts))
 }
@@ -64,6 +70,7 @@ export {
    assignmentState,
    attemptsUsed,
    computeDeadline,
+   effectiveMaxAttempts,
    isFinished,
    personalWindowEnd,
    remainingAttempts,

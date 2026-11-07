@@ -11,6 +11,7 @@ import {
    assignmentState,
    attemptsUsed,
    computeDeadline,
+   effectiveMaxAttempts,
    isFinished,
    personalWindowEnd,
    remainingAttempts,
@@ -165,7 +166,14 @@ function learnerAssignmentState(row, now) {
    return row.available === false ? 'revoked' : assignmentState(row, now)
 }
 
-function safeLearnerAssignment(row, attempts, now) {
+// Extra attempts granted to this student, per assignment id.
+async function extraAttemptsFor(deps, userId, assignmentIds, db) {
+   if (!assignmentIds.length) return new Map()
+   return deps.repository.sumExtraAttempts(userId, assignmentIds, db)
+}
+
+function safeLearnerAssignment(row, attempts, now, extraAttempts = 0) {
+   const maxAttempts = effectiveMaxAttempts(row.max_attempts, extraAttempts)
    return {
       id: row.id,
       testId: row.test_id,
@@ -173,13 +181,13 @@ function safeLearnerAssignment(row, attempts, now) {
       mode: row.mode,
       questionCount: row.question_count,
       timeLimitMinutes: row.duration_seconds === null ? null : row.duration_seconds / 60,
-      maxAttempts: row.max_attempts,
+      maxAttempts,
       opensAt: iso(row.opens_at),
       closesAt: iso(row.closes_at),
       personalWindowMinutes: row.personal_window_minutes,
       personalWindowEndsAt: iso(personalWindowEnd(attempts[0]?.started_at, row.personal_window_minutes)),
       state: learnerAssignmentState(row, now),
-      attempts: attemptStateSummary(attempts, row.max_attempts, row.result_policy),
+      attempts: attemptStateSummary(attempts, maxAttempts, row.result_policy),
    }
 }
 
@@ -260,11 +268,13 @@ async function listMyAssignmentsService(userId, courseIdValue, query = {}, overr
    const now = deps.clock()
    const rows = await deps.repository.listLearnerAssignments(actorId, courseId, lessonId)
    const attempts = await deps.repository.listUserAttempts(actorId, rows.map((row) => row.id))
+   const extra = await extraAttemptsFor(deps, actorId, rows.map((row) => row.id))
    return {
       assignments: rows.map((row) => safeLearnerAssignment(
          row,
          attempts.filter((attempt) => attempt.assignment_id === row.id),
          now,
+         extra.get(row.id) ?? 0,
       )),
       serverNow: now.toISOString(),
    }
@@ -315,7 +325,10 @@ function policySnapshot(assignment) {
 
 async function createNewAttempt(deps, client, actorId, assignment, attempts, now) {
    requireStartable(assignment, now)
-   if (assignment.max_attempts !== null && attemptsUsed(attempts) >= assignment.max_attempts) {
+   // The slot lock is held, and grants take the same lock, so this count cannot race a grant.
+   const extra = (await extraAttemptsFor(deps, actorId, [assignment.id], client)).get(assignment.id) ?? 0
+   const limit = effectiveMaxAttempts(assignment.max_attempts, extra)
+   if (limit !== null && attemptsUsed(attempts) >= limit) {
       throw new AppError(409, 'ATTEMPTS_EXHAUSTED', 'No attempts remain for this assignment')
    }
    const personalEnd = personalWindowEnd(
@@ -487,7 +500,13 @@ async function saveAnswerService(userId, attemptIdValue, attemptQuestionIdValue,
 async function readResult(deps, attempt, now) {
    const policy = attempt.policy_snapshot.answerRevealPolicy
    const attempts = await deps.repository.listUserAttempts(attempt.user_id, [attempt.assignment_id])
-   const remaining = remainingAttempts(attempt.policy_snapshot.maxAttempts, attempts)
+   // The snapshot keeps the test's own limit; grants are read live and added here, so attempts
+   // created before a grant need no rewrite.
+   const extra = (await extraAttemptsFor(deps, attempt.user_id, [attempt.assignment_id])).get(attempt.assignment_id) ?? 0
+   const remaining = remainingAttempts(
+      effectiveMaxAttempts(attempt.policy_snapshot.maxAttempts ?? null, extra),
+      attempts,
+   )
    const revealed = answersRevealed(policy, attempt.closes_at, now, remaining)
    const questions = revealed
       ? await deps.repository.listAttemptQuestions(attempt.id, { withSnapshot: true })
@@ -549,13 +568,14 @@ async function getAssignmentResultService(userId, assignmentIdValue, overrides) 
    if (!assignment) throw assignmentNotFound()
    const attempts = await deps.repository.listUserAttempts(actorId, [assignmentId])
    const selected = selectResultAttempt(assignment.result_policy, attempts)
+   const extra = (await extraAttemptsFor(deps, actorId, [assignmentId])).get(assignmentId) ?? 0
    return {
       resultPolicy: assignment.result_policy,
       state: learnerAssignmentState(assignment, deps.clock()),
       resultAttemptId: selected?.id ?? null,
       score: selected?.score ?? null,
       maxScore: selected?.max_score ?? null,
-      remainingAttempts: remainingAttempts(assignment.max_attempts, attempts),
+      remainingAttempts: remainingAttempts(effectiveMaxAttempts(assignment.max_attempts, extra), attempts),
       attempts: attempts.map(safeAttempt),
       serverNow: deps.clock().toISOString(),
    }
@@ -563,6 +583,7 @@ async function getAssignmentResultService(userId, assignmentIdValue, overrides) 
 
 export {
    attemptStateSummary,
+   extraAttemptsFor,
    finalizeExpiredAttemptsForUserService,
    finalizeNextExpiredAttemptService,
    getAssignmentResultService,

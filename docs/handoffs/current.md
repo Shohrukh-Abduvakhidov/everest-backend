@@ -1,47 +1,52 @@
 ---
 project: EVEREST Backend
-current_milestone: M12 learning progress and analytics (next)
+current_milestone: M11 extra attempts per student
 status: awaiting_review
-branch: docs/roadmap-sync
-base_commit: 233c10b
+branch: feat/m11-extra-attempts
+base_commit: cce7ef6
 updated_at: 2026-11-07
 ---
 
 # Current handoff
 
+## Findings before editing (from the code)
+
+- The limit is `tests.max_attempts`, selected as `assignment.max_attempts`. Attempts are unique by (`assignment_id`, `user_id`, `attempt_number`) and are counted per assignment by `attemptsUsed` and `remainingAttempts` (cancelled attempts excluded).
+- `createNewAttempt` refuses with `ATTEMPTS_EXHAUSTED` under the per-student advisory lock `lockAttemptSlot`.
+- `policy_snapshot.maxAttempts` (the test's limit at start) drives `remainingAttempts` in `readResult`, and so the `after_submission` reveal. Live `max_attempts` drives the learner list, the lesson summary and the assignment result.
+- Regrade: permission migration `20261105040000000` (owner, admin), route `POST /admin/tests/:testId/attempts/:attemptId/regrade` with CSRF and the admin rate limit, `idempotency_key UNIQUE`, audit `test.attempt_regraded`.
+
 ## State
 
-- M11 is merged together with its gaps: PR #35 (`3bdeed7`) and PR #36 (`233c10b`).
-- `docs/roadmap-sync` (a documentation-only PR) syncs `ROADMAP.md` with `git log origin/main --merges` and the code.
+Implemented on `feat/m11-extra-attempts`: two migrations, the grant and read endpoints, and the effective limit everywhere. The owner's rules and the choices made here are in `docs/decisions.md`, 2026-11-07, "Extra attempts".
 
-## Roadmap sync, checked against git log and code
+## Verification (2026-11-07)
 
-- **Merged:** M07-A (#18), M07-B (#19), M-DOCS (#22), M09 (#24), M10 (#31, #33), M11 (#35, #36). Follow-ups were also merged: M04-B (#28), M06 (#29), M17 admin accounts (#25).
-- **M07-A and M07-B stay In progress.** Real MinIO/S3 verification is still open.
-- **M10 stays In progress although merged.** Parameter-based question selection and course or lesson audiences are listed deliverables and are not built.
-- **Teacher-granted extra attempts are not implemented.** There is no code, migration, permission or decision for them. They are recorded as an open M11 line.
+- `npm test` with `DB_NAME` on a fresh migrated disposable database: exit 0; 339 tests, 338 passed, 0 failed, 1 skipped (real S3).
+- `npm run test:migrations`: 32 / 32 / 31 / 32.
+- `verify-database.js`: valid, after its stale permission counts were corrected.
+- `everest_db` was not touched; it needs `migrate:up` for the two new migrations.
 
-## Verification
+## Not verified
 
-- Documentation only. No tests were run; no code changed.
+- Frontend screens for granting.
+- Teachers holding `tests.attempts.grant` in a real role setup. Scope was tested by giving teachers the permission for the length of one subtest.
+- Cookie-session CSRF on the new `POST`; the tests use Bearer tokens.
+- Parallel grant and start under load beyond five concurrent requests.
 
 ## Decisions needed
 
-- Rules for teacher-granted extra attempts:
-  - who may grant them;
-  - per assignment or per student;
-  - whether they count against `maxAttempts`;
-  - how they interact with reveal while attempts remain.
-- M10: build parameter selection and course or lesson audiences, or drop them from the deliverables.
+- Should teachers hold `tests.attempts.grant`? The request said both "same roles as regrade" (owner, admin) and "group teachers for their group". Today only owner and admin hold it; the group scope is already enforced if teachers are given it.
+- Accept that a grant hides already revealed `after_submission` keys again until the extra attempts are used?
 
 ## Next concrete task
 
-1. Review and merge `docs/roadmap-sync`.
-2. Run `migrate:up` on the local `everest_db` (it was on 28 of 30 migrations before M11; PR #36 added none).
-3. Start M12: lesson and course progress, test history and homepage summaries. First confirm the metric definitions with the owner, then build on `lesson_progress` and the M11 course `progress`.
+1. Review and merge `feat/m11-extra-attempts`. Then run `npm run migrate:up` on the local `everest_db`.
+2. Answer the teacher-permission question. If yes, add a migration that grants `tests.attempts.grant` to `teacher`.
+3. Then start M12, after the metric definitions are confirmed.
 
 ## Constraints
 
 - Preserve route → middleware → controller → service → repository → PostgreSQL.
 - Do not edit applied migrations. Never merge, force-push, or push to `main`.
-- `npm test` uses the configured database for `test:integrity`; point `DB_NAME` at a disposable database. Never delete data in `everest_db`.
+- Point `DB_NAME` at a disposable database for `npm test`. Never delete data in `everest_db`.

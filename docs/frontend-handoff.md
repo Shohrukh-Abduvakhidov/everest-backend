@@ -412,6 +412,19 @@ Permission `tests.results.read` (regrade: `tests.results.regrade`, owner and adm
 
 Assignments gained an optional `personalWindowMinutes` on create, patch and read.
 
+**Extra attempts (2026-11-07).** Permission `tests.attempts.grant` (owner and admin by default).
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/admin/tests/:testId/assignments/:assignmentId/users/:userId/extra-attempts` | Effective limit, used, remaining, grant history |
+| POST | same | Grant `{ count: 1..10, reason, idempotencyKey }`; safe to repeat |
+
+- Generate one `idempotencyKey` per dialog submit and reuse it on retry.
+- Show the error codes `ATTEMPTS_UNLIMITED`, `ASSIGNMENT_CLOSED`, `ASSIGNMENT_REVOKED` and `STUDENT_NOT_ASSIGNED`.
+- A grant cannot be undone, so ask for confirmation before sending.
+- Learner screens need no change: `maxAttempts` and `remainingAttempts` already include grants.
+- After a grant, the result of an `after_submission` test may hide the answers again (`revealed: false`) until the extra attempts are used.
+
 ### Admin: tests (M10)
 
 | Method | Path | Permission | Purpose |

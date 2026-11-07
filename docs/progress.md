@@ -4,7 +4,27 @@ Updated: 2026-11-07.
 
 ## Current increment
 
-M11 follow-up gaps on `feat/m11-gaps` (awaiting review). M11 itself is merged (PR #35). Real-storage (MinIO/S3) import is still **not** verified.
+M11 extra attempts on `feat/m11-extra-attempts` (awaiting review). M11 and its gaps are merged (PR #35, #36).
+
+## 2026-11-07 — Extra attempts per student (`feat/m11-extra-attempts`)
+
+- **Migrations:**
+   - `20261107010000000_add-test-attempt-grants.js`: append-only table.
+   - `20261107020000000_add-attempt-grant-permission.js`: `tests.attempts.grant` for owner and admin.
+- **API:** `GET|POST /admin/tests/:testId/assignments/:assignmentId/users/:userId/extra-attempts`.
+- **Effective limit:** used in starts, learner counts and reveal, through one formula, `effectiveMaxAttempts`.
+- **Tests:**
+   - New: `tests/integration/extra-attempts.test.js` (8 subtests).
+   - Updated: the permission counts in `tests-authoring`, and the catalog numbers in `verify-database.js` and `test-migration-cycle.js`.
+- **Verified:**
+   - `npm test` with `DB_NAME` on a fresh migrated disposable database: exit 0; 339 tests, 338 passed, 0 failed, 1 skipped.
+   - `npm run test:migrations`: 32 / 32 / 31 / 32.
+   - `verify-database.js`: valid.
+   - `everest_db` was not touched.
+
+## Earlier increment
+
+M11 follow-up gaps on `feat/m11-gaps`, merged in PR #36. Real-storage (MinIO/S3) import is still **not** verified.
 
 ## 2026-11-07 — M11 gaps (`feat/m11-gaps`)
 

@@ -69,8 +69,19 @@ async function regradeTestResultsAuthorizationMiddleware(req, res, next) {
    }
 }
 
+async function grantAttemptsAuthorizationMiddleware(req, res, next) {
+   try {
+      void res
+      await authorize(req, 'tests.attempts.grant')
+      next()
+   } catch (error) {
+      next(error)
+   }
+}
+
 export {
    assignTestsAuthorizationMiddleware,
+   grantAttemptsAuthorizationMiddleware,
    manageTestsAuthorizationMiddleware,
    publishTestsAuthorizationMiddleware,
    readTestResultsAuthorizationMiddleware,
