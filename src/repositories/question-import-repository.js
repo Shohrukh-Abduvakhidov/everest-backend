@@ -53,6 +53,17 @@ async function findQuestionsByExternalIds(bankId, externalIds, db = pool) {
    return result.rows
 }
 
+// Every question of a bank with its current interaction settings (answer-key import).
+async function listBankQuestionStates(bankId, db = pool) {
+   const result = await db.query(
+      `SELECT id, external_id, question_type, status, interaction_settings
+       FROM questions WHERE bank_id = $1
+       ORDER BY id`,
+      [normalizeInternalId(bankId)],
+   )
+   return result.rows
+}
+
 async function lockQuestionByExternalId(bankId, externalId, client) {
    const result = await client.query(
       `SELECT id, external_id, question_type, status
@@ -288,6 +299,7 @@ export {
    insertRun,
    insertRunErrors,
    isAdministrator,
+   listBankQuestionStates,
    listDuplicateCandidates,
    listRunErrors,
    listVisibleRuns,

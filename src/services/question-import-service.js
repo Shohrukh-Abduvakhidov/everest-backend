@@ -1488,6 +1488,9 @@ async function listQuestionImportErrorsService(userId, importIdValue, query = {}
    }
 }
 
+// Shared with the answer-key importer: the same actor rule (active + questions.manage).
+export { loadActor as loadImportActor }
+
 export {
    dryRunQuestionImportService,
    getQuestionImportService,
