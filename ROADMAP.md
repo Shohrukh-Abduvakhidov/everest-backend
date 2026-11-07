@@ -1,8 +1,8 @@
 ---
 project: EVEREST Backend
 roadmap_version: 1
-current_milestone: M11
-current_status: in_progress
+current_milestone: M12
+current_status: done
 updated_at: 2026-11-07
 architecture: docs/architecture.md
 ---
@@ -154,7 +154,7 @@ This roadmap orders implementation; it does not replace the [current architectur
 - **Verification:** Administrative permissions, atomic membership changes, announcement scope, and no implicit course-grant tests.
 - **Documentation updates:** API, decisions, architecture, progress, roadmap, handoff.
 - **Exclusions:** Announcement assets before M07; progress summaries before M12; ranking before M13 and an approved formula; `group_courses`.
-- **Follow-up (2026-10-31, PR open):** optional generated group codes, list filters with total, member/teacher edit endpoints, candidate filters on `/admin/users`, counts on writes, `GROUP_ARCHIVED`, announcement status filter. Verified by `npm test` (238 passed).
+- **Follow-up (2026-10-31, merged in PR #28):** optional generated group codes, list filters with total, member/teacher edit endpoints, candidate filters on `/admin/users`, counts on writes, `GROUP_ARCHIVED`, announcement status filter. Verified by `npm test` (238 passed).
 
 ## M05-A — Course catalog, lifecycle and teacher assignments
 
@@ -184,12 +184,12 @@ This roadmap orders implementation; it does not replace the [current architectur
 - **Deliverables:** `course_enrollments`, validity windows, revoke/extend/re-grant, separate `module_access_grants`, locked metadata, protected-content guard (`requireModuleAccessService`), and progress preservation after expiry. Administrative routes under `/api/v1/admin/courses/:courseId/enrollments`; learner reads at `/api/v1/courses`.
 - **Verification:** `tests/integration/course-access.test.js` (16 subtests, 17 reported tests) covers the grant/date/revocation matrix, concurrency, locked metadata, cross-course and cross-user denial, group non-grant, onboarding, audit rollback, and preserved-progress rows. `npm test` passed 130 tests; the disposable migration cycle passed 20/20/19/20.
 - **Documentation updates:** API, decisions (15 recorded assumptions made without user input), architecture, progress, roadmap, handoff.
-- **Follow-up (2026-11-01, `feat/enrollment-reinstate`, awaiting review):** enrollment list exposes `user.phone`; `GET /admin/users?notEnrolledInCourse=`; explicit reinstatement tests (`tests/integration/enrollment-reinstate.test.js`). `npm test`: 244 passed, 0 failed, 1 skipped.
+- **Follow-up (2026-11-01, merged in PR #29):** enrollment list exposes `user.phone`; `GET /admin/users?notEnrolledInCourse=`; explicit reinstatement tests (`tests/integration/enrollment-reinstate.test.js`). `npm test`: 244 passed, 0 failed, 1 skipped.
 - **Exclusions:** No `group_courses`; group membership grants nothing; course and module grants remain separate. Teacher and administrator access to protected content is left to M07.
 
 ## M07-A — Media storage and resumable uploads
 
-- **Status:** In progress. The implementation and the tests that use a storage double are complete; the real-storage verification below is pending.
+- **Status:** In progress. Implemented and merged (PR #18). The tests that use a storage double pass; the real MinIO/S3 verification below is still open.
 - **Goal:** Store original-quality videos and materials in S3-compatible storage through resumable, verified multipart uploads.
 - **Dependencies:** M05–M06; approved storage decisions (2026-10-29).
 - **Deliverables:**
@@ -206,7 +206,7 @@ This roadmap orders implementation; it does not replace the [current architectur
 
 ## M07-B — Lessons and protected delivery
 
-- **Status:** In progress. The implementation and the tests that use a storage double are complete; the real-storage verifications below are pending.
+- **Status:** In progress. Implemented and merged (PR #19). The tests that use a storage double pass; the real MinIO/S3 verifications below are still open.
 - **Goal:** Deliver lessons and assets through access-aware contracts.
 - **Dependencies:** M07-A.
 - **Deliverables:**
@@ -226,7 +226,7 @@ This roadmap orders implementation; it does not replace the [current architectur
 
 ## M-DOCS — OpenAPI specification and Swagger UI
 
-- **Status:** In progress (implemented and verified on `feat/m-docs-swagger`; awaiting PR review). Added by the user on 2026-10-30, outside the original plan.
+- **Status:** Done (merged in PR #22). Added by the user on 2026-10-30, outside the original plan.
 - **Goal:** Give frontend and staff an always-current, interactive description of every implemented `/api/v1` route.
 - **Deliverables:**
    - OpenAPI 3.1 spec (`src/docs/openapi.js`) with cookie/Bearer security, the CSRF header, DTO schemas, error codes and pagination.
@@ -268,7 +268,7 @@ This roadmap orders implementation; it does not replace the [current architectur
 
 ## M09 — Indexed book import
 
-- **Status:** Implemented, awaiting review (`feat/m09-book-import`).
+- **Status:** Done (merged in PR #24). Real S3/MinIO import is not verified; it shares the open M07-A storage check.
 - **Implemented:**
    - CLI import of `everest.question-import.v1` packages (directory or ZIP) with a dry run.
    - Recorded idempotent runs with per-record errors and warnings, batches of ≤100 questions per transaction.
@@ -289,26 +289,27 @@ This roadmap orders implementation; it does not replace the [current architectur
 
 ## M10 — Test constructor and assignments
 
-- **Status:** Implemented, awaiting review (`feat/m10-tests`). Parameter-based question selection and course or lesson audiences are not built; see `docs/decisions.md`.
+- **Status:** In progress. Merged (PR #31, follow-up PR #33), but two listed deliverables are not built: parameter-based question selection and course or lesson audiences (see `docs/decisions.md`). Under the status rules it is not Done until they are built or removed from the deliverables.
 - **Goal:** Author, publish, and assign tests with explicit policies.
 - **Dependencies:** M04–M06 and M08.
 - **Deliverables:** Test creation, manual/parameter selection, publication, course/user/group audiences, timing, and attempt policies.
 - **Verification:** Construction, audience exclusivity, permission, publication immutability, and assignment tests.
 - **Documentation updates:** API, decisions, architecture, progress, roadmap.
 - **Exclusions:** Unapproved NCT scope, scoring, timing, or reveal rules.
-- **Follow-up (2026-11-05, `feat/lesson-tests-and-import`, awaiting review):** lesson-test link, optional `tests.module_id`, HTTP package upload with worker. `npm run test:auth`: 281 passed, 0 failed, 1 skipped.
+- **Follow-up (2026-11-05, merged in PR #33):** lesson-test link, optional `tests.module_id`, HTTP package upload with worker. `npm run test:auth`: 281 passed, 0 failed, 1 skipped.
 
 
 ## M11 — Attempts, autosave and grading
 
-- **Status:** In progress. The core is merged (PR #35, `3bdeed7`); the follow-up gaps below await review.
+- **Status:** Done (merged in PR #35, `3bdeed7`, and PR #36, `233c10b`). Not verified: `worker:attempts` as a separate PM2 process.
 - **Goal:** Run durable, timed, safely graded attempts.
 - **Dependencies:** M06, M08, M10, M19 for expiry work.
 - **Deliverables:** Start, immutable snapshots, revision autosave, server timer, submit/expiry, grading, score revisions, idempotency, reveal policy, and student-safe serialization.
 - **Verification:** Ownership, timer, concurrent revision, finalization, expiry, grading, idempotency, and private-key/snapshot redaction tests.
 - **Documentation updates:** API, decisions, architecture, progress, roadmap.
+- **Open:** extra attempts granted by a teacher are not implemented: no code, migration, permission or decision exists. Rules needed from the owner before building (who may grant, per assignment or per student, audit).
 - **Exclusions:** Unapproved partial scoring or reveal policy.
-- **Follow-up (2026-11-07, `feat/m11-gaps`, awaiting review):** server-side lesson completion by test (submit, expiry, worker, regrade) by the owner's rule; `passPercent` in results; attempt history after revocation; `testId` in lesson lists; course `progress`. `npm test` on a disposable database: 330 tests, 329 passed, 0 failed, 1 skipped. No migration.
+- **Follow-up (2026-11-07, merged in PR #36):** server-side lesson completion by test (submit, expiry, worker, regrade) by the owner's rule; `passPercent` in results; attempt history after revocation; `testId` in lesson lists; course `progress`. `npm test` on a disposable database: 330 tests, 329 passed, 0 failed, 1 skipped. No migration.
 
 ## M12 — Learning progress and analytics
 
@@ -362,7 +363,7 @@ This roadmap orders implementation; it does not replace the [current architectur
 
 ## M17 — Administration API
 
-- **Status:** Partial. The admin-accounts slice is implemented on `feat/admin-accounts-api` (awaiting review):
+- **Status:** Partial. The admin-accounts slice is merged (PR #25):
    - `GET /admin/users` (filters, search, `total`);
    - `total` on `GET /admin/users/pending`;
    - `PUT /admin/users/:userId/roles`;
