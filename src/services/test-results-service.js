@@ -4,6 +4,7 @@ import { withTransaction } from '../repositories/transaction-repository.js'
 import AppError from '../utils/app-error.js'
 import { sumPoints, toHundredths } from '../utils/attempt-grading.js'
 import {
+   attemptPassed,
    attemptsUsed,
    effectiveMaxAttempts,
    isFinished,
@@ -72,6 +73,7 @@ function safeStaffAttempt(row) {
       userDisplayName: row.user_display_name,
       // The threshold stored when the attempt started, never the test's current setting.
       passPercent: row.policy_snapshot?.passPercent ?? null,
+      passed: attemptPassed(row),
    }
 }
 

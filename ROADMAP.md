@@ -307,6 +307,7 @@ This roadmap orders implementation; it does not replace the [current architectur
 - **Deliverables:** Start, immutable snapshots, revision autosave, server timer, submit/expiry, grading, score revisions, idempotency, reveal policy, and student-safe serialization.
 - **Verification:** Ownership, timer, concurrent revision, finalization, expiry, grading, idempotency, and private-key/snapshot redaction tests.
 - **Documentation updates:** API, decisions, architecture, progress, roadmap.
+- **Fix (2026-11-08, `fix/lesson-completion-and-staff-passed`, awaiting review):** lessons with a test complete only by the test result (`409 LESSON_COMPLETES_BY_TEST` from the player); staff attempts carry `passed`.
 - **Extra attempts (2026-11-07, `feat/m11-extra-attempts`, awaiting review):**
    - Append-only `test_attempt_grants` and the permission `tests.attempts.grant` (owner, admin and teacher within their own groups).
    - `GET|POST /admin/tests/:testId/assignments/:assignmentId/users/:userId/extra-attempts`.

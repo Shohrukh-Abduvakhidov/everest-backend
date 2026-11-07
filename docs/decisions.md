@@ -1,5 +1,24 @@
 # Decisions
 
+## 2026-11-08 — A lesson with a test completes only by its test; staff `passed`
+
+**Bypass found in code.** `saveLessonProgressService` accepted `{ completed: true }` for any lesson without a video, and completed a video lesson at 90% watched. Both worked for a lesson with `test_id`, so a student could finish it without passing the test. No other path writes `lesson_progress` for a student; `completeTestLessons` is the test path.
+
+**Rule now (owner's rule: only the test result completes such a lesson):**
+
+- For a lesson with `test_id`, `completed: true` and any write to a lesson without a video are refused with `409 LESSON_COMPLETES_BY_TEST`.
+- On a lesson with a video and a test, watch progress (`playbackSeconds`, `watchedSeconds`) still saves as `in_progress`, and the 90% rule no longer completes it. A completion already written by a test result is kept and is never undone.
+- Lessons without `test_id` work as before.
+- **Fork, strictest option chosen (not guessed).** For a mixed lesson (video and test) one could instead require both 90% watched and a passed test. The request says to build the strictest variant, so completion needs only the test, and watching does not count. Changing it later means adding the 90% condition to `completeTestLessons`.
+- Completions that students already obtained through the old bypass are kept; nothing was reset.
+
+**Staff `passed`.** `attemptPassed` in `utils/attempt-policy.js` is the only pass formula; the learner result and the staff list and detail both use it.
+
+- It is `true` or `false` for a finished attempt (`graded`, `expired`) with a snapshot `passPercent`, using `percent >= passPercent`.
+- It is `null` without `passPercent`, or while the attempt is in progress or cancelled.
+- A finished attempt with `maxScore` 0 is `false`.
+- `attemptCompletesLesson` was not changed and keeps its own timer rule.
+
 ## 2026-11-08 — Teachers may grant extra attempts
 
 **Owner's decision (2026-11-08):** a teacher can grant extra attempts to students of their own groups; admin and owner as before.
