@@ -208,8 +208,12 @@ test('M11 gaps integration', async (t) => {
       // The player still sees the server write and cannot undo it.
       const lessonView = await getLearnerLessonService(learner, courseId, lessons[0])
       assert.equal(lessonView.lesson.progress.status, 'completed')
-      const replay = await saveLessonProgressService(learner, courseId, lessons[0], { revision: 1, completed: true })
-      assert.equal(replay.progress.completedAt, done[0].completed_at.toISOString())
+      // The player cannot complete a lesson with a test; the server write stays as it was.
+      await assert.rejects(
+         saveLessonProgressService(learner, courseId, lessons[0], { revision: 1, completed: true }),
+         { code: 'LESSON_COMPLETES_BY_TEST' },
+      )
+      assert.deepEqual(await progressRows(learner, lessons), done)
    })
 
    await t.test('with passPercent only a passing attempt completes, and regrade follows the rule', async () => {

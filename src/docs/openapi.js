@@ -450,6 +450,7 @@ const schemas = {
       score: nullable(testPoints()),
       maxScore: nullable(testPoints()),
       passPercent: nullable(num({ description: 'From the attempt policy snapshot.' })),
+      passed: nullable(bool({ description: 'percent >= passPercent for a finished attempt; null without passPercent or while in progress.' })),
    }, ['id', 'userId', 'status'], { description: 'TestAttempt plus the student.' }),
    ExtraAttempts: obj({
       assignmentId: id(),
@@ -1105,9 +1106,9 @@ const routes = [
    ['get', '/courses/:courseId/lessons/:lessonId/progress', { tag: 'Learner lessons', summary: 'Own progress', response: obj({ progress: ref('Progress') }) }],
    ['put', '/courses/:courseId/lessons/:lessonId/progress', {
       tag: 'Learner lessons', summary: 'Save progress (optimistic revision)',
-      description: 'Video lessons: `{ revision, playbackSeconds, watchedSeconds }`. Other lessons: `{ revision, completed: true }`.',
+      description: 'Video lessons: `{ revision, playbackSeconds, watchedSeconds }`. Other lessons: `{ revision, completed: true }`. A lesson with a test is completed only by its test result: `completed: true` and the 90% rule are refused with 409 LESSON_COMPLETES_BY_TEST, watch progress still saves.',
       body: body({ revision: int({ minimum: 0 }), playbackSeconds: int({ minimum: 0 }), watchedSeconds: int({ minimum: 0 }), completed: bool() }, ['revision']),
-      response: obj({ progress: ref('Progress') }), errors: { 409: ['PROGRESS_REVISION_CONFLICT'] },
+      response: obj({ progress: ref('Progress') }), errors: { 409: ['PROGRESS_REVISION_CONFLICT', 'LESSON_COMPLETES_BY_TEST'] },
    }],
 
    // Offline licenses

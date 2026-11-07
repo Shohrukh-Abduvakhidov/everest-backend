@@ -1,9 +1,20 @@
-import { toHundredths } from './attempt-grading.js'
+import { scorePercent, toHundredths } from './attempt-grading.js'
 
 const finishedStatuses = ['graded', 'expired']
 
 function isFinished(attempt) {
    return finishedStatuses.includes(attempt.status)
+}
+
+// The one pass/fail formula, shared by the learner result and the staff attempt DTOs. null when
+// the attempt is not finished or the snapshot has no passPercent.
+function attemptPassed(attempt) {
+   const passPercent = attempt.policy_snapshot?.passPercent ?? null
+   if (passPercent === null || !isFinished(attempt)) return null
+   if (attempt.score === null || attempt.score === undefined || toHundredths(attempt.max_score ?? 0) === 0) {
+      return false
+   }
+   return scorePercent(attempt.score, attempt.max_score) >= passPercent
 }
 
 function personalWindowEnd(firstStartedAt, minutes) {
@@ -68,6 +79,7 @@ function remainingAttempts(maxAttempts, attempts) {
 export {
    answersRevealed,
    assignmentState,
+   attemptPassed,
    attemptsUsed,
    computeDeadline,
    effectiveMaxAttempts,
