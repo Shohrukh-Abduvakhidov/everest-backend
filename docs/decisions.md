@@ -1,5 +1,20 @@
 # Decisions
 
+## 2026-11-08 — Teachers may grant extra attempts
+
+**Owner's decision (2026-11-08):** a teacher can grant extra attempts to students of their own groups; admin and owner as before.
+
+- Migration `20261108010000000_grant-teacher-attempt-grant-permission.js` binds `tests.attempts.grant` to the `teacher` role. `down` removes only that binding. This resolves the open question from the previous PR.
+- **Scope, verified in code (`grantScopeSql`):** owner and admin see every assignment. A teacher sees an assignment only when it is made to a group (`assignment.group_id`) where they hold a `group_teachers` row with `can_view_results`.
+- **Other ways into scope.** None grant anything:
+   - a `course_teachers` row, even with `can_view_results`, gives no right to grant;
+   - a direct (single-student) assignment has no group, so only owner and admin can grant on it;
+   - a group teacher without `can_view_results` is out of scope;
+   - a student cannot grant, because the permission check fails first (`403`).
+- Out-of-scope teachers get `404 ASSIGNMENT_NOT_FOUND`, the same as a missing assignment. The `GET` follows the same scope.
+- The audit event `test.attempts_granted` and the `granted_by` column record the teacher.
+- **Note:** results scope (`tests.results.read`) lets a course teacher see all attempts of the course's tests, while granting is narrower and group-only. This is deliberate and follows the 2026-11-07 request ("own group").
+
 ## 2026-11-07 — Extra attempts per student (M11)
 
 **Owner's decisions (given on 2026-11-07):**
