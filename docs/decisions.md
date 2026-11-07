@@ -1,5 +1,32 @@
 # Decisions
 
+## 2026-11-07 — M11 gaps: lesson completion by test, passPercent, history, testId, course progress
+
+**Owner's decision on lesson completion (given by the owner on 2026-11-07):**
+
+1. A lesson with `test_id` is completed by the server from the attempt result.
+2. With `passPercent` set on the test, the lesson completes only when `passed = true`.
+3. With `passPercent` `null`, any finished (submitted) attempt completes it.
+4. An attempt closed by the timer without a single answer never completes the lesson, whatever `passPercent` is.
+5. A completed lesson is never moved back: not by a worse retake and not by a regrade down. `completed_at` is never overwritten.
+6. When the attempts run out and `passed` never became `true`, the lesson stays not completed. This is deliberate.
+7. `max_attempts` does not change the rule and is not checked by it.
+8. When a regrade makes `passed` `true`, the lesson completes by the same rule, in the same transaction as the regrade.
+
+**Implementation choices made here, unattended; please review:**
+
+- **One rule, one place.** `attemptCompletesLesson` and `completeTestLessonsService` (`src/services/lesson-completion-service.js`) are called from `finalizeAttempt` (submit, deadline on next access, autosave after the deadline, `worker:attempts`) and from `regradeAttemptService`, each with the transaction's client.
+- **`passed`** uses `scorePercent(score, maxScore) >= policy_snapshot.passPercent`, the same comparison `readResult` reports. A `maxScore` of 0 never passes.
+- **"Without a single answer"** = no `student_answers` row with a non-null `answer_data` for the attempt. Grading writes a row for every question, so the existence of a row means nothing. The rule is applied only to `expired` attempts, as stated; a manual submit with no answers and no `passPercent` completes the lesson.
+- **Link.** Only `lessons.test_id`. `test_assignments.lesson_id` exists in the baseline but nothing writes it (M10 left lesson audiences unbuilt), so it is ignored. Every linked lesson is completed, whatever its status; the course progress counts only published, accessible ones.
+- **Idempotency.** `INSERT ... ON CONFLICT DO UPDATE ... WHERE status <> 'completed'`: a completed row is not touched at all (same `completed_at`, same `revision`), and other rows get `completed_at = COALESCE(existing, now)` and `revision + 1`, so a player holding the old revision gets the existing conflict. Finalization runs once per attempt (row lock, `in_progress` check), and the idempotent regrade replay returns before it.
+- **No migration.** `lesson_progress` already has everything needed.
+- **passPercent.** `null` when the snapshot has none. Staff DTOs carry only `passPercent` (they already have `score` and `maxScore`).
+- **History after revocation.** An assignment the learner no longer holds (revoked, or a group they left) is readable only when they have at least one attempt on it, and reports `state: 'revoked'` in the list, the lesson summary and the assignment result. Starts still use the active-only lookup, so nothing new can start. Leaving a group is treated like revocation and uses the same state value.
+- **Reveal after revocation.** Unchanged: the snapshot policy, `closesAt` and the attempts the policy still allows. A revoked assignment with attempts left by policy keeps its keys hidden (until `closesAt`, or forever with no window), so revoking can never reveal keys early.
+- **testId in lesson lists** follows the locked-content rule: `null` when the module is not granted.
+- **Course progress** counts published lessons of published modules for which `can_access_module` is true now, in a `LATERAL` subquery of the same statement as the course list or card. `percent` is rounded down so 100 means all done. With an expired enrollment every module is locked, so progress reads `0 / 0` while the `lesson_progress` rows are kept.
+
 ## 2026-11-05 — M11 attempts, timing and grading
 
 The user set the access, time, attempt, autosave, grading, reveal and endpoint rules. The following were chosen here, unattended; please review.

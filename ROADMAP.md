@@ -3,7 +3,7 @@ project: EVEREST Backend
 roadmap_version: 1
 current_milestone: M11
 current_status: in_progress
-updated_at: 2026-11-05
+updated_at: 2026-11-07
 architecture: docs/architecture.md
 ---
 
@@ -301,13 +301,14 @@ This roadmap orders implementation; it does not replace the [current architectur
 
 ## M11 — Attempts, autosave and grading
 
-- **Status:** In progress (implemented on `feat/m11-attempts`, awaiting review)
+- **Status:** In progress. The core is merged (PR #35, `3bdeed7`); the follow-up gaps below await review.
 - **Goal:** Run durable, timed, safely graded attempts.
 - **Dependencies:** M06, M08, M10, M19 for expiry work.
 - **Deliverables:** Start, immutable snapshots, revision autosave, server timer, submit/expiry, grading, score revisions, idempotency, reveal policy, and student-safe serialization.
 - **Verification:** Ownership, timer, concurrent revision, finalization, expiry, grading, idempotency, and private-key/snapshot redaction tests.
 - **Documentation updates:** API, decisions, architecture, progress, roadmap.
 - **Exclusions:** Unapproved partial scoring or reveal policy.
+- **Follow-up (2026-11-07, `feat/m11-gaps`, awaiting review):** server-side lesson completion by test (submit, expiry, worker, regrade) by the owner's rule; `passPercent` in results; attempt history after revocation; `testId` in lesson lists; course `progress`. `npm test` on a disposable database: 330 tests, 329 passed, 0 failed, 1 skipped. No migration.
 
 ## M12 — Learning progress and analytics
 

@@ -1,10 +1,21 @@
 # EVEREST backend progress
 
-Updated: 2026-11-05.
+Updated: 2026-11-07.
 
 ## Current increment
 
-M09 (indexed book import) is merged (PR #24). The M17 admin-accounts slice (account list, role replacement, owner protection) is implemented on `feat/admin-accounts-api` and is awaiting review. Real-storage (MinIO/S3) import is still **not** verified.
+M11 follow-up gaps on `feat/m11-gaps` (awaiting review). M11 itself is merged (PR #35). Real-storage (MinIO/S3) import is still **not** verified.
+
+## 2026-11-07 — M11 gaps (`feat/m11-gaps`)
+
+- Lesson completion by test from submit, expiry (next access and `worker:attempts`) and regrade, in the same transaction, by the owner's rule (`docs/decisions.md`, 2026-11-07). New `src/services/lesson-completion-service.js`, `learner-lesson-repository.completeTestLessons`, `test-attempt-repository.hasSavedAnswer`.
+- `passPercent` from the policy snapshot in learner results and staff attempts.
+- Attempt history after a revoked assignment or a left group: list, assignment result and lesson summary show `state: revoked`; no new starts; strangers still get `404`.
+- `testId` in learner lesson lists (`null` without module access).
+- `progress { completedLessons, totalLessons, percent }` in `GET /courses` and `GET /courses/:courseId/modules`, one statement.
+- No migration. OpenAPI, `docs/api.md` and `docs/frontend-handoff.md` updated.
+- **Tests:** `tests/unit/m11-gaps.test.js` (7 tests with repository doubles), `tests/integration/m11-gaps.test.js` (6 subtests, including HTTP).
+- **Verified:** `npm test` with `DB_NAME` on a freshly created and migrated disposable database: exit 0; sources, integrity and server passed; 330 tests, 329 passed, 0 failed, 1 skipped (real S3 storage). The disposable database was dropped. `everest_db` was not touched.
 
 ## 2026-11-05 — M11 attempts, timing and grading (`feat/m11-attempts`)
 

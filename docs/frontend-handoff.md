@@ -386,9 +386,17 @@ Screens should:
 - Use the `id` of each question (the attempt question) in the autosave path, keep the order as returned, and raise `revision` on every save.
 - On `409 ATTEMPT_DEADLINE_PASSED`, open the result: the server has already submitted the attempt.
 - Handle `revealed: false` (score only), `revealsAt` and `remainingAttempts`. With `after_submission` the answers appear only after the last attempt or when the window closes.
-- A running attempt keeps working after its assignment is revoked.
+- A running attempt keeps working after its assignment is revoked; afterwards the assignment shows `state: 'revoked'` with its history.
 
 The learner lesson `test` now has `assignment.id` and `attempts: { status, attemptId, deadlineAt, score, maxScore, submittedAt, remainingAttempts }`, where `status` is `not_started`, `in_progress` or `submitted`, and `remainingAttempts: null` means unlimited.
+
+New fields (2026-11-07, M11 gaps):
+
+- **`passPercent`** in every attempt result (`submit`, `GET /tests/attempts/:attemptId/result`) next to `percent` and `passed`, and in staff attempts (list and detail). It is the threshold stored when the attempt started; `null` means the test has none, and then `passed` is `null` as well. Show "passed / not passed" only when `passed` is not `null`.
+- **`state: 'revoked'`** on learner assignments (list, lesson `test.assignment.state`, and `GET /tests/assignments/:assignmentId/result`). The assignment was revoked or came through a group the student left; it is shown only because the student has attempts on it. Hide the start button; results stay readable. Keys stay hidden as long as the reveal policy says so; revocation never reveals them earlier.
+- **`testId`** in each item of `GET /courses/:courseId/modules/:moduleId/lessons` (and the locked lesson summary). `null` for a lesson without a test and for every lesson of a module that is not granted.
+- **`progress: { completedLessons, totalLessons, percent }`** on every course in `GET /courses` and on `course` in `GET /courses/:courseId/modules`. Only lessons the student can open now count (published lessons of granted published modules). `percent` is rounded down; `0 / 0` is `0`.
+- **Lesson completion by test.** The server marks a lesson with a test as completed when an attempt finishes (submit, deadline, or a later regrade): with `passPercent`, only when `passed` is `true`; without it, on any finished attempt; never for an attempt the timer closed without any saved answer. Once completed, a lesson stays completed (`completedAt` is kept). After a submit, reload the lesson `progress` and the course `progress`; a stale `PUT progress` returns `409 PROGRESS_REVISION_CONFLICT`, as before.
 
 Demo seed: `+992900000004` (Aziza) has a submitted attempt; `+992900000008` (Firuza) has one in progress without a deadline.
 
