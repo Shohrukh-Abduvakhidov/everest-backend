@@ -4,6 +4,14 @@ Updated: 2026-11-07.
 
 ## Current increment
 
+Teacher permission `tests.attempts.grant` on `feat/teacher-grant-permission` (awaiting review). Extra attempts are merged (PR #38).
+
+## 2026-11-08 — Teachers may grant extra attempts (`feat/teacher-grant-permission`)
+
+- Migration `20261108010000000_grant-teacher-attempt-grant-permission.js` (one role binding).
+- Tests: `extra-attempts.test.js` now uses the seeded teacher role over HTTP (own group, foreign group, same-course teacher, student, idempotency, audit); the temporary permission grant was removed. Updated `tests-authoring` counts, `verify-database.js` (86 bindings, 14 teacher) and `test-migration-cycle.js` (33).
+- **Verified:** `npm test` on a disposable database: exit 0; 339 tests, 338 passed, 0 failed, 1 skipped. `test:migrations`: 33 / 33 / 32 / 33. `everest_db` not touched.
+
 M11 extra attempts on `feat/m11-extra-attempts` (awaiting review). M11 and its gaps are merged (PR #35, #36).
 
 ## 2026-11-07 — Extra attempts per student (`feat/m11-extra-attempts`)
