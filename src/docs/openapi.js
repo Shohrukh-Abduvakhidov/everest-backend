@@ -277,6 +277,11 @@ const schemas = {
       beginsAt: dt(),
       expiresAt: nullable(dt()),
    }),
+   CourseProgress: obj({
+      completedLessons: int(),
+      totalLessons: int(),
+      percent: int({ description: 'floor(completedLessons * 100 / totalLessons); 0 when totalLessons is 0.' }),
+   }, ['completedLessons', 'totalLessons', 'percent'], { description: 'Published lessons of published modules the learner can open now (can_access_module); completed by lesson_progress.' }),
    LearnerCourse: obj({
       id: id(),
       title: str(),
@@ -287,6 +292,7 @@ const schemas = {
       subject: nullable(ref('SubjectCard')),
       moduleCount: int(),
       lessonCount: int(),
+      progress: ref('CourseProgress'),
       enrollment: ref('EnrollmentWindow'),
    }),
    LearnerModule: obj({
@@ -391,7 +397,7 @@ const schemas = {
       closesAt: nullable(dt()),
       personalWindowMinutes: nullable(int()),
       personalWindowEndsAt: nullable(dt()),
-      state: enumOf(['open', 'upcoming', 'closed']),
+      state: enumOf(['open', 'upcoming', 'closed', 'revoked'], { description: 'revoked: no longer assigned to you; listed only for your own attempts and never startable.' }),
       attempts: ref('AttemptState'),
    }),
    AttemptQuestion: obj({
@@ -416,6 +422,7 @@ const schemas = {
    AttemptResult: obj({
       attempt: ref('TestAttempt'),
       percent: num(),
+      passPercent: nullable(num({ description: 'Threshold stored when the attempt started; null when the test has none.' })),
       passed: nullable(bool()),
       answerRevealPolicy: enumOf(testRevealPolicies),
       revealed: bool(),
@@ -423,9 +430,10 @@ const schemas = {
       remainingAttempts: nullable(int()),
       questions: arr(anyObject('Question with answer, awardedPoints, gradingStatus, correctAnswer and explanation'), { description: 'Empty until the reveal policy allows it.' }),
       serverNow: dt(),
-   }, ['attempt', 'percent', 'revealed', 'questions', 'serverNow']),
+   }, ['attempt', 'percent', 'passPercent', 'revealed', 'questions', 'serverNow']),
    AssignmentResult: obj({
       resultPolicy: enumOf(testResultPolicies),
+      state: enumOf(['open', 'upcoming', 'closed', 'revoked']),
       resultAttemptId: nullable(id()),
       score: nullable(testPoints()),
       maxScore: nullable(testPoints()),
@@ -441,6 +449,7 @@ const schemas = {
       status: str(),
       score: nullable(testPoints()),
       maxScore: nullable(testPoints()),
+      passPercent: nullable(num({ description: 'From the attempt policy snapshot.' })),
    }, ['id', 'userId', 'status'], { description: 'TestAttempt plus the student.' }),
    StaffAttemptDetail: obj({
       attempt: ref('StaffAttempt'),
@@ -456,7 +465,7 @@ const schemas = {
       attempts: ref('AttemptState'),
       assignment: obj({
          id: nullable(id()),
-         state: enumOf(['open', 'upcoming', 'closed', 'none']),
+         state: enumOf(['open', 'upcoming', 'closed', 'revoked', 'none']),
          opensAt: nullable(dt()),
          closesAt: nullable(dt()),
       }),
@@ -468,6 +477,7 @@ const schemas = {
       position: int(),
       lessonType: str(),
       translations: ref('TitleTranslations'),
+      testId: { ...nullable(id()), description: 'Linked test; null without a test or without module access.' },
       access: obj({ granted: bool() }),
       content: ref('RichContent'),
       test: nullable(ref('LearnerLessonTest')),
@@ -1038,7 +1048,7 @@ const routes = [
    ['get', '/courses/:courseId/modules', {
       tag: 'Learner courses', summary: 'Course card and module access',
       response: obj({
-         course: obj({ id: id(), title: str(), subject: nullable(ref('SubjectCard')), moduleCount: int(), lessonCount: int(), enrollment: ref('EnrollmentWindow') }),
+         course: obj({ id: id(), title: str(), subject: nullable(ref('SubjectCard')), moduleCount: int(), lessonCount: int(), progress: ref('CourseProgress'), enrollment: ref('EnrollmentWindow') }),
          modules: arr(ref('LearnerModule')),
       }),
       errors: { 400: ['INVALID_COURSE_ID'], 404: ['COURSE_NOT_FOUND'] },

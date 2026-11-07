@@ -84,7 +84,9 @@ async function requirePlayableVideo(deps, lesson) {
    return asset
 }
 
+// testId is protected structure: a locked lesson reports null, like its content.
 function safeLearnerLessonSummary(row) {
+   const granted = row.granted === true
    return {
       id: row.id,
       moduleId: row.module_id,
@@ -92,7 +94,8 @@ function safeLearnerLessonSummary(row) {
       position: row.position,
       lessonType: row.lesson_type,
       translations: row.translations,
-      access: { granted: row.granted === true },
+      testId: granted ? row.test_id ?? null : null,
+      access: { granted },
    }
 }
 
@@ -127,9 +130,10 @@ function safeProgress(row) {
    }
 }
 
-// The best window wins when a student has several assignments: open, then upcoming, then closed.
+// The best window wins when a student has several assignments: open, then upcoming, then
+// closed, then a revoked one kept only for its attempt history.
 function bestAssignment(row) {
-   const rank = { open: 0, upcoming: 1, closed: 2 }
+   const rank = { open: 0, upcoming: 1, closed: 2, revoked: 3 }
    return [...row.assignments].sort((left, right) => rank[left.state] - rank[right.state])[0]
 }
 

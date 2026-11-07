@@ -18,6 +18,7 @@ import {
 } from '../utils/attempt-policy.js'
 import { normalizeInternalId } from '../utils/internal-id.js'
 import { parseCourseId, parseUserId, validateBody, validationError } from './course-service.js'
+import { completeTestLessonsService } from './lesson-completion-service.js'
 
 function shuffled(values) {
    const result = [...values]
@@ -37,6 +38,7 @@ function dependencies(overrides = {}) {
       transaction: overrides.transaction || withTransaction,
       clock: overrides.clock || (() => new Date()),
       shuffle: overrides.shuffle || shuffled,
+      completeLessons: overrides.completeLessons || completeTestLessonsService,
    }
 }
 
@@ -158,6 +160,11 @@ function attemptStateSummary(attempts, maxAttempts, policy) {
    }
 }
 
+// An assignment kept only for its history (revoked, or a group the learner left) is 'revoked'.
+function learnerAssignmentState(row, now) {
+   return row.available === false ? 'revoked' : assignmentState(row, now)
+}
+
 function safeLearnerAssignment(row, attempts, now) {
    return {
       id: row.id,
@@ -171,7 +178,7 @@ function safeLearnerAssignment(row, attempts, now) {
       closesAt: iso(row.closes_at),
       personalWindowMinutes: row.personal_window_minutes,
       personalWindowEndsAt: iso(personalWindowEnd(attempts[0]?.started_at, row.personal_window_minutes)),
-      state: assignmentState(row, now),
+      state: learnerAssignmentState(row, now),
       attempts: attemptStateSummary(attempts, row.max_attempts, row.result_policy),
    }
 }
@@ -193,13 +200,20 @@ async function finalizeAttempt(deps, client, attempt, { status, submittedAt, act
       question_id: row.question_id,
       awarded_points: gradeAnswer(row.answer_data, row.grading_snapshot, row.max_points),
    }))
+   const score = sumPoints(grades.map((grade) => grade.awarded_points))
+   const maxScore = sumPoints(rows.map((row) => row.max_points))
    await deps.repository.saveGrades(grades, now, client)
    await deps.repository.finishAttempt(attempt.id, {
       status,
       submittedAt,
       gradedAt: now,
-      score: sumPoints(grades.map((grade) => grade.awarded_points)),
-      maxScore: sumPoints(rows.map((row) => row.max_points)),
+      score,
+      maxScore,
+   }, client)
+   // Same transaction: the attempt and its lesson completion commit or roll back together.
+   await deps.completeLessons({
+      attempt: { ...attempt, status, score, max_score: maxScore },
+      completedAt: now,
    }, client)
    await deps.auth.appendAuditEvent({
       actorUserId: actorId,
@@ -479,10 +493,12 @@ async function readResult(deps, attempt, now) {
       ? await deps.repository.listAttemptQuestions(attempt.id, { withSnapshot: true })
       : []
    const percent = scorePercent(attempt.score, attempt.max_score)
-   const { passPercent } = attempt.policy_snapshot
+   // From the snapshot taken at start, so editing the test later cannot change this result.
+   const passPercent = attempt.policy_snapshot.passPercent ?? null
    return {
       attempt: { ...safeAttempt(attempt), title: attempt.title },
       percent,
+      passPercent,
       passed: passPercent === null ? null : percent >= passPercent,
       answerRevealPolicy: policy,
       revealed,
@@ -528,12 +544,14 @@ async function getAssignmentResultService(userId, assignmentIdValue, overrides) 
    const actorId = parseUserId(userId)
    const assignmentId = parseAssignmentId(assignmentIdValue)
    await finalizeExpiredAttemptsForUserService(actorId, overrides)
-   const assignment = await deps.repository.findLearnerAssignment(actorId, assignmentId)
+   // Read-only, so a revoked assignment stays readable through the learner's own attempts.
+   const assignment = await deps.repository.findLearnerAssignmentHistory(actorId, assignmentId)
    if (!assignment) throw assignmentNotFound()
    const attempts = await deps.repository.listUserAttempts(actorId, [assignmentId])
    const selected = selectResultAttempt(assignment.result_policy, attempts)
    return {
       resultPolicy: assignment.result_policy,
+      state: learnerAssignmentState(assignment, deps.clock()),
       resultAttemptId: selected?.id ?? null,
       score: selected?.score ?? null,
       maxScore: selected?.max_score ?? null,

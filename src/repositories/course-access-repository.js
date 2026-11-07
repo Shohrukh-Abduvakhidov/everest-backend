@@ -293,7 +293,23 @@ const learnerCardColumns = `
       JOIN course_modules AS lesson_module ON lesson_module.id = counted_lesson.module_id
       WHERE counted_lesson.course_id = course.id AND counted_lesson.status = 'published'
          AND lesson_module.status = 'published')
-      AS lesson_count`
+      AS lesson_count,
+   course_progress.total_lessons, course_progress.completed_lessons`
+
+// Course progress counts the published lessons of published modules that can_access_module
+// grants right now (the M06 predicate); completion is lesson_progress, written by the player
+// and by test completion. One lateral subquery per course row of the same statement.
+const learnerProgressJoin = `LEFT JOIN LATERAL (
+   SELECT count(*)::integer AS total_lessons,
+      count(*) FILTER (WHERE progress.status = 'completed')::integer AS completed_lessons
+   FROM lessons AS progress_lesson
+   JOIN course_modules AS progress_module ON progress_module.id = progress_lesson.module_id
+   LEFT JOIN lesson_progress AS progress
+      ON progress.lesson_id = progress_lesson.id AND progress.user_id = $1
+   WHERE progress_lesson.course_id = course.id AND progress_lesson.status = 'published'
+      AND progress_module.status = 'published' AND can_access_module($1, progress_module.id)
+) AS course_progress ON TRUE`
+
 async function listLearnerCourses(userId, db = pool) {
    const result = await db.query(
       `SELECT course.title, course.description, course.language_code,
@@ -302,6 +318,7 @@ async function listLearnerCourses(userId, db = pool) {
        FROM course_enrollments AS grant_row
        JOIN courses AS course ON course.id = grant_row.course_id
        LEFT JOIN subjects AS subject ON subject.id = course.subject_id
+       ${learnerProgressJoin}
        WHERE grant_row.user_id = $1 AND grant_row.revoked_at IS NULL
          AND course.status = 'published'
        ORDER BY course.title, course.id`,
@@ -316,6 +333,7 @@ async function findLearnerCourse(userId, courseId, db = pool) {
        FROM course_enrollments AS grant_row
        JOIN courses AS course ON course.id = grant_row.course_id
        LEFT JOIN subjects AS subject ON subject.id = course.subject_id
+       ${learnerProgressJoin}
        WHERE grant_row.user_id = $1 AND grant_row.course_id = $2
          AND grant_row.revoked_at IS NULL AND course.status = 'published'`,
       [normalizeInternalId(userId), normalizeInternalId(courseId)],
