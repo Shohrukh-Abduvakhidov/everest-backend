@@ -21,7 +21,7 @@ updated_at: 2026-11-07
 
 - All five items are implemented on `feat/m11-gaps`; nothing was skipped. There is no migration.
 - The owner's lesson-completion rule and the choices made here are in `docs/decisions.md`, 2026-11-07.
-- No commit, push or PR yet unless reported otherwise in the session summary.
+- PR #36 is open from `feat/m11-gaps` and awaits review. The agent must not merge it.
 
 ## Verification (2026-11-07)
 
