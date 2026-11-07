@@ -1,0 +1,33 @@
+{
+   "schemaVersion": "everest.answer-key-import.v1",
+   "sourcePackage": "synthetic-package-v1",
+   "bankCode": "synthetic-bank",
+   "keySource": {
+      "filename": "synthetic-key.pdf",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "pages": 1
+   },
+   "records": [
+      {
+         "bankCode": "synthetic-bank",
+         "questionExternalId": "synthetic-single-0001",
+         "status": "proposed",
+         "source": "official_key",
+         "answerDataExternal": { "optionKeys": ["a"] },
+         "explanation": { "blocks": [] }
+      },
+      {
+         "bankCode": "synthetic-bank",
+         "questionExternalId": "synthetic-matching-0001",
+         "status": "proposed",
+         "source": "official_key",
+         "answerDataExternal": {
+            "pairs": [
+               { "leftKey": "l1", "rightKey": "r2" },
+               { "leftKey": "l2", "rightKey": "r1" }
+            ]
+         },
+         "explanation": { "blocks": [] }
+      }
+   ]
+}

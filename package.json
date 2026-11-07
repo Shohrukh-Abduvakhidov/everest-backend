@@ -19,6 +19,7 @@
     "storage:configure": "node scripts/configure-storage-bucket.js",
     "video:faststart": "node scripts/remux-faststart.js",
     "import:questions": "node scripts/import-question-package.js",
+    "import:answer-keys": "node scripts/import-answer-keys.js",
     "worker:imports": "node scripts/question-import-worker.js",
     "worker:attempts": "node scripts/attempt-sweep-worker.js",
     "test:sources": "node scripts/verify-migration-sources.js",

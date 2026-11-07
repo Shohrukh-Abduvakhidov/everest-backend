@@ -4,7 +4,17 @@ Updated: 2026-11-07.
 
 ## Current increment
 
-Fix on `fix/lesson-completion-and-staff-passed` (awaiting review).
+Answer-key sidecar import on `feat/import-answer-keys` (awaiting review). The lesson-completion fix is merged (PR #40).
+
+## 2026-11-08 — Answer keys from a sidecar file (`feat/import-answer-keys`)
+
+- **CLI:** `npm run import:answer-keys -- --keys <file> --actor-phone +992... [--bank] [--dry-run] [--idempotency-key] [--batch-size] [--report] [--set-matching-rules | --set-allow-right-reuse-false]`.
+- **New:** `src/services/answer-key-import-service.js`, `src/utils/answer-key-file.js`, `scripts/import-answer-keys.js`, repository method `listBankQuestionStates`. Exported for reuse: `mapAnswerData`/`convertContent` (adapter), `loadImportActor` (question import).
+- Keys are written by `replaceAnswerKeyService` and rules by `updateQuestionService`, inside the batch transaction. Outcomes: `APPLIED`, `UNCHANGED`, `KEY_CONFLICT`, `KEY_VERIFIED_SKIPPED`, `QUESTION_NOT_DRAFT`, `QUESTION_NOT_FOUND`, `ANSWER_KEY_INVALID`, `NO_KEY_FOR_QUESTION`. Matching-rule counters are per field.
+- **No migration:** runs are stored in `question_imports` (`schema_version = everest.answer-key-import.v1`). Decisions: `docs/decisions.md` (2026-11-08). Runbook §6, contract §11.
+- **Tests:** `tests/integration/answer-key-import.test.js` (11 subtests: actor, file rejections, dry run, real run in batches, replay, re-run, idempotency conflict, rules dry run and real run per field, audit without answer data, batch rollback and retry, CLI) and `tests/unit/answer-key-import.test.js` (4 tests).
+- **Verified:** `npm test` on a fresh migrated disposable database: exit 0; 359 tests, 358 passed, 0 failed, 1 skipped (real S3). `everest_db` was not changed; one read-only count showed bank `nct-tg-2026` is not imported there.
+- **Not verified:** a run against the real Tajik bank and the real key file (972 records).
 
 ## 2026-11-08 — Lesson completion guard and staff `passed` (`fix/lesson-completion-and-staff-passed`)
 

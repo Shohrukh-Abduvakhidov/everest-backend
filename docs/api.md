@@ -259,6 +259,10 @@ Shapes:
 - `run` = `{ id, bankId, bankCode, initiatedBy, packageSha256, schemaVersion, idempotencyKey, isDryRun, status, manifest, counters, createdAt, finishedAt }`.
    - `manifest` is a summary: `bankCode`, `sourceNamespace` and entity counts. It holds no question text.
    - `counters` = `{ subjects|sections|topics: { created, updated, unchanged }, bank: { created, existing }, assets: { total, uploaded, reusedByAlias, reusedByHash }, questions: { total, created, updated, skippedImmutable, failed, notAttempted }, answerKeys: { unknown, proposed, keptExisting }, duplicates: { suggested }, batches: { size, committed, failed }, warnings, errors }`.
+- **Answer-key runs** (CLI `npm run import:answer-keys`, no HTTP endpoint) are listed here too. They have `schemaVersion = everest.answer-key-import.v1` and `packageSha256` = the sha256 of the key file.
+   - `manifest` = `{ kind: 'answer_keys', schemaVersion, bankCode, sourcePackage, keySource: { filename, sha256, pages? }, records, setMatchingRules }`.
+   - `counters` = `{ records, outcomes: { APPLIED, UNCHANGED, KEY_CONFLICT, KEY_VERIFIED_SKIPPED, QUESTION_NOT_DRAFT, QUESTION_NOT_FOUND, ANSWER_KEY_INVALID }, noKeyForQuestion, recordsFailed, recordsNotAttempted, batches, matchingRules, errors }`.
+   - Entries are the non-applied outcomes (`warning`) and failed batches (`error`, `recordPath` `records[a..b]`). They never contain answer data.
 - `entry` = `{ id, externalId, recordPath, severity, code, message, createdAt }`.
    - `recordPath` points into the package, for example `questions[12].options` or `questions[200..299]` for a failed batch.
    - `message` holds codes and field names only. It never contains question text or answers.

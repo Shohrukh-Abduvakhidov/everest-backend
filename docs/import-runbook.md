@@ -102,6 +102,84 @@ Common codes:
 - Questions with `answerKey.status = proposed` still need `POST /admin/questions/:id/answer-key/verify` by a reviewer before they can be published.
 - `counters.duplicates.suggested` counts possible duplicates recorded in `question_duplicate_links`. They are suggestions only; nothing was merged.
 
+## 6. Answer keys from a sidecar file
+
+A book package may come without keys (the Tajik package `everest-tajik-indexed-v1` has none). The official keys can then be attached later from a sidecar JSON file (`everest.answer-key-import.v1`, format: `docs/import-contract.md` §11). The package itself stays unchanged.
+
+- **Before you start:**
+   - import the questions first (`npm run import:questions`, sections 1–2);
+   - put the key file under `import-packages/` (git-ignored). Never commit the key PDF or the JSON;
+   - the actor rule is the same as for `import:questions`: an active account with `questions.manage` that owns the bank, or an owner/admin.
+- **What it does:**
+   - sets `proposed` keys on draft questions through the same service as `PUT /admin/questions/:id/answer-key` (validation, draft-only rule, audit);
+   - never verifies, never publishes, never overwrites a different proposed key;
+   - with `--set-matching-rules`, also sets `null` matching rules that the keys support (below).
+
+### 6.1 Dry run
+
+```bash
+npm run import:answer-keys -- --keys import-packages/answer-keys-nct-tg-2026.json --actor-phone +992XXXXXXXXX --bank nct-tg-2026 --dry-run --report import-packages/tajik-keys.dry-run.json
+```
+
+- It validates the whole file, then classifies every record against the stored questions. It writes nothing.
+- stdout prints counts and codes only: `counters.outcomes`, `counters.matchingRules`, `topOutcomeCodes` and the first 20 file errors.
+- `--report` writes the full per-record list (`outcomes`, `matchingRules`). It includes **both keys** of each `KEY_CONFLICT`, so keep it in `import-packages/`, never in git.
+- Exit code `0` = valid, `2` = file rejected, `1` = could not run.
+
+### 6.2 Real run
+
+```bash
+npm run import:answer-keys -- --keys import-packages/answer-keys-nct-tg-2026.json --actor-phone +992XXXXXXXXX --bank nct-tg-2026 --report import-packages/tajik-keys.run.json
+```
+
+- The default idempotency key is `answer-keys-<sha256 of the file>`; with `--set-matching-rules` it is `answer-keys-<sha256>-matching-rules`.
+- Each batch of up to 100 records (`--batch-size 1-100`) is one transaction. A failing batch rolls back, is reported as an `error`, and later batches are not attempted (`status: failed`).
+- The run is stored in `question_imports` with the file sha256 and `keySource`. You can read it with the import API (section 4).
+
+### 6.3 Matching rules (`--set-matching-rules`)
+
+Publication of a matching question needs both `requireAllLeft` and `allowRightReuse` to be booleans. Books often state neither, so they are imported as `null`. The flag (alias `--set-allow-right-reuse-false`) is off by default. It touches only draft matching questions whose key was `APPLIED` or `UNCHANGED` in this run, and decides each field independently:
+
+| Stored value | The key | Result | Counter |
+|---|---|---|---|
+| `requireAllLeft` is `null` | pairs every left item | set `true` | `requireAllLeft.set` |
+| `requireAllLeft` is `null` | misses a left item | stays `null` | `requireAllLeft.skippedNotCovered` (`REQUIRE_ALL_LEFT_SKIPPED_NOT_COVERED`) |
+| `allowRightReuse` is `null` | uses distinct right items | set `false` (never `true`) | `allowRightReuse.set` |
+| `allowRightReuse` is `null` | reuses a right item | stays `null` | `allowRightReuse.skippedNotDistinct` (`RIGHT_REUSE_SKIPPED_NOT_DISTINCT`) |
+| a boolean | — | never changed | `….skippedAlreadySet` |
+
+- `stillNull` per field and `publishableBySettings` (both booleans) count every draft matching question of the bank after the run. In a dry run they are projected.
+- The change goes through the normal draft edit (`question.updated` audit with `fields: ['interactionSettings']`). Only these two settings change.
+
+```bash
+npm run import:answer-keys -- --keys import-packages/answer-keys-nct-tg-2026.json --actor-phone +992XXXXXXXXX --bank nct-tg-2026 --set-matching-rules --dry-run
+npm run import:answer-keys -- --keys import-packages/answer-keys-nct-tg-2026.json --actor-phone +992XXXXXXXXX --bank nct-tg-2026 --set-matching-rules --report import-packages/tajik-keys.rules.json
+```
+
+### 6.4 Re-run
+
+| Situation | Result |
+|---|---|
+| Same file, same key | the stored run is returned (`"replayed": true`), nothing is written |
+| Same key, other file | `IMPORT_IDEMPOTENCY_CONFLICT`; use a new `--idempotency-key` |
+| After a `failed` run | replaying the same key returns the failed run; re-run with a **new** `--idempotency-key`. Keys already set report `UNCHANGED`. |
+| Same file with `--set-matching-rules` after a plain run | a separate run (different default key): keys report `UNCHANGED`, rules are set |
+
+### 6.5 Outcome codes
+
+| Code | Meaning | Action |
+|---|---|---|
+| `APPLIED` | draft with an `unknown` key → `proposed` with the file's source and answer | a reviewer verifies it (`POST /admin/questions/:id/answer-key/verify`) |
+| `UNCHANGED` | the same proposed key and source are already stored | none |
+| `KEY_CONFLICT` | another proposed key, or another source, is stored; it was **kept** | compare `stored` and `file` in the `--report` file, then fix it with `PUT /admin/questions/:id/answer-key` |
+| `KEY_VERIFIED_SKIPPED` | a verified key is stored; it is never changed | none |
+| `QUESTION_NOT_DRAFT` | the question is published or archived | correct it via a copy if needed |
+| `QUESTION_NOT_FOUND` | no question with this `questionExternalId` in the bank | check the ID, or import the question first |
+| `ANSWER_KEY_INVALID` | the answer does not fit the question's option/item keys or type (unknown key, wrong pair keys, reused right item while the rule is not `true`, a left item twice, numeric tolerance) | fix the record |
+| `NO_KEY_FOR_QUESTION` | a question of the bank has no record in the file; it was not changed | none, or add a record |
+
+File errors (nothing is written): `KEY_FILE_SCHEMA_VERSION_UNSUPPORTED`, `KEY_FILE_FIELD_UNKNOWN`, `KEY_FILE_HEADER_INVALID`, `KEY_FILE_BANK_MISMATCH` (`--bank` ≠ `bankCode`), `KEY_FILE_SCHEMA_INVALID`, `KEY_RECORD_BANK_MISMATCH`, `KEY_RECORD_EXTERNAL_ID_INVALID`, `KEY_RECORD_DUPLICATE`, `ANSWER_KEY_STATUS_INVALID`, `ANSWER_KEY_VERIFIED_REJECTED`, `ANSWER_KEY_SOURCE_REJECTED` (`ai_inference` or anything other than `official_key`/`expert_review`), `ANSWER_DATA_REQUIRED`, `EXPLANATION_INVALID`, `QUESTION_BANK_NOT_FOUND`, `QUESTION_BANK_READ_ONLY`.
+
 ## HTTP upload
 
 The same importer is reachable over HTTP; see "Package upload (HTTP)" in `docs/api.md`. Run the worker with `npm run worker:imports` on the host that serves the API, because packages wait on its local disk (`QUESTION_IMPORT_UPLOAD_DIR`, default `uploads/question-imports`). Use the CLI for packages above the upload limit. `--apply-matching-defaults` sets missing matching rules explicitly; each affected question gets a warning.

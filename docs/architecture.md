@@ -502,6 +502,13 @@ M09 implementation (indexed book import):
    - Published and archived matches are skipped. The DB triggers stay the final guard.
 - **Assets.** A partial unique index `assets_sha256_key` makes the sha256 dedup race-safe. `asset_aliases (source_namespace, external_id)` keeps package-local IDs stable across re-imports.
 
+Answer-key sidecar import (2026-11-08):
+
+- **Entry point.** `scripts/import-answer-keys.js` → `utils/answer-key-file.js` (pure: bytes, sha256, JSON) → `answer-key-import-service`. The service reuses `loadImportActor` from `question-import-service`, `mapAnswerData`/`convertContent` from the adapter, and the `question-import` and `question-bank` repositories (`listBankQuestionStates`, `lockQuestionByExternalId`, `findQuestion`, `findQuestionParts`, the run methods). It adds no SQL of its own.
+- **Writes go through the M08 services.** `replaceAnswerKeyService` sets the key and `updateQuestionService` sets matching rules. Each receives `{ transaction: (work) => work(client) }`, so it joins the batch transaction with the same client. Lock order is question → bank, the same as the API edits; the bank is not locked first.
+- **Plan, then write.** One read-only plan classifies every record (dry run report). Each batch (≤100) re-locks and re-classifies its records under the lock before writing, so a change made since planning is respected.
+- **Runs** are rows in `question_imports` / `question_import_errors` with `schema_version = everest.answer-key-import.v1`. No migration.
+
 ## 16. Test attempt architecture
 
 `test_assignments` scopes a test to one audience type. `test_attempts` carries attempt number, lifecycle status, start/expiry/pause/submission/grading timestamps, scores, and policy snapshot. `attempt_questions` snapshots order, points, and private grading rules. `student_answers` stores the current answer and optimistic `revision` for autosave. `attempt_score_revisions` provides append-only score history and idempotency.

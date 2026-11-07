@@ -1,42 +1,40 @@
 ---
 project: EVEREST Backend
-current_milestone: M11 fixes (lesson completion guard, staff passed)
+current_milestone: M09 follow-up (answer keys from a sidecar file)
 status: awaiting_review
-branch: fix/lesson-completion-and-staff-passed
-base_commit: f97c639
+branch: feat/import-answer-keys
+base_commit: cf8a6a6
 updated_at: 2026-11-08
 ---
 
 # Current handoff
 
-## Findings (from the code)
+## Done
 
-- The player could complete a lesson with `test_id`: `completed: true` on a lesson without a video, or 90% watched on a video lesson. Both bypassed the rule that only the test result completes it. Fixed with `409 LESSON_COMPLETES_BY_TEST`; watch progress still saves.
-- Staff attempts had `passPercent` but no `passed`. Added, from the single `attemptPassed` in `utils/attempt-policy.js`.
+- `npm run import:answer-keys` attaches `proposed` keys from an `everest.answer-key-import.v1` file to imported draft questions. It works through `replaceAnswerKeyService`, and `--set-matching-rules` works through `updateQuestionService`. It never verifies, publishes or overwrites another proposed key.
+- No migration: runs are stored in `question_imports` / `question_import_errors`.
+- Docs: runbook §6, contract §11, decisions (2026-11-08), api (answer-key runs in the import API), architecture, ROADMAP M09 follow-up.
 
 ## Verification (2026-11-08)
 
-- `npm test` with `DB_NAME` on a fresh migrated disposable database: exit 0; 343 tests, 342 passed, 0 failed, 1 skipped (real S3). No migration, so `test:migrations` was not run.
-- `everest_db` was not touched.
+- `npm test` on a fresh migrated disposable database: exit 0; 359 tests, 358 passed, 0 failed, 1 skipped (real S3).
+- No migration, so `test:migrations` was not run and `verify-database.js` was not changed.
+- `everest_db`: one read-only query only. Bank `nct-tg-2026` is not imported there.
 
 ## Not verified
 
-- A frontend that still shows a "mark as done" button for lessons with a test.
-- Completions that students already got through the old bypass are kept. They were not searched for or cleaned.
-
-## Decisions needed
-
-- Mixed lesson (video and test): completion is by the test only (strictest). If the owner wants both 90% watched and a passed test, the rule in `completeTestLessons` must change.
-- Whether to reset completions obtained through the old bypass. Nothing was reset.
+- The real run on the Tajik bank with `import-packages/answer-keys-nct-tg-2026.json` (972 records). Its stored matching settings were not read, because the bank does not exist locally yet.
+- Run time for 972 records (planning plus per-record service calls). Expected seconds to tens of seconds; not measured.
 
 ## Next concrete task
 
-1. Review and merge this branch.
-2. Run `npm run migrate:up` on the local `everest_db`.
-3. Start M12 after the metric definitions are confirmed.
+1. Review and merge `feat/import-answer-keys`.
+2. Locally: `npm run import:questions` for the Tajik package (if not done), then the answer-key dry run and real run (runbook §6).
+3. A reviewer verifies keys; then publication.
 
 ## Constraints
 
 - Preserve route → middleware → controller → service → repository → PostgreSQL.
 - Do not edit applied migrations. Never merge, force-push, or push to `main`.
 - Point `DB_NAME` at a disposable database for `npm test`. Never delete data in `everest_db`.
+- Never commit `import-packages/` (book content, key PDF, key JSON, reports).

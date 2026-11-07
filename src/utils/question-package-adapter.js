@@ -609,4 +609,4 @@ function adaptEntityPackage(pkg) {
    }
 }
 
-export { adaptEntityPackage, isEntityPackage }
+export { adaptEntityPackage, convertContent, isEntityPackage, mapAnswerData }
