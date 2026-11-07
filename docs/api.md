@@ -100,7 +100,7 @@ Time is decided by the server. Every attempt response has `serverNow`; show the 
 - **Access.** `tests.attempts.grant`; the `POST` also needs CSRF and is under the admin rate limit.
 - **Request.** `POST` body: `{ count: 1..10, reason, idempotencyKey }`.
 - **Response.** Both return `{ assignmentId, userId, maxAttempts, extraAttempts, effectiveMaxAttempts, attemptsUsed, remainingAttempts, grants: [{ id, extraAttempts, reason, grantedBy, grantedByName, createdAt }] }`.
-- **Scope.** Owner and admin may grant on any assignment. A teacher holding the permission may grant only on an assignment to a group they teach with `canViewResults`. Out of scope, or an assignment of another test: `404 ASSIGNMENT_NOT_FOUND`.
+- **Scope.** The permission is held by owner, admin and teacher. Owner and admin may grant on any assignment. A teacher may grant only on an assignment made to a group they teach with `canViewResults`; course teachers and direct assignments are out of scope for teachers. Out of scope, or an assignment of another test: `404 ASSIGNMENT_NOT_FOUND`. A student gets `403`.
 - **Student.** The student must be the direct assignee or an active member of the assigned group, otherwise `409 STUDENT_NOT_ASSIGNED`.
 - **Errors.**
    - `400 ATTEMPTS_UNLIMITED` when the test has no limit.

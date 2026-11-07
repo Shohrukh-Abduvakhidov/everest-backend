@@ -412,7 +412,15 @@ Permission `tests.results.read` (regrade: `tests.results.regrade`, owner and adm
 
 Assignments gained an optional `personalWindowMinutes` on create, patch and read.
 
-**Extra attempts (2026-11-07).** Permission `tests.attempts.grant` (owner and admin by default).
+**Extra attempts (2026-11-07).** Permission `tests.attempts.grant`.
+
+| Role | Can grant |
+|---|---|
+| owner, admin | any assignment |
+| teacher | only assignments made to a group they teach with `canViewResults`; anything else is `404 ASSIGNMENT_NOT_FOUND` |
+| student | no (`403`) |
+
+Show the grant button to a teacher only on group assignments of their groups.
 
 | Method | Path | Purpose |
 |---|---|---|

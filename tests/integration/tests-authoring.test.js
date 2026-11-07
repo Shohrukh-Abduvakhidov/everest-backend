@@ -397,7 +397,7 @@ test('test authoring, publication and assignment integration', async (t) => {
       assert.deepEqual(seeded.rows, [
          { code: 'admin', count: 7 },
          { code: 'owner', count: 7 },
-         { code: 'teacher', count: 4 },
+         { code: 'teacher', count: 5 },
       ])
    })
 

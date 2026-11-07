@@ -308,7 +308,7 @@ This roadmap orders implementation; it does not replace the [current architectur
 - **Verification:** Ownership, timer, concurrent revision, finalization, expiry, grading, idempotency, and private-key/snapshot redaction tests.
 - **Documentation updates:** API, decisions, architecture, progress, roadmap.
 - **Extra attempts (2026-11-07, `feat/m11-extra-attempts`, awaiting review):**
-   - Append-only `test_attempt_grants` and the permission `tests.attempts.grant` (owner and admin; group-teacher scope).
+   - Append-only `test_attempt_grants` and the permission `tests.attempts.grant` (owner, admin and teacher within their own groups).
    - `GET|POST /admin/tests/:testId/assignments/:assignmentId/users/:userId/extra-attempts`.
    - The effective limit applies to starts, learner counts and reveal.
    - Migrations `20261107010000000` and `20261107020000000`.

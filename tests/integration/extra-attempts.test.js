@@ -260,19 +260,7 @@ test('extra attempts integration', async (t) => {
       assert.deepEqual(await grantRows(windowed.id), [])
    })
 
-   await t.test('group teachers grant only within their own group', async (subtest) => {
-      // No role holds tests.attempts.grant except owner and admin; this subtest gives it to
-      // teachers for its duration to check the scope rule behind the permission.
-      await client.query(
-         `INSERT INTO role_permissions (role_id, permission_id)
-          SELECT role.id, permission.id FROM roles AS role, permissions AS permission
-          WHERE role.code = 'teacher' AND permission.code = 'tests.attempts.grant'`,
-      )
-      subtest.after(() => client.query(
-         `DELETE FROM role_permissions
-          WHERE role_id = (SELECT id FROM roles WHERE code = 'teacher')
-            AND permission_id = (SELECT id FROM permissions WHERE code = 'tests.attempts.grant')`,
-      ))
+   await t.test('group teachers grant only within their own group', async () => {
       const quiz = await publishedTest()
       const learner = await student()
       const stranger = await student()
@@ -293,7 +281,15 @@ test('extra attempts integration', async (t) => {
          'INSERT INTO course_teachers (course_id, user_id, can_view_results, assigned_by) VALUES ($1, $2, TRUE, $3)',
          [courseId, courseTeacher, adminId],
       )
-      assert.equal((await grant(teacher, quiz, ownAssignment, learner)).extraAttempts, 1)
+      const teacherGrant = await grant(teacher, quiz, ownAssignment, learner)
+      assert.equal(teacherGrant.extraAttempts, 1)
+      assert.equal(teacherGrant.grants[0].grantedBy, teacher)
+      const audit = await client.query(
+         `SELECT actor_user_id FROM audit_events
+          WHERE event_code = 'test.attempts_granted' AND subject_user_id = $1`,
+         [learner],
+      )
+      assert.deepEqual(audit.rows.map((row) => row.actor_user_id), [teacher])
       assert.equal((await getExtraAttemptsService(teacher, quiz.id, ownAssignment.id, learner)).grants.length, 1)
       await rejects(grant(teacher, quiz, foreignAssignment, stranger), 'ASSIGNMENT_NOT_FOUND')
       await rejects(grant(teacher, quiz, direct, learner), 'ASSIGNMENT_NOT_FOUND')
@@ -389,15 +385,44 @@ test('extra attempts integration', async (t) => {
 
       assert.equal((await api('POST', path, null, body)).status, 401)
       assert.equal((await api('POST', path, await session(learner), body)).status, 403)
-      assert.equal((await api('POST', path, await session(teacher), body)).status, 403)
+      const stranger = await createUser('teacher')
+      const sameCourse = await createUser('teacher')
+      const foreignGroup = await group([])
+      await client.query(
+         `INSERT INTO group_teachers (group_id, user_id, can_view_results, assigned_by)
+          VALUES ($1, $2, TRUE, $3)`,
+         [foreignGroup, stranger, adminId],
+      )
+      await client.query(
+         'INSERT INTO course_teachers (course_id, user_id, can_view_results, assigned_by) VALUES ($1, $2, TRUE, $3)',
+         [courseId, sameCourse, adminId],
+      )
+      // Teachers hold the permission through the seeded role; the group decides the scope.
+      for (const outsider of [stranger, sameCourse]) {
+         const denied = await api('POST', path, await session(outsider), body)
+         assert.equal(denied.status, 404)
+         assert.equal(denied.body.error.code, 'ASSIGNMENT_NOT_FOUND')
+         assert.equal((await api('GET', path, await session(outsider))).status, 404)
+      }
+      assert.deepEqual(await grantRows(assignment.id), [])
+      const teacherSession = await session(teacher)
+      const byTeacher = await api('POST', path, teacherSession, body)
+      assert.equal(byTeacher.status, 200, JSON.stringify(byTeacher.body))
+      assert.equal(byTeacher.body.data.grants[0].grantedBy, teacher)
+      assert.equal((await api('POST', path, teacherSession, body)).body.data.extraAttempts, 1)
+      assert.equal((await api('GET', path, teacherSession)).body.data.grants.length, 1)
+      assert.equal((await grantRows(assignment.id)).length, 1)
       const admin = await session(adminId)
       const granted = await api('POST', path, admin, body)
       assert.equal(granted.status, 200, JSON.stringify(granted.body))
       assert.equal(granted.body.data.effectiveMaxAttempts, 2)
+      assert.equal(granted.body.data.grants.length, 1, 'the teacher grant above used the same key')
       assert.equal((await api('POST', path, admin, body)).body.data.extraAttempts, 1)
+      const second = await api('POST', path, admin, { ...body, idempotencyKey: `http-2-${suffix}` })
+      assert.equal(second.body.data.extraAttempts, 2)
       const read = await api('GET', path, admin)
       assert.equal(read.status, 200)
-      assert.equal(read.body.data.grants.length, 1)
+      assert.equal(read.body.data.grants.length, 2)
       assert.equal((await api('GET', path, await session(learner))).status, 403)
       const invalid = await api('POST', path, admin, { ...body, count: 0, idempotencyKey: `zero-${suffix}` })
       assert.equal(invalid.status, 400)

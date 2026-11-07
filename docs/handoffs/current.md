@@ -1,49 +1,38 @@
 ---
 project: EVEREST Backend
-current_milestone: M11 extra attempts per student
+current_milestone: M11 teacher permission for extra attempts
 status: awaiting_review
-branch: feat/m11-extra-attempts
-base_commit: cce7ef6
-updated_at: 2026-11-07
+branch: feat/teacher-grant-permission
+base_commit: 200d9e1
+updated_at: 2026-11-08
 ---
 
 # Current handoff
 
-## Findings before editing (from the code)
-
-- The limit is `tests.max_attempts`, selected as `assignment.max_attempts`. Attempts are unique by (`assignment_id`, `user_id`, `attempt_number`) and are counted per assignment by `attemptsUsed` and `remainingAttempts` (cancelled attempts excluded).
-- `createNewAttempt` refuses with `ATTEMPTS_EXHAUSTED` under the per-student advisory lock `lockAttemptSlot`.
-- `policy_snapshot.maxAttempts` (the test's limit at start) drives `remainingAttempts` in `readResult`, and so the `after_submission` reveal. Live `max_attempts` drives the learner list, the lesson summary and the assignment result.
-- Regrade: permission migration `20261105040000000` (owner, admin), route `POST /admin/tests/:testId/attempts/:attemptId/regrade` with CSRF and the admin rate limit, `idempotency_key UNIQUE`, audit `test.attempt_regraded`.
-
 ## State
 
-Implemented on `feat/m11-extra-attempts`: two migrations, the grant and read endpoints, and the effective limit everywhere. The owner's rules and the choices made here are in `docs/decisions.md`, 2026-11-07, "Extra attempts".
+- Extra attempts (PR #38) are merged. This branch binds `tests.attempts.grant` to the `teacher` role (migration `20261108010000000`). The group scope was already in `grantScopeSql`; decisions.md, 2026-11-08, records how scope is computed.
 
-## Verification (2026-11-07)
+## Verification (2026-11-08)
 
-- `npm test` with `DB_NAME` on a fresh migrated disposable database: exit 0; 339 tests, 338 passed, 0 failed, 1 skipped (real S3).
-- `npm run test:migrations`: 32 / 32 / 31 / 32.
-- `verify-database.js`: valid, after its stale permission counts were corrected.
-- `everest_db` was not touched; it needs `migrate:up` for the two new migrations.
+- `npm test` on a fresh migrated disposable database: exit 0; 339 tests, 338 passed, 0 failed, 1 skipped (real S3).
+- `npm run test:migrations`: 33 / 33 / 32 / 33. `verify-database.js` valid (86 bindings, 14 for teacher).
+- `everest_db` was not touched. It needs `npm run migrate:up` (now 3 behind: the two M11 extra-attempt migrations and this one).
 
 ## Not verified
 
-- Frontend screens for granting.
-- Teachers holding `tests.attempts.grant` in a real role setup. Scope was tested by giving teachers the permission for the length of one subtest.
-- Cookie-session CSRF on the new `POST`; the tests use Bearer tokens.
-- Parallel grant and start under load beyond five concurrent requests.
+- A frontend grant dialog.
+- Cookie-session CSRF on the grant `POST` (tests use Bearer).
+- Load and wider concurrency.
 
 ## Decisions needed
 
-- Should teachers hold `tests.attempts.grant`? The request said both "same roles as regrade" (owner, admin) and "group teachers for their group". Today only owner and admin hold it; the group scope is already enforced if teachers are given it.
-- Accept that a grant hides already revealed `after_submission` keys again until the extra attempts are used?
+None open.
 
 ## Next concrete task
 
-1. Review and merge `feat/m11-extra-attempts`. Then run `npm run migrate:up` on the local `everest_db`.
-2. Answer the teacher-permission question. If yes, add a migration that grants `tests.attempts.grant` to `teacher`.
-3. Then start M12, after the metric definitions are confirmed.
+1. Review and merge this branch, then run `npm run migrate:up` on the local `everest_db`.
+2. Start M12 (learning progress and analytics) after the metric definitions are confirmed.
 
 ## Constraints
 

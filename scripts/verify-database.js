@@ -13,7 +13,7 @@ const expected = {
   functions: 7,
   triggers: 11,
   roles: 4,
-  migrations: 32,
+  migrations: 33,
   identityColumns: 69,
 };
 
@@ -152,8 +152,8 @@ try {
     && remainingUuidColumns.rows[0].table_name === 'sms_deliveries'
     && remainingUuidColumns.rows[0].column_name === 'idempotency_key'
     && authorizationSeeds.rows[0].permissions === 36
-    && authorizationSeeds.rows[0].role_permissions === 85
-    && authorizationSeeds.rows[0].teacher_grants === 13
+    && authorizationSeeds.rows[0].role_permissions === 86
+    && authorizationSeeds.rows[0].teacher_grants === 14
     && authorizationSeeds.rows[0].student_grants === 0
     && permissionConstraintCode === '23514'
     && generatedIdentity.type === 'bigint'
