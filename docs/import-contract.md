@@ -685,3 +685,43 @@ A small synthetic §9.1 package is `tests/fixtures/question-import/sample/`.
 | 11. Content model limits | **open**: inline marks, inline formulas, table headers and merged cells, and matching column headers are mapped with warnings |
 | 12. Grading semantics | **open** (M10/M11): open-answer input settings, tolerance and normalization are reported as not stored; unstated matching rules are kept as `null` and block publication |
 | 13. Ownership | **closed**: the CLI requires an existing active user with `questions.manage` |
+
+---
+
+## 11. Answer-key sidecar `everest.answer-key-import.v1`
+
+A separate JSON file that attaches keys to questions already imported from a package. The package is not changed. CLI: `npm run import:answer-keys` (`docs/import-runbook.md` §6).
+
+```json
+{
+   "schemaVersion": "everest.answer-key-import.v1",
+   "sourcePackage": "<package name>",
+   "bankCode": "<bank code>",
+   "keySource": { "filename": "<key document>", "sha256": "<64 hex>", "pages": 9 },
+   "records": [
+      {
+         "bankCode": "<bank code>",
+         "questionExternalId": "<question externalId>",
+         "status": "proposed",
+         "source": "official_key",
+         "answerDataExternal": { "optionKeys": ["a"] },
+         "explanation": { "blocks": [] }
+      }
+   ]
+}
+```
+
+- **Header:**
+   - only the five fields above are allowed;
+   - `sourcePackage` is a non-empty string;
+   - `bankCode` must name an existing bank and equal `--bank` when given;
+   - `keySource` = `{ filename, sha256 (hex), pages? (positive integer) }`. It is stored with the run, together with the sha256 of the key file itself.
+- **Records:** 1–20 000, the same shape as a package `question_answer_keys` record (§9.4):
+   - `bankCode` must equal the header's;
+   - `questionExternalId` must be unique in the file;
+   - `status` must be `proposed`. `verified` is rejected (verification stays a reviewer action);
+   - `source` is `official_key` or `expert_review`. `ai_inference` is rejected;
+   - `answerDataExternal` is required and uses the package-external form; it is converted by the same `mapAnswerData` as the package importer (§9.7);
+   - `explanation` is optional package-external rich content without images. When it is empty, an explanation already stored on the draft is kept.
+- Any file-level error rejects the whole file, and nothing is written. Per-record outcomes and the matching-rule option are described in the runbook (§6.3, §6.5).
+- A synthetic example is `tests/fixtures/answer-keys/sample-keys.json`.

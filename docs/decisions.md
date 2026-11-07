@@ -1,5 +1,26 @@
 # Decisions
 
+## 2026-11-08 — Answer keys from a sidecar file (`import:answer-keys`)
+
+The owner was away; every open choice below was settled deny-by-default and can be changed.
+
+- **Path.** Keys are written by `replaceAnswerKeyService` (the service behind `PUT /admin/questions/:id/answer-key`), and matching rules by `updateQuestionService` (the `PATCH` draft edit). Both run inside the importer's batch transaction (their `transaction` dependency receives the batch client). The validation, the draft-only rule, the bank-manage rule and the audit rows are the API's own. The importer adds no SQL around them.
+- **Only `proposed`.** The file may carry `proposed` with `official_key` or `expert_review`. `verified`, `unknown` and `ai_inference` reject the whole file. Nothing is verified or published.
+- **No overwrite.** A stored proposed key with other data or another source is `KEY_CONFLICT`: it is kept, and both values go to the report file only. A verified key is never touched. Equality ignores pair and option order. It compares answer data and source, not the explanation.
+- **Explanation.** An empty file explanation keeps an explanation already stored on the draft. A non-empty one replaces it. Image blocks are refused (`EXPLANATION_INVALID`), because a key file cannot carry assets.
+- **Grading rules.** A record whose `answerDataExternal` carries tolerance, unit or normalization is `ANSWER_KEY_INVALID`. Applying it without them would change grading silently.
+- **Run record, no migration.** `question_imports` already fits: `package_sha256` = sha256 of the key file, `schema_version = everest.answer-key-import.v1`, `manifest` holds `keySource` and `sourcePackage`, `counters` the outcomes. The unique `(bank_id, idempotency_key)` gives idempotency. The default key is `answer-keys-<sha256>`, plus `-matching-rules` with the flag, because the flag changes what is written. Stored entries are the non-applied outcomes and failed batches, with messages only (no answer data). These runs are visible in `GET /admin/question-imports`.
+- **Batches.** Up to 100 records per transaction. After a failed batch, later batches are not attempted (as in `import:questions`). Replaying the same key returns the failed run; a retry uses a new key and reports already-set keys as `UNCHANGED`.
+- **Actor.** The same rule as `import:questions` (`loadImportActor`): an active user with `questions.manage` who owns the bank, or an owner/admin.
+- **Matching rules (`--set-matching-rules`, alias `--set-allow-right-reuse-false`).**
+   - Opt-in, and only for draft matching questions whose key is `APPLIED` or `UNCHANGED` in this run.
+   - Each field is decided on its own: `requireAllLeft` `null` → `true` only when the key pairs every left item; `allowRightReuse` `null` → `false` only when the right items are distinct. It is never set to `true`. A stored boolean is never changed.
+   - Reason: the book prints no rule, but every official key covers all left items with distinct right items, so these are the strictest rules consistent with the key.
+   - In practice `RIGHT_REUSE_SKIPPED_NOT_DISTINCT` cannot happen after a successful key write: with the rule `null`, the validator already refuses reused right items (`ANSWER_KEY_INVALID`). The branch is kept and unit-tested.
+   - `stillNull` and `publishableBySettings` count every draft matching question of the bank, not only the keyed ones.
+- **`NO_KEY_FOR_QUESTION`** lists every question of the bank without a record, whatever its status.
+- **Not checked against `everest_db`.** The Tajik bank `nct-tg-2026` is not imported in the local `everest_db` yet, so its stored values (`requireAllLeft: true`, `allowRightReuse: null` expected from the adapter) were not read. The command reads the real stored values per question and does not depend on that expectation.
+
 ## 2026-11-08 — A lesson with a test completes only by its test; staff `passed`
 
 **Bypass found in code.** `saveLessonProgressService` accepted `{ completed: true }` for any lesson without a video, and completed a video lesson at 90% watched. Both worked for a lesson with `test_id`, so a student could finish it without passing the test. No other path writes `lesson_progress` for a student; `completeTestLessons` is the test path.
