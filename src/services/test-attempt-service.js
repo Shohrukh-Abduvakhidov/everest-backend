@@ -9,6 +9,7 @@ import { gradeAnswer, parseStudentAnswer, scorePercent, sumPoints } from '../uti
 import {
    answersRevealed,
    assignmentState,
+   attemptPassed,
    attemptsUsed,
    computeDeadline,
    effectiveMaxAttempts,
@@ -518,7 +519,7 @@ async function readResult(deps, attempt, now) {
       attempt: { ...safeAttempt(attempt), title: attempt.title },
       percent,
       passPercent,
-      passed: passPercent === null ? null : percent >= passPercent,
+      passed: attemptPassed(attempt),
       answerRevealPolicy: policy,
       revealed,
       revealsAt: policy !== 'never' && !revealed ? iso(attempt.closes_at) : null,

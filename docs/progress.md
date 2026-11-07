@@ -4,6 +4,15 @@ Updated: 2026-11-07.
 
 ## Current increment
 
+Fix on `fix/lesson-completion-and-staff-passed` (awaiting review).
+
+## 2026-11-08 — Lesson completion guard and staff `passed` (`fix/lesson-completion-and-staff-passed`)
+
+- The player could complete a lesson with a test (`completed: true`, or 90% watched). It now returns `409 LESSON_COMPLETES_BY_TEST`; watch progress still saves.
+- Staff attempt list and detail carry `passed` from the single `attemptPassed`; OpenAPI updated. No migration.
+- **Tests:** `tests/integration/lesson-test-completion-guard.test.js` (bypass before and after, staff `passed` for set and null `passPercent`, graded, in progress) and a unit test for `attemptPassed`. The `m11-gaps` replay of `completed: true` now expects the rejection.
+- **Verified:** `npm test` with `DB_NAME` on a fresh migrated disposable database: exit 0; 343 tests, 342 passed, 0 failed, 1 skipped. `everest_db` not touched.
+
 Teacher permission `tests.attempts.grant` on `feat/teacher-grant-permission` (awaiting review). Extra attempts are merged (PR #38).
 
 ## 2026-11-08 — Teachers may grant extra attempts (`feat/teacher-grant-permission`)

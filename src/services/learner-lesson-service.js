@@ -374,6 +374,12 @@ async function saveLessonProgressService(userId, courseIdValue, lessonIdValue, b
    const current = await deps.learner.findProgress(actorId, lesson.id)
    const currentRevision = current ? Number(current.revision) : 0
    const hasVideo = Boolean(lesson.video_asset_id)
+   // A lesson with a test completes only through the attempt result (lesson-completion-service).
+   // Watch progress still saves; a stored completion is never removed.
+   const completesByTest = lesson.test_id !== null && lesson.test_id !== undefined
+   if (completesByTest && (body.completed === true || !hasVideo)) {
+      throw new AppError(409, 'LESSON_COMPLETES_BY_TEST', 'This lesson is completed by passing its test')
+   }
    let playbackSeconds = current ? current.playback_seconds : 0
    let watchedSeconds = current ? current.watched_seconds : 0
    let completed = current?.status === 'completed'
@@ -387,7 +393,9 @@ async function saveLessonProgressService(userId, courseIdValue, lessonIdValue, b
          watchedSeconds,
          clamp(parseNonNegativeSeconds(body.watchedSeconds, 'watchedSeconds'), duration),
       )
-      if (duration && watchedSeconds >= Math.ceil(duration * completionRatio)) completed = true
+      if (!completesByTest && duration && watchedSeconds >= Math.ceil(duration * completionRatio)) {
+         completed = true
+      }
    } else {
       if (body.playbackSeconds !== undefined || body.watchedSeconds !== undefined
          || body.completed !== true) {

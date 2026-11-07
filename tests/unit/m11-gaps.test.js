@@ -159,3 +159,15 @@ test('lesson lists expose testId only with module access', async () => {
    const { lessons } = await listLearnerLessonsService('2', '4', '3', { learner })
    assert.deepEqual(lessons.map((item) => item.testId), ['9', null])
 })
+
+test('attemptPassed is the single pass formula', async () => {
+   const { attemptPassed } = await import('../../src/utils/attempt-policy.js')
+   const row = (extra) => ({ status: 'graded', score: '5.00', max_score: '10.00', policy_snapshot: { passPercent: 50 }, ...extra })
+   assert.equal(attemptPassed(row({})), true)
+   assert.equal(attemptPassed(row({ score: '4.99' })), false)
+   assert.equal(attemptPassed(row({ policy_snapshot: { passPercent: null } })), null)
+   assert.equal(attemptPassed(row({ policy_snapshot: {} })), null)
+   assert.equal(attemptPassed(row({ status: 'in_progress', score: null })), null)
+   assert.equal(attemptPassed(row({ status: 'expired' })), true)
+   assert.equal(attemptPassed(row({ max_score: '0.00' })), false)
+})
