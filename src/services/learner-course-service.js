@@ -12,11 +12,23 @@ function iso(value) {
    return value === null ? null : new Date(value).toISOString()
 }
 
+// Rounded down, so 100 means every accessible lesson is completed.
+function courseProgress(row) {
+   const totalLessons = row.total_lessons ?? 0
+   const completedLessons = row.completed_lessons ?? 0
+   return {
+      completedLessons,
+      totalLessons,
+      percent: totalLessons === 0 ? 0 : Math.floor((completedLessons * 100) / totalLessons),
+   }
+}
+
 function safeCardMetadata(row) {
    return {
       subject: row.subject,
       moduleCount: row.module_count,
       lessonCount: row.lesson_count,
+      progress: courseProgress(row),
    }
 }
 
@@ -101,6 +113,7 @@ async function requireModuleAccessService(userId, moduleIdValue, overrides) {
 }
 
 export {
+   courseProgress,
    listLearnerCourseModulesService,
    listLearnerCoursesService,
    requireModuleAccessService,

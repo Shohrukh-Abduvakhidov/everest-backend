@@ -46,7 +46,8 @@ async function findLearnerLesson(userId, courseId, lessonId, db = pool) {
 }
 
 // Safe test facts for a lesson. Questions, keys and grading settings are never selected. The
-// assignments are the learner's own: direct ones and those of their active group memberships.
+// assignments are the learner's own: direct ones and those of their active group memberships,
+// plus, as 'revoked', ones they no longer hold but have attempts on (history only).
 async function findLearnerLessonTest(userId, testId, db = pool) {
    const test = await db.query(
       `SELECT test.id, test.title, test.status, test.duration_seconds, test.max_attempts,
@@ -57,17 +58,26 @@ async function findLearnerLessonTest(userId, testId, db = pool) {
    )
    if (!test.rows[0]) return null
    const assignments = await db.query(
-      `SELECT assignment.id, assignment.opens_at, assignment.closes_at,
+      `SELECT listed.id, listed.opens_at, listed.closes_at,
          CASE
-            WHEN assignment.opens_at > CURRENT_TIMESTAMP THEN 'upcoming'
-            WHEN assignment.closes_at IS NOT NULL AND assignment.closes_at <= CURRENT_TIMESTAMP THEN 'closed'
+            WHEN NOT listed.available THEN 'revoked'
+            WHEN listed.opens_at > CURRENT_TIMESTAMP THEN 'upcoming'
+            WHEN listed.closes_at IS NOT NULL AND listed.closes_at <= CURRENT_TIMESTAMP THEN 'closed'
             ELSE 'open'
          END AS state
-       FROM test_assignments AS assignment
-       WHERE assignment.test_id = $2 AND assignment.status = 'active' AND (
-          assignment.user_id = $1 OR assignment.group_id IN (
-             SELECT group_id FROM group_members WHERE user_id = $1 AND status = 'active'
-          )
+       FROM (
+          SELECT assignment.id, assignment.opens_at, assignment.closes_at,
+             (assignment.status = 'active' AND (
+                assignment.user_id = $1 OR assignment.group_id IN (
+                   SELECT group_id FROM group_members WHERE user_id = $1 AND status = 'active'
+                )
+             )) AS available
+          FROM test_assignments AS assignment
+          WHERE assignment.test_id = $2
+       ) AS listed
+       WHERE listed.available OR EXISTS (
+          SELECT 1 FROM test_attempts AS own_attempt
+          WHERE own_attempt.assignment_id = listed.id AND own_attempt.user_id = $1
        )`,
       [normalizeInternalId(userId), normalizeInternalId(testId)],
    )
@@ -197,6 +207,27 @@ async function writeProgress(progress, db = pool) {
    return updated.rows[0] || null
 }
 
+// Server-side completion of every lesson linked to a test, in the caller's transaction. A row
+// that is already completed is left untouched, so retries change neither completed_at nor
+// revision. Other rows gain completed status and a new revision, so a stale player write
+// gets the usual revision conflict.
+async function completeTestLessons({ userId, testId, completedAt }, client) {
+   const result = await client.query(
+      `INSERT INTO lesson_progress (user_id, lesson_id, status, completed_at, revision, updated_at)
+       SELECT $1, lesson.id, 'completed', $3, 1, $3
+       FROM lessons AS lesson WHERE lesson.test_id = $2
+       ON CONFLICT (user_id, lesson_id) DO UPDATE SET
+         status = 'completed',
+         completed_at = COALESCE(lesson_progress.completed_at, EXCLUDED.completed_at),
+         revision = lesson_progress.revision + 1,
+         updated_at = EXCLUDED.updated_at
+       WHERE lesson_progress.status <> 'completed'
+       RETURNING lesson_id`,
+      [normalizeInternalId(userId), normalizeInternalId(testId), completedAt],
+   )
+   return result.rows.map((row) => row.lesson_id)
+}
+
 async function addFavorite(userId, courseId, db = pool) {
    await db.query(
       `INSERT INTO course_favorites (user_id, course_id) VALUES ($1, $2)
@@ -232,6 +263,7 @@ async function listFavorites(userId, db = pool) {
 
 export {
    addFavorite,
+   completeTestLessons,
    countNotes,
    createNote,
    deleteNote,

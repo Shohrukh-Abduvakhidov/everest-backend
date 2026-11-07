@@ -6,6 +6,7 @@ import { sumPoints, toHundredths } from '../utils/attempt-grading.js'
 import { isFinished } from '../utils/attempt-policy.js'
 import { normalizeInternalId } from '../utils/internal-id.js'
 import { parsePagination, parseText, validateBody, validationError } from './course-service.js'
+import { completeTestLessonsService } from './lesson-completion-service.js'
 import { safeAttempt, safeQuestionBase } from './test-attempt-service.js'
 
 const attemptStatuses = ['in_progress', 'graded', 'expired', 'cancelled']
@@ -19,6 +20,7 @@ function dependencies(overrides = {}) {
       auth: overrides.auth || authRepository,
       transaction: overrides.transaction || withTransaction,
       clock: overrides.clock || (() => new Date()),
+      completeLessons: overrides.completeLessons || completeTestLessonsService,
    }
 }
 
@@ -62,6 +64,8 @@ function safeStaffAttempt(row) {
       ...safeAttempt(row),
       userId: row.user_id,
       userDisplayName: row.user_display_name,
+      // The threshold stored when the attempt started, never the test's current setting.
+      passPercent: row.policy_snapshot?.passPercent ?? null,
    }
 }
 
@@ -147,7 +151,7 @@ function parseOverrides(value) {
 // Manual override of points. The revision row keeps the earlier score; the key makes a retry
 // of the same request change nothing.
 async function regradeAttemptService(userId, testIdValue, attemptIdValue, body, overrides) {
-   const { repository, auth, transaction, clock } = dependencies(overrides)
+   const { repository, auth, transaction, clock, completeLessons } = dependencies(overrides)
    const actorId = normalizeInternalId(userId)
    const testId = parseTestId(testIdValue)
    const attemptId = parseAttemptId(attemptIdValue)
@@ -185,6 +189,8 @@ async function regradeAttemptService(userId, testIdValue, attemptIdValue, body, 
       }
       const newScore = sumPoints([...points.values()])
       await repository.setAttemptScore(attemptId, newScore, now, client)
+      // A regrade that now passes completes the lessons; one that lowers the score undoes nothing.
+      await completeLessons({ attempt: { ...attempt, score: newScore }, completedAt: now }, client)
       await repository.addScoreRevision({
          attemptId,
          revisedBy: actorId,

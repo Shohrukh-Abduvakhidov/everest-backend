@@ -14,6 +14,15 @@ const learnerAudienceSql = `assignment.status = 'active' AND (
    )
 )`
 
+// History: an assignment the learner is no longer assigned (revoked, or a group they left)
+// stays readable only through their own attempts on it. It never allows a start.
+const learnerOwnAttemptSql = `EXISTS (
+   SELECT 1 FROM test_attempts AS own_attempt
+   WHERE own_attempt.assignment_id = assignment.id AND own_attempt.user_id = $1
+)`
+
+const learnerHistoryColumns = `${assignmentColumns}, (${learnerAudienceSql}) AS available`
+
 const attemptColumns = `attempt.id, attempt.test_id, attempt.assignment_id, attempt.user_id,
    attempt.attempt_number, attempt.status, attempt.started_at, attempt.expires_at,
    attempt.submitted_at, attempt.graded_at, attempt.score, attempt.max_score,
@@ -44,11 +53,23 @@ async function findLearnerAssignment(userId, assignmentId, db = pool) {
    return result.rows[0] || null
 }
 
+// Read-only lookup that also finds an assignment the learner only has attempts on.
+async function findLearnerAssignmentHistory(userId, assignmentId, db = pool) {
+   const result = await db.query(
+      `SELECT ${learnerHistoryColumns}
+       FROM test_assignments AS assignment JOIN tests AS test ON test.id = assignment.test_id
+       WHERE assignment.id = $2 AND ((${learnerAudienceSql}) OR ${learnerOwnAttemptSql})`,
+      [normalizeInternalId(userId), normalizeInternalId(assignmentId)],
+   )
+   return result.rows[0] || null
+}
+
 async function listLearnerAssignments(userId, courseId, lessonId, db = pool) {
    const result = await db.query(
-      `SELECT ${assignmentColumns}
+      `SELECT ${learnerHistoryColumns}
        FROM test_assignments AS assignment JOIN tests AS test ON test.id = assignment.test_id
-       WHERE test.course_id = $2 AND test.status = 'published' AND ${learnerAudienceSql}
+       WHERE test.course_id = $2
+         AND ((test.status = 'published' AND ${learnerAudienceSql}) OR ${learnerOwnAttemptSql})
          AND ($3::bigint IS NULL OR EXISTS (
             SELECT 1 FROM lessons AS lesson
             WHERE lesson.id = $3 AND lesson.course_id = test.course_id AND lesson.test_id = test.id
@@ -216,6 +237,19 @@ async function listGradingRows(attemptId, client) {
       [normalizeInternalId(attemptId)],
    )
    return result.rows
+}
+
+// Grading writes a row for every question, so only a non-null answer_data is a real answer.
+async function hasSavedAnswer(attemptId, client) {
+   const result = await client.query(
+      `SELECT EXISTS (
+         SELECT 1 FROM attempt_questions AS item
+         JOIN student_answers AS answer ON answer.attempt_question_id = item.id
+         WHERE item.attempt_id = $1 AND answer.answer_data IS NOT NULL
+       ) AS answered`,
+      [normalizeInternalId(attemptId)],
+   )
+   return result.rows[0].answered
 }
 
 async function findAttemptQuestion(attemptId, attemptQuestionId, client) {
@@ -429,12 +463,14 @@ export {
    findAttempt,
    findAttemptQuestion,
    findLearnerAssignment,
+   findLearnerAssignmentHistory,
    findResultsTest,
    findScoreRevisionByKey,
    findTestAttempt,
    finishAttempt,
    hasActiveEnrollment,
    hasActiveModuleGrant,
+   hasSavedAnswer,
    listAttemptQuestions,
    listAttemptSource,
    listGradingRows,
