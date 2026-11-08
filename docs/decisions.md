@@ -1,5 +1,14 @@
 # Decisions
 
+## 2026-11-08 — Bulk verify and publish (`verify:keys`, `publish:questions`)
+
+- **Same path as the buttons.** Writes go through `verifyAnswerKeyService` and `publishQuestionService` inside the batch transaction. Their checks were moved into shared functions (`answerKeyVerificationBlocker`, `questionPublicationBlocker`), so a dry run uses the same rules without writing. The HTTP endpoints behave as before.
+- **Actor.** An active account with `questions.review`, the permission the admin buttons check (owner/admin by seed). Not `questions.manage`, which teachers also hold.
+- **Verification source** is the key's proposed source. `ai_inference` proposals are skipped (`SKIPPED_SOURCE_NOT_VERIFIABLE`): turning an AI guess into `expert_review` is a human decision.
+- **Run record.** No table and no migration: `runId` is a UUID in audit metadata (`question_bulk_<kind>.started/.completed` on the bank, and every per-question event). Bulk audit is written only when something changes, so a repeated run adds no rows. The full per-question report exists only in the `--report` file.
+- **Errors.** A refusal from the service (an `AppError`, thrown before any write) is a per-question outcome and the batch continues. Any other error rolls the batch back, marks its questions `FAILED` / `BATCH_ROLLED_BACK` and stops the run.
+- **Not included:** setting matching rules. That stays in `import:answer-keys --set-matching-rules` or the admin edit.
+
 ## 2026-11-08 — Answer keys from a sidecar file (`import:answer-keys`)
 
 The owner was away; every open choice below was settled deny-by-default and can be changed.

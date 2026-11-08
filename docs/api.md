@@ -282,7 +282,8 @@ Answer keys and review:
 - `POST /questions/:questionId/answer-key/verify` (review) → `detail`. Body: `{ source: official_key|expert_review }`. Only a `proposed` key can be verified (`409 ANSWER_KEY_NOT_PROPOSED`). AI inference is never a verified source.
 - Any draft `PATCH` returns a `verified` key to `proposed`. If the key no longer matches the items, it is reset to `unknown`. The audit event records `keyChange`.
 - `POST /questions/:questionId/publish` (review) → `draft → published`.
-   - Fails with `409 QUESTION_NOT_PUBLISHABLE`, where `details[0].message` is one of `ANSWER_KEY_NOT_VERIFIED`, `ANSWER_KEY_INVALID` or `ASSET_NOT_READY`.
+   - Fails with `409 QUESTION_NOT_PUBLISHABLE`, where `details[0].message` is one of `ANSWER_KEY_NOT_VERIFIED`, `INTERACTION_SETTINGS_INCOMPLETE`, `ANSWER_KEY_INVALID` or `ASSET_NOT_READY`.
+   - The CLIs `npm run verify:keys` and `npm run publish:questions` (no HTTP endpoint, runbook §7) run the same checks per question.
    - Database triggers enforce the same guards and immutability independently.
 - `POST /questions/:questionId/archive` (review) → `published → archived`, irreversible.
 - Other transitions return `409 INVALID_QUESTION_TRANSITION`.
