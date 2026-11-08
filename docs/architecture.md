@@ -509,6 +509,12 @@ Answer-key sidecar import (2026-11-08):
 - **Plan, then write.** One read-only plan classifies every record (dry run report). Each batch (≤100) re-locks and re-classifies its records under the lock before writing, so a change made since planning is respected.
 - **Runs** are rows in `question_imports` / `question_import_errors` with `schema_version = everest.answer-key-import.v1`. No migration.
 
+Bulk verify and publish (2026-11-08):
+
+- **Entry points.** `scripts/verify-answer-keys.js` and `scripts/publish-questions.js` (shared argument parsing in `scripts/bulk-review-cli.js`, exclude file in `utils/exclude-file.js`) → `question-bulk-review-service`.
+- **Shared checks.** `answerKeyVerificationBlocker` and `questionPublicationBlocker` in `question-bank-service` are used by the admin services and by the bulk planner (dry run). Writes go through `verifyAnswerKeyService` / `publishQuestionService` with the batch client; their new optional `context.auditMetadata` adds `{ origin, runId, keySource }` to the audit event.
+- **No SQL, no migration.** The service uses existing repository methods (`listBankQuestionStates`, `lockQuestion`, `findQuestionParts`). The run id is a UUID kept in audit metadata; there is no run table.
+
 ## 16. Test attempt architecture
 
 `test_assignments` scopes a test to one audience type. `test_attempts` carries attempt number, lifecycle status, start/expiry/pause/submission/grading timestamps, scores, and policy snapshot. `attempt_questions` snapshots order, points, and private grading rules. `student_answers` stores the current answer and optimistic `revision` for autosave. `attempt_score_revisions` provides append-only score history and idempotency.

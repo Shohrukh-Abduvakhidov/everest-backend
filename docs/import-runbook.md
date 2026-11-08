@@ -99,7 +99,7 @@ Common codes:
 ## 5. After the import
 
 - Review the drafts in the admin API.
-- Questions with `answerKey.status = proposed` still need `POST /admin/questions/:id/answer-key/verify` by a reviewer before they can be published.
+- Questions with `answerKey.status = proposed` still need `POST /admin/questions/:id/answer-key/verify` by a reviewer before they can be published (in bulk: section 7).
 - `counters.duplicates.suggested` counts possible duplicates recorded in `question_duplicate_links`. They are suggestions only; nothing was merged.
 
 ## 6. Answer keys from a sidecar file
@@ -179,6 +179,54 @@ npm run import:answer-keys -- --keys import-packages/answer-keys-nct-tg-2026.jso
 | `NO_KEY_FOR_QUESTION` | a question of the bank has no record in the file; it was not changed | none, or add a record |
 
 File errors (nothing is written): `KEY_FILE_SCHEMA_VERSION_UNSUPPORTED`, `KEY_FILE_FIELD_UNKNOWN`, `KEY_FILE_HEADER_INVALID`, `KEY_FILE_BANK_MISMATCH` (`--bank` ≠ `bankCode`), `KEY_FILE_SCHEMA_INVALID`, `KEY_RECORD_BANK_MISMATCH`, `KEY_RECORD_EXTERNAL_ID_INVALID`, `KEY_RECORD_DUPLICATE`, `ANSWER_KEY_STATUS_INVALID`, `ANSWER_KEY_VERIFIED_REJECTED`, `ANSWER_KEY_SOURCE_REJECTED` (`ai_inference` or anything other than `official_key`/`expert_review`), `ANSWER_DATA_REQUIRED`, `EXPLANATION_INVALID`, `QUESTION_BANK_NOT_FOUND`, `QUESTION_BANK_READ_ONLY`.
+
+## 7. After the keys: verify, then publish
+
+Run these after section 6, in this order. Both use the same services and checks as the admin buttons (`POST /admin/questions/:id/answer-key/verify` and `POST /admin/questions/:id/publish`); they write no SQL of their own.
+
+- **Actor:** an active account with `questions.review` (owner/admin), found by phone. A teacher is refused (`BULK_ACTOR_FORBIDDEN`), a blocked account too (`BULK_ACTOR_INACTIVE`).
+- **Scope:** one bank (`--bank`). Other banks are not touched.
+- **Batches:** up to 100 questions per transaction (`--batch-size 1-100`). A database error rolls the batch back (its questions report `FAILED` / `BATCH_ROLLED_BACK`), later batches are not attempted (`counters.notAttempted`) and the exit code is `1`. Re-running is safe.
+- **Output:** stdout prints counts and codes only. `--report` writes `entries`: `{ externalId, questionId, outcome, reason? }` per question. No question text, no key values.
+- **Dry run:** `--dry-run` classifies every question and writes nothing; the codes then mean "would" (`VERIFIED` = would be verified).
+
+### 7.1 Verify keys
+
+Optional: list the questions that need a manual check in a JSON file (`["q-12", "q-40"]` or `{ "externalIds": [...] }`) and pass it as `--exclude`. IDs that are not in the bank are listed in `exclude.notFoundInBank`.
+
+```bash
+npm run verify:keys -- --bank nct-tg-2026 --actor-phone +992XXXXXXXXX --only-source official_key --exclude import-packages/manual-check.json --dry-run --report import-packages/tajik-verify.dry-run.json
+npm run verify:keys -- --bank nct-tg-2026 --actor-phone +992XXXXXXXXX --only-source official_key --exclude import-packages/manual-check.json --report import-packages/tajik-verify.run.json
+```
+
+| Outcome | Meaning |
+|---|---|
+| `VERIFIED` | proposed → verified; the verification source is the key's proposed source |
+| `SKIPPED_EXCLUDED` | listed in `--exclude` |
+| `SKIPPED_NOT_DRAFT` | published or archived |
+| `SKIPPED_NOT_PROPOSED` | no key, `unknown`, or already `verified` (never touched) |
+| `SKIPPED_SOURCE_FILTERED` | the key's source differs from `--only-source` |
+| `SKIPPED_SOURCE_NOT_VERIFIABLE` | an `ai_inference` proposal; a reviewer chooses the source in the admin UI |
+| `FAILED` | refused by the verify check (`reason`, e.g. `ANSWER_KEY_INVALID`), or `BATCH_ROLLED_BACK` |
+
+Audit: one `question.answer_key.verified` event per verified question with `{ origin: 'bulk', runId, keySource, source }`, plus `question_bulk_verify.started` / `.completed` on the bank. A run that verifies nothing writes no audit, so a repeated run adds nothing.
+
+### 7.2 Publish
+
+```bash
+npm run publish:questions -- --bank nct-tg-2026 --actor-phone +992XXXXXXXXX --dry-run --report import-packages/tajik-publish.dry-run.json
+npm run publish:questions -- --bank nct-tg-2026 --actor-phone +992XXXXXXXXX --report import-packages/tajik-publish.run.json
+```
+
+| Outcome | Meaning |
+|---|---|
+| `PUBLISHED` | draft → published |
+| `SKIPPED_NOT_DRAFT` | already published or archived; not touched |
+| `SKIPPED_KEY_NOT_VERIFIED` | the key is not verified yet (run 7.1, or verify by hand) |
+| `NOT_PUBLISHABLE` | the publish check refused it; `reason` is `INTERACTION_SETTINGS_INCOMPLETE` (matching without `requireAllLeft`/`allowRightReuse`), `ANSWER_KEY_INVALID` or `ASSET_NOT_READY`. Counted in `counters.reasons`. |
+| `FAILED` | `BATCH_ROLLED_BACK` or another refusal |
+
+For `NOT_PUBLISHABLE` matching questions: set the rules (section 6.3 or the admin edit). That returns a verified key to proposed, so run 7.1 and 7.2 again.
 
 ## HTTP upload
 

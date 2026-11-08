@@ -1,10 +1,18 @@
 # EVEREST backend progress
 
-Updated: 2026-11-07.
+Updated: 2026-11-08.
 
 ## Current increment
 
-Answer-key sidecar import on `feat/import-answer-keys` (awaiting review). The lesson-completion fix is merged (PR #40).
+Bulk key verification and publication on `feat/bulk-verify-publish` (awaiting review). The answer-key sidecar import is merged (PR #41).
+
+## 2026-11-08 — Bulk verify and publish (`feat/bulk-verify-publish`)
+
+- **CLI:** `npm run verify:keys -- --bank <code> --actor-phone +992... [--dry-run] [--only-source] [--exclude <file>] [--report] [--batch-size]` and `npm run publish:questions -- --bank <code> --actor-phone +992... [--dry-run] [--report] [--batch-size]`. Runbook §7.
+- **New:** `src/services/question-bulk-review-service.js`, `src/utils/exclude-file.js`, `scripts/verify-answer-keys.js`, `scripts/publish-questions.js`, `scripts/bulk-review-cli.js`. `question-bank-service` exports the shared checks and accepts optional audit metadata. No migration, no new SQL.
+- **Tests:** `tests/integration/question-bulk-review.test.js` (6 subtests: actor refusal, dry run, verify with exclude / verified kept / other bank untouched / audit, repeat without audit, publish with matching `INTERACTION_SETTINGS_INCOMPLETE` and repeat, CLI output) and `tests/unit/question-bulk-review.test.js` (5 tests, including batch rollback).
+- **Checked:** `npm test` on a fresh migrated disposable database: exit 0; 371 tests, 371 passed, 0 failed, 0 skipped.
+- **Not run:** against `nct-tg-2026` in `everest_db`.
 
 ## 2026-11-08 — Answer keys from a sidecar file (`feat/import-answer-keys`)
 
