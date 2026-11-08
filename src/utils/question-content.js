@@ -92,7 +92,9 @@ function parseBlock(block, field, assetIds) {
          return { type: 'table', rows }
       }
       case 'image': {
-         requireKeys(block, field, ['type', 'assetId', 'alt'])
+         // url/expiresAt are response-only (presigned); a client may send a block back as it
+         // received it, and they are dropped here so they are never stored.
+         requireKeys(block, field, ['type', 'assetId', 'alt', 'url', 'expiresAt'])
          let assetId
          try {
             assetId = normalizeInternalId(block.assetId)

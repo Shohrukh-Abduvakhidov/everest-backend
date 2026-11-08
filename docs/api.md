@@ -71,7 +71,7 @@ Time is decided by the server. Every attempt response has `serverNow`; show the 
 | `GET /courses/:courseId/test-assignments?lessonId=` | learner | My assignments with `state` and `attempts` |
 | `POST /tests/assignments/:assignmentId/start` | learner | `201` new attempt, `200` resumed (`resumed: true`) |
 | `GET /tests/assignments/:assignmentId/result` | learner | Result chosen by `resultPolicy`, all attempts, remaining attempts |
-| `GET /tests/attempts/:attemptId` | owner | Attempt with questions, no keys; `questions: []` once finished |
+| `GET /tests/attempts/:attemptId` | owner | Attempt with questions, no keys; `questions: []` once finished. Image blocks carry presigned `url`/`expiresAt` (Question bank APIs, rich content) |
 | `PUT /tests/attempts/:attemptId/answers/:attemptQuestionId` | owner | Autosave `{ answer, revision }` |
 | `POST /tests/attempts/:attemptId/submit` | owner | Grades and returns the result; repeating returns the same result |
 | `GET /tests/attempts/:attemptId/result` | owner | Result; details follow the reveal policy |
@@ -216,9 +216,22 @@ Rich content is `{ blocks: [...] }`, with at most 100 blocks and 64 KB of JSON. 
 - `formula{latex, display?}`
 - `chemistry{formula}`
 - `table{rows: string[][]}`
-- `image{assetId, alt?}`
+- `image{assetId, alt?}` (responses add `url`/`expiresAt`, below)
 
 An image must be a `ready` PNG/JPEG asset that the actor uploaded, that is already used in the same bank, or, for administrators, any such asset. Otherwise the request returns `422 QUESTION_ASSET_NOT_USABLE`. `assetIds` in the detail is kept in sync automatically.
+
+**Image URLs in responses.** Question responses add a short-lived presigned URL to every image block that can be shown:
+
+```json
+{ "type": "image", "assetId": "<id>", "alt": "<alt>", "url": "<presigned url>", "expiresAt": "<ISO>" }
+```
+
+- `url` and `expiresAt` are both absent when no link can be issued: the asset is not `ready`, it is not linked to this question, or storage is not configured or fails. The request still succeeds; show a placeholder.
+- `alt` is present only when it was stored.
+- Lifetime: 5 minutes, the same as lesson materials. Re-read the question or attempt for fresh links. The URL host is `S3_PUBLIC_ENDPOINT`.
+- Never stored. Content sent back with `url`/`expiresAt` is accepted, and both fields are dropped before saving.
+- Responses with URLs: every admin question detail (`GET /admin/questions/:questionId`, create, `PATCH`, copy, `PUT …/answer-key`, verify, publish, archive), covering the stem, options, matching items and the key explanation. Learner: `POST /tests/assignments/:assignmentId/start`, `GET /tests/attempts/:attemptId`, `POST /tests/attempts/:attemptId/submit`, `GET /tests/attempts/:attemptId/result` (stem, options, matching items and, when revealed, the explanation).
+- Not yet: `GET /admin/question-banks/:bankId/questions` (summaries) and the staff attempt view `GET /admin/tests/:testId/attempts/:attemptId`.
 
 `detail` = `{ id, bankId, subjectId, externalId, questionType, languageCode, difficulty, difficultySource, status, content, interactionSettings, sourceMetadata, sourceQuestionId, importId, createdBy, createdAt, updatedAt, options: [{ key, position, sourceLabel, content }], matching: { left, right }|null, topicIds, assetIds, keyStatus, answerKey? }`. `answerKey` = `{ status, source, answerData, explanation, verifiedBy, verifiedAt }` and is present only for actors who can manage the bank. Read-only staff see `keyStatus` only.
 

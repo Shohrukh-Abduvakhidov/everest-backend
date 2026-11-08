@@ -21,6 +21,7 @@ import {
 import { normalizeInternalId } from '../utils/internal-id.js'
 import { parseCourseId, parseUserId, validateBody, validationError } from './course-service.js'
 import { completeTestLessonsService } from './lesson-completion-service.js'
+import { issueQuestionImageUrls, withImageUrls } from './question-image-service.js'
 
 function shuffled(values) {
    const result = [...values]
@@ -41,6 +42,8 @@ function dependencies(overrides = {}) {
       clock: overrides.clock || (() => new Date()),
       shuffle: overrides.shuffle || shuffled,
       completeLessons: overrides.completeLessons || completeTestLessonsService,
+      // storage / clock / questionImages for the image URLs of question content.
+      images: overrides,
    }
 }
 
@@ -373,6 +376,27 @@ async function createNewAttempt(deps, client, actorId, assignment, attempts, now
    return attemptId
 }
 
+// Image URLs for the questions of one attempt the caller already loaded for its owner, so only
+// files of this attempt's questions are signed. One query for the whole attempt.
+async function withAttemptImages(deps, rows, questions) {
+   const urls = await issueQuestionImageUrls(rows.map((row) => row.question_id), deps.images)
+   if (!urls.size) return questions
+   return questions.map((question, index) => {
+      const questionId = rows[index].question_id
+      const sign = (content) => withImageUrls(content, questionId, urls)
+      const items = (list) => list.map((item) => ({ ...item, content: sign(item.content) }))
+      return {
+         ...question,
+         content: sign(question.content),
+         options: items(question.options),
+         matching: question.matching
+            ? { left: items(question.matching.left), right: items(question.matching.right) }
+            : null,
+         ...(Object.hasOwn(question, 'explanation') ? { explanation: sign(question.explanation) } : {}),
+      }
+   })
+}
+
 async function readAttemptView(deps, actorId, attemptId) {
    const attempt = await deps.repository.findAttempt(actorId, attemptId)
    const questions = attempt.status === 'in_progress'
@@ -380,7 +404,7 @@ async function readAttemptView(deps, actorId, attemptId) {
       : []
    return {
       attempt: { ...safeAttempt(attempt), title: attempt.title },
-      questions: questions.map(safeLearnerQuestion),
+      questions: await withAttemptImages(deps, questions, questions.map(safeLearnerQuestion)),
       serverNow: deps.clock().toISOString(),
    }
 }
@@ -524,7 +548,7 @@ async function readResult(deps, attempt, now) {
       revealed,
       revealsAt: policy !== 'never' && !revealed ? iso(attempt.closes_at) : null,
       remainingAttempts: remaining,
-      questions: questions.map(safeReviewQuestion),
+      questions: await withAttemptImages(deps, questions, questions.map(safeReviewQuestion)),
       serverNow: now.toISOString(),
    }
 }
