@@ -259,6 +259,7 @@ This roadmap orders implementation; it does not replace the [current architectur
    - Answer keys (unknown → proposed → reviewer-verified), publication, archive and copy.
    - Migration `20261031010000000_add-question-bank-permissions.js`.
 - **Verified:** `tests/unit/question-content.test.js` and `tests/integration/question-bank.test.js` (9 subtests). `npm test`: 189 tests, 188 passed, 1 skipped. Migration cycle: 23/23/22/23.
+- **Follow-up (awaiting review, `feat/question-image-urls`):** presigned `url`/`expiresAt` on image blocks in admin question detail and learner attempt/result responses. No migration. `tests/integration/question-image-urls.test.js` passes on a disposable database (`npm test`: 376 passed). Not checked against real MinIO/S3.
 - **Goal:** Manage reviewed, publishable assessment content.
 - **Dependencies:** M02F, M07-A asset contracts.
 - **Deliverables:** Subjects, sections, topics/translations, banks, questions/options/matching, answer keys, topics/assets/sources, review, and publication.

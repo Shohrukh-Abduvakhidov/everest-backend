@@ -515,6 +515,10 @@ Bulk verify and publish (2026-11-08):
 - **Shared checks.** `answerKeyVerificationBlocker` and `questionPublicationBlocker` in `question-bank-service` are used by the admin services and by the bulk planner (dry run). Writes go through `verifyAnswerKeyService` / `publishQuestionService` with the batch client; their new optional `context.auditMetadata` adds `{ origin, runId, keySource }` to the audit event.
 - **No SQL, no migration.** The service uses existing repository methods (`listBankQuestionStates`, `lockQuestion`, `findQuestionParts`). The run id is a UUID kept in audit metadata; there is no run table.
 
+Question image URLs (2026-11-08):
+
+- `question-image-service` (`issueQuestionImageUrls`, `withImageUrls`) is shared by `question-bank-service` (`readQuestion`, `getQuestionService`) and `test-attempt-service` (attempt view and result). It reads `question-bank-repository.listQuestionImageAssets` once per response and signs with the storage provider's `presignDownload`, like the lesson URLs. Stored content is never changed.
+
 ## 16. Test attempt architecture
 
 `test_assignments` scopes a test to one audience type. `test_attempts` carries attempt number, lifecycle status, start/expiry/pause/submission/grading timestamps, scores, and policy snapshot. `attempt_questions` snapshots order, points, and private grading rules. `student_answers` stores the current answer and optimistic `revision` for autosave. `attempt_score_revisions` provides append-only score history and idempotency.

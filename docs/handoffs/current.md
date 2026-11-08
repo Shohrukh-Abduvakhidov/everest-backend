@@ -1,9 +1,9 @@
 ---
 project: EVEREST Backend
-current_milestone: M09 follow-up (bulk verify and publish)
+current_milestone: M08/M11 follow-up (question image URLs)
 status: awaiting_review
-branch: feat/bulk-verify-publish
-base_commit: 359d98d
+branch: feat/question-image-urls
+base_commit: d9c0a69
 updated_at: 2026-11-08
 ---
 
@@ -11,28 +11,29 @@ updated_at: 2026-11-08
 
 ## Done
 
-- `npm run verify:keys` moves `proposed` keys of one bank's drafts to `verified` through `verifyAnswerKeyService` (the admin "verify" button), with `--exclude`, `--only-source`, `--dry-run`, `--report`, `--batch-size`.
-- `npm run publish:questions` publishes verified drafts through `publishQuestionService`; refused questions are reported with a reason code (`INTERACTION_SETTINGS_INCOMPLETE`, …) and stay draft.
-- The verify/publish checks are shared functions in `question-bank-service` (`answerKeyVerificationBlocker`, `questionPublicationBlocker`); the HTTP endpoints behave as before.
-- Actor: active, `questions.review` (owner/admin). Audit carries `{ origin: 'bulk', runId, keySource }`; nothing is written when nothing changes.
-- No migration, no new SQL. Docs: runbook §7, decisions, api (also fixed the missing `INTERACTION_SETTINGS_INCOMPLETE` in the publish reasons), architecture, progress, ROADMAP.
+- Image blocks in question responses carry `url` and `expiresAt` (presigned, 5 minutes) when the asset is ready, PNG/JPEG and linked to the same question: `{ "type": "image", "assetId", "alt", "url", "expiresAt" }`. Both fields are absent when no link can be issued.
+- Admin: every question detail response (get, create, PATCH, copy, answer key, verify, publish, archive), covering the stem, options, matching items and the key explanation.
+- Learner: start, get attempt, submit, result (stem, options, matching and the revealed explanation), only for the learner's own attempt.
+- One repository query per response (`listQuestionImageAssets`). Storage missing or failing leaves blocks without URLs, and the request succeeds.
+- Nothing is stored. The input parser accepts and drops `url`/`expiresAt` on image blocks.
+- Docs: api (Question bank APIs, rich content), OpenAPI `ImageBlock`, decisions, architecture, progress, ROADMAP.
 
 ## Verification (2026-11-08)
 
-- `npm test` on a fresh migrated disposable database: exit 0; 371 tests, 371 passed, 0 failed, 0 skipped.
-- New: `tests/integration/question-bulk-review.test.js` (6 subtests), `tests/unit/question-bulk-review.test.js` (5 tests).
+- `npm test` on a fresh migrated disposable database: exit 0; 376 tests, 376 passed, 0 failed, 0 skipped.
+- New: `tests/integration/question-image-urls.test.js` (4 subtests).
 - `everest_db` was not touched.
 
 ## Not verified
 
-- The real run on `nct-tg-2026` (972 drafts). Run time not measured.
-- How many Tajik matching questions will be `NOT_PUBLISHABLE` until their rules are set.
+- Real MinIO/S3 signing for question images and the `S3_PUBLIC_ENDPOINT` host (tests use the memory storage provider; the provider code is the one used for lessons).
+- Bank question lists (`GET /admin/question-banks/:bankId/questions`) and the staff attempt view do not sign images yet.
 
 ## Next concrete task
 
-1. Review and merge `feat/bulk-verify-publish`.
-2. Locally: `verify:keys --dry-run`, read the report, prepare the `--exclude` file, real run; then `publish:questions --dry-run` and the real run (runbook §7).
-3. Resolve `NOT_PUBLISHABLE` matching questions (rules), then verify and publish them again.
+1. Review and merge `feat/question-image-urls`.
+2. Locally with MinIO: open an imported Tajik question with an image in the admin and in an attempt, and check that the URL loads.
+3. Decide whether bank lists and the staff attempt view need URLs.
 
 ## Constraints
 

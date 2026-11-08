@@ -1,5 +1,14 @@
 # Decisions
 
+## 2026-11-08 — Presigned URLs for question images
+
+- **Response only.** `url`/`expiresAt` are added to a copy of the content when a response is built and are never written. On input the parser accepts and drops them, so a client can send back what it received.
+- **Who may get a link.** The service that builds the response has already checked access: the admin read scope of the bank, or the learner's own attempt (`findAttempt(actorId, …)`). On top of that, an asset is signed only when it is `ready`, PNG/JPEG and linked to the same question in `question_assets`. An image block naming any other asset gets no URL.
+- **One query per response.** `listQuestionImageAssets(questionIds)` reads every linked image of the response at once. Signing is local (no storage call).
+- **Failure is not an error.** Missing storage configuration or a signing error leaves the block without `url`/`expiresAt`; the request still succeeds.
+- **Lifetime** 5 minutes, the same as lesson materials. `S3_PUBLIC_ENDPOINT` is applied by the storage provider, as for lessons.
+- **Not included:** bank question lists and the staff attempt view.
+
 ## 2026-11-08 — Bulk verify and publish (`verify:keys`, `publish:questions`)
 
 - **Same path as the buttons.** Writes go through `verifyAnswerKeyService` and `publishQuestionService` inside the batch transaction. Their checks were moved into shared functions (`answerKeyVerificationBlocker`, `questionPublicationBlocker`), so a dry run uses the same rules without writing. The HTTP endpoints behave as before.

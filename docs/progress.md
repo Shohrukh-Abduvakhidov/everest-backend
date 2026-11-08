@@ -4,7 +4,15 @@ Updated: 2026-11-08.
 
 ## Current increment
 
-Bulk key verification and publication on `feat/bulk-verify-publish` (awaiting review). The answer-key sidecar import is merged (PR #41).
+Presigned URLs for question images on `feat/question-image-urls` (awaiting review). Bulk verify/publish is merged (PR #42).
+
+## 2026-11-08 — Question image URLs (`feat/question-image-urls`)
+
+- Image blocks in admin question detail and in learner attempt/result responses carry `url` and `expiresAt` (5 minutes) when the asset is ready and linked to the question. Nothing is stored; no migration.
+- **New:** `src/services/question-image-service.js`, repository method `listQuestionImageAssets`, OpenAPI `ImageBlock`. Input parser accepts and drops `url`/`expiresAt` on image blocks.
+- **Tests:** `tests/integration/question-image-urls.test.js` (4 subtests: admin signing of stem/option/explanation and nothing stored; unready, unlinked foreign asset and failing storage give no URL; content sent back with URL is stored without it; learner own attempt and result signed, another learner refused).
+- **Checked:** `npm test` on a fresh migrated disposable database: exit 0; 376 tests, 376 passed, 0 failed, 0 skipped.
+- **Not checked:** real MinIO/S3 signing with `S3_PUBLIC_ENDPOINT` for question images (the memory storage provider was used).
 
 ## 2026-11-08 — Bulk verify and publish (`feat/bulk-verify-publish`)
 
