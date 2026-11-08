@@ -680,7 +680,37 @@ async function replaceAnswerKeyService(userId, questionIdValue, body, overrides)
    })
 }
 
-async function verifyAnswerKeyService(userId, questionIdValue, body, overrides) {
+// Shared by POST /admin/questions/:id/answer-key/verify and the bulk CLI: the reason a
+// draft's key cannot be verified, or null. Reads nothing; the caller holds the lock.
+function answerKeyVerificationBlocker(question, parts) {
+   if (question.status !== 'draft') return 'QUESTION_IMMUTABLE'
+   const key = parts.answerKey
+   if (!key || key.status !== 'proposed') return 'ANSWER_KEY_NOT_PROPOSED'
+   if (!isValidAnswerData(key.answer_data, keyShape(question, parts))) return 'ANSWER_KEY_INVALID'
+   return null
+}
+
+// Shared by POST /admin/questions/:id/publish and the bulk CLI: the reason a draft cannot be
+// published, or null. It only reads.
+async function questionPublicationBlocker(repository, client, actorId, question, parts) {
+   if (parts.answerKey?.status !== 'verified') return 'ANSWER_KEY_NOT_VERIFIED'
+   if (!hasCompleteInteractionSettings(question.question_type, question.interaction_settings)) {
+      return 'INTERACTION_SETTINGS_INCOMPLETE'
+   }
+   if (!isValidAnswerData(parts.answerKey.answer_data, keyShape(question, parts))) return 'ANSWER_KEY_INVALID'
+   if (parts.assetIds.length && (await repository.findUsableImageAssets(
+      actorId,
+      question.bank_id,
+      parts.assetIds,
+      client,
+   )).length !== parts.assetIds.length) {
+      return 'ASSET_NOT_READY'
+   }
+   return null
+}
+
+// `context.auditMetadata` is added to the audit event (the bulk CLI records its run there).
+async function verifyAnswerKeyService(userId, questionIdValue, body, overrides, context = {}) {
    const { repository, auth, transaction } = dependencies(overrides)
    const actorId = normalizeInternalId(userId)
    const questionId = parseQuestionId(questionIdValue)
@@ -697,13 +727,14 @@ async function verifyAnswerKeyService(userId, questionIdValue, body, overrides) 
       parseAnswerData(key.answer_data, keyShape(question, parts))
       await repository.verifyAnswerKey(questionId, body.source, actorId, client)
       await audit(auth, client, actorId, 'question.answer_key.verified', 'question', questionId, {
+         ...context.auditMetadata,
          source: body.source,
       })
       return readQuestion(repository, client, questionId, true)
    })
 }
 
-async function publishQuestionService(userId, questionIdValue, overrides) {
+async function publishQuestionService(userId, questionIdValue, overrides, context = {}) {
    const { repository, auth, transaction } = dependencies(overrides)
    const actorId = normalizeInternalId(userId)
    const questionId = parseQuestionId(questionIdValue)
@@ -713,26 +744,14 @@ async function publishQuestionService(userId, questionIdValue, overrides) {
          throw new AppError(409, 'INVALID_QUESTION_TRANSITION', 'Only draft questions can be published')
       }
       const parts = await repository.findQuestionParts(questionId, client)
-      const notReady = (reason) => new AppError(409, 'QUESTION_NOT_PUBLISHABLE', 'Question is not ready for publication', [
-         { field: 'question', message: reason },
-      ])
-      if (parts.answerKey?.status !== 'verified') throw notReady('ANSWER_KEY_NOT_VERIFIED')
-      if (!hasCompleteInteractionSettings(question.question_type, question.interaction_settings)) {
-         throw notReady('INTERACTION_SETTINGS_INCOMPLETE')
-      }
-      if (!isValidAnswerData(parts.answerKey.answer_data, keyShape(question, parts))) {
-         throw notReady('ANSWER_KEY_INVALID')
-      }
-      if (parts.assetIds.length && (await repository.findUsableImageAssets(
-         actorId,
-         question.bank_id,
-         parts.assetIds,
-         client,
-      )).length !== parts.assetIds.length) {
-         throw notReady('ASSET_NOT_READY')
+      const reason = await questionPublicationBlocker(repository, client, actorId, question, parts)
+      if (reason) {
+         throw new AppError(409, 'QUESTION_NOT_PUBLISHABLE', 'Question is not ready for publication', [
+            { field: 'question', message: reason },
+         ])
       }
       await repository.setQuestionStatus(questionId, 'published', client)
-      await audit(auth, client, actorId, 'question.published', 'question', questionId, {})
+      await audit(auth, client, actorId, 'question.published', 'question', questionId, { ...context.auditMetadata })
       return readQuestion(repository, client, questionId, true)
    })
 }
@@ -754,10 +773,12 @@ async function archiveQuestionService(userId, questionIdValue, overrides) {
 
 // Shared with the M09 importer so imported questions go through the same validation path.
 export {
+   answerKeyVerificationBlocker,
    canManage,
    keyShape,
    mapConstraintError,
    parseQuestionBody,
+   questionPublicationBlocker,
    reconcileAnswerKey,
 }
 

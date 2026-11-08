@@ -20,6 +20,8 @@
     "video:faststart": "node scripts/remux-faststart.js",
     "import:questions": "node scripts/import-question-package.js",
     "import:answer-keys": "node scripts/import-answer-keys.js",
+    "verify:keys": "node scripts/verify-answer-keys.js",
+    "publish:questions": "node scripts/publish-questions.js",
     "worker:imports": "node scripts/question-import-worker.js",
     "worker:attempts": "node scripts/attempt-sweep-worker.js",
     "test:sources": "node scripts/verify-migration-sources.js",
