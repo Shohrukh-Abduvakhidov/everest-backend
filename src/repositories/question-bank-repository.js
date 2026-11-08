@@ -322,6 +322,23 @@ async function findUsableImageAssets(userId, bankId, assetIds, client) {
    return result.rows.map((row) => row.id)
 }
 
+// Ready PNG/JPEG assets linked to the given questions (question_assets), in one query. Only
+// linked assets are returned, so a content block can never reach another question's file.
+async function listQuestionImageAssets(questionIds, db = pool) {
+   const ids = [...new Set(questionIds.map((id) => normalizeInternalId(id)))]
+   if (!ids.length) return []
+   const result = await db.query(
+      `SELECT link.question_id, asset.id AS asset_id, asset.storage_key, asset.mime_type
+       FROM question_assets AS link
+       JOIN assets AS asset ON asset.id = link.asset_id
+       WHERE link.question_id = ANY($1::bigint[])
+         AND asset.status = 'ready'
+         AND asset.mime_type IN ('image/png', 'image/jpeg')`,
+      [ids],
+   )
+   return result.rows
+}
+
 async function upsertAnswerKey(questionId, key, client) {
    await client.query(
       `INSERT INTO question_answer_keys
@@ -391,6 +408,7 @@ export {
    findReadableBank,
    findUsableImageAssets,
    isQuestionReferenced,
+   listQuestionImageAssets,
    listQuestions,
    listReadableBanks,
    lockAnswerKey,

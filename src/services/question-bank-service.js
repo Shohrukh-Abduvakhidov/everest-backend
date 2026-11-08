@@ -16,6 +16,7 @@ import {
    questionTypes,
 } from '../utils/question-content.js'
 import { parsePagination, validateBody, validationError } from './course-service.js'
+import { issueQuestionImageUrls, withImageUrls } from './question-image-service.js'
 
 const languages = ['tg', 'ru', 'en']
 const bankCodePattern = /^[a-z0-9][a-z0-9_-]{0,99}$/
@@ -408,10 +409,31 @@ async function reconcileAnswerKey(repository, client, questionId) {
    return keyChange
 }
 
-async function readQuestion(repository, client, questionId, includeKey) {
+// Adds url/expiresAt to every image block of a safe question (stem, options, matching items
+// and, when present, the key explanation). Stored content is never changed.
+async function withQuestionImages(question, overrides, db) {
+   const urls = await issueQuestionImageUrls([question.id], overrides, db)
+   if (!urls.size) return question
+   const sign = (content) => withImageUrls(content, question.id, urls)
+   const items = (list) => list.map((item) => ({ ...item, content: sign(item.content) }))
+   return {
+      ...question,
+      content: sign(question.content),
+      options: items(question.options),
+      matching: question.matching
+         ? { left: items(question.matching.left), right: items(question.matching.right) }
+         : null,
+      ...(question.answerKey
+         ? { answerKey: { ...question.answerKey, explanation: sign(question.answerKey.explanation) } }
+         : {}),
+   }
+}
+
+async function readQuestion(repository, client, questionId, includeKey, overrides) {
    const row = await repository.findQuestion(questionId, client)
    const parts = await repository.findQuestionParts(questionId, client)
-   return safeQuestion(row, parts, includeKey)
+   // Read with the same client: links written in this transaction are visible.
+   return withQuestionImages(safeQuestion(row, parts, includeKey), overrides, client)
 }
 
 async function listQuestionBanksService(userId, query, overrides) {
@@ -498,7 +520,8 @@ async function getQuestionService(userId, questionIdValue, overrides) {
    if (!row) throw questionNotFound()
    const bank = await repository.findReadableBank(actorId, row.bank_id)
    if (!bank) throw questionNotFound()
-   return safeQuestion(row, await repository.findQuestionParts(questionId), canManage(bank, actorId))
+   const question = safeQuestion(row, await repository.findQuestionParts(questionId), canManage(bank, actorId))
+   return withQuestionImages(question, overrides)
 }
 
 async function createQuestionService(userId, bankIdValue, body, overrides) {
@@ -531,7 +554,7 @@ async function createQuestionService(userId, bankIdValue, body, overrides) {
             bankId,
             questionType: body.questionType,
          })
-         return readQuestion(repository, client, questionId, true)
+         return readQuestion(repository, client, questionId, true, overrides)
       })
    } catch (error) {
       throw mapConstraintError(error)
@@ -559,7 +582,7 @@ async function updateQuestionService(userId, questionIdValue, body, overrides) {
             fields: Object.keys(body),
             keyChange,
          })
-         return readQuestion(repository, client, questionId, true)
+         return readQuestion(repository, client, questionId, true, overrides)
       })
    } catch (error) {
       throw mapConstraintError(error)
@@ -632,7 +655,7 @@ async function copyQuestionService(userId, questionIdValue, overrides) {
       await audit(auth, client, actorId, 'question.copied', 'question', copyId, {
          sourceQuestionId: questionId,
       })
-      return readQuestion(repository, client, copyId, true)
+      return readQuestion(repository, client, copyId, true, overrides)
    })
 }
 
@@ -676,7 +699,7 @@ async function replaceAnswerKeyService(userId, questionIdValue, body, overrides)
          status,
          source: answerData ? body.source : 'none',
       })
-      return readQuestion(repository, client, questionId, true)
+      return readQuestion(repository, client, questionId, true, overrides)
    })
 }
 
@@ -730,7 +753,7 @@ async function verifyAnswerKeyService(userId, questionIdValue, body, overrides, 
          ...context.auditMetadata,
          source: body.source,
       })
-      return readQuestion(repository, client, questionId, true)
+      return readQuestion(repository, client, questionId, true, overrides)
    })
 }
 
@@ -752,7 +775,7 @@ async function publishQuestionService(userId, questionIdValue, overrides, contex
       }
       await repository.setQuestionStatus(questionId, 'published', client)
       await audit(auth, client, actorId, 'question.published', 'question', questionId, { ...context.auditMetadata })
-      return readQuestion(repository, client, questionId, true)
+      return readQuestion(repository, client, questionId, true, overrides)
    })
 }
 
@@ -767,7 +790,7 @@ async function archiveQuestionService(userId, questionIdValue, overrides) {
       }
       await repository.setQuestionStatus(questionId, 'archived', client)
       await audit(auth, client, actorId, 'question.archived', 'question', questionId, {})
-      return readQuestion(repository, client, questionId, true)
+      return readQuestion(repository, client, questionId, true, overrides)
    })
 }
 

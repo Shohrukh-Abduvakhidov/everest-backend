@@ -77,8 +77,15 @@ const schemas = {
       additionalProperties: body({ title: str(), description: nullable(str()) }),
    },
    RichContent: obj({
-      blocks: arr(obj({ type: str() }, ['type']), { maxItems: 200 }),
+      blocks: arr({ anyOf: [ref('ImageBlock'), obj({ type: str() }, ['type'])] }, { maxItems: 200 }),
    }, ['blocks'], { description: 'Content blocks; the allowed block types depend on the resource (see docs/api.md).' }),
+   ImageBlock: obj({
+      type: enumOf(['image']),
+      assetId: id(),
+      alt: str(),
+      url: str({ description: 'Response only: presigned download URL (5 minutes). Absent when the image is not ready or storage is unavailable. Never stored; ignored on input.' }),
+      expiresAt: dt(),
+   }, ['type', 'assetId'], { description: 'Image block. In question responses (admin question detail, learner attempt and result) url/expiresAt are added when a link can be issued.' }),
    AuthResult: obj({
       status: enumOf(['authenticated', 'refreshed']),
       expiresAt: dt(),
