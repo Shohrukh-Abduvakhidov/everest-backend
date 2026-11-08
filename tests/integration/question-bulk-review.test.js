@@ -9,7 +9,10 @@ import test from 'node:test'
 import pg from 'pg'
 
 import env from '../../src/configs/env.js'
+import { dryRunAnswerKeyImportService } from '../../src/services/answer-key-import-service.js'
 import {
+   createQuestionBankService,
+   createQuestionService,
    publishQuestionService,
    replaceAnswerKeyService,
    verifyAnswerKeyService,
@@ -19,6 +22,7 @@ import {
    bulkVerifyAnswerKeysService,
 } from '../../src/services/question-bulk-review-service.js'
 import { runQuestionImportService } from '../../src/services/question-import-service.js'
+import { parseAnswerKeyFileBuffer } from '../../src/utils/answer-key-file.js'
 
 // Synthetic questions only. A nested M09 package creates the draft banks; proposed keys are set
 // through the admin service, then the bulk verify/publish services and CLIs run on them.
@@ -117,6 +121,7 @@ async function cleanup(client) {
    await client.query(`DELETE FROM question_import_errors WHERE import_id IN (${runs})`, [userIds])
    await client.query('DELETE FROM question_imports WHERE initiated_by = ANY($1::bigint[])', [userIds])
    await client.query('DELETE FROM question_banks WHERE owner_id = ANY($1::bigint[])', [userIds])
+   await client.query('DELETE FROM assets WHERE uploaded_by = ANY($1::bigint[])', [userIds])
    await client.query('DELETE FROM subject_translations WHERE subject_id IN (SELECT id FROM subjects WHERE code = $1)', [subjectCode])
    await client.query('DELETE FROM subjects WHERE code = $1', [subjectCode])
    await client.query('DELETE FROM audit_events WHERE actor_user_id = ANY($1::bigint[])', [userIds])
@@ -344,6 +349,80 @@ test('bulk key verification and publication integration', async (t) => {
          assert.deepEqual(await snapshot(), before)
          const unknown = await runCli('publish-questions.js', ['--bank', bankCode])
          assert.equal(unknown.code, 1)
+      })
+
+      await t.test('dry runs of a bank with image questions read without a transaction and write nothing', async () => {
+         const imageBankCode = `bulk-img-${suffix}`
+         const subject = await client.query('SELECT id FROM subjects WHERE code = $1', [subjectCode])
+         const bank = await createQuestionBankService(adminId, {
+            code: imageBankCode, title: 'Synthetic image bank', subjectId: subject.rows[0].id, visibility: 'staff',
+         })
+         async function imageQuestion(externalId, status = 'ready') {
+            const asset = await client.query(
+               `INSERT INTO assets (storage_key, mime_type, size_bytes, status, uploaded_by)
+                VALUES ($1, 'image/png', 10, 'ready', $2) RETURNING id`,
+               [`questions/test-${randomUUID()}.png`, adminId],
+            )
+            const assetId = String(asset.rows[0].id)
+            const question = await createQuestionService(adminId, bank.id, {
+               questionType: 'single_choice',
+               languageCode: 'tg',
+               content: { blocks: [{ type: 'text', text: `Synthetic stem ${externalId}` }, { type: 'image', assetId, alt: 'figure' }] },
+               options: ['a', 'b'].map((key) => ({ key, content: text(`${externalId} option ${key}`) })),
+            })
+            await client.query('UPDATE questions SET external_id = $2 WHERE id = $1', [question.id, externalId])
+            await replaceAnswerKeyService(adminId, question.id, { answerData: { optionKey: 'a' }, source: 'official_key' })
+            if (status !== 'proposed') await verifyAnswerKeyService(adminId, question.id, { source: 'official_key' })
+            if (status === 'archived') await client.query(`UPDATE assets SET status = 'archived' WHERE id = $1`, [assetId])
+         }
+         await imageQuestion('img-proposed', 'proposed')
+         await imageQuestion('img-ready')
+         await imageQuestion('img-archived', 'archived')
+         const before = await snapshot([imageBankCode])
+
+         const verify = await bulkVerifyAnswerKeysService(reviewerId, { bankCode: imageBankCode, dryRun: true })
+         assert.equal(verify.status, 'completed', JSON.stringify(verify.errors))
+         assert.equal(outcomesOf(verify)['img-proposed'], 'VERIFIED')
+         const publish = await bulkPublishQuestionsService(reviewerId, { bankCode: imageBankCode, dryRun: true })
+         assert.equal(publish.status, 'completed', JSON.stringify(publish.errors))
+         assert.deepEqual(outcomesOf(publish), {
+            'img-proposed': 'SKIPPED_KEY_NOT_VERIFIED',
+            'img-ready': 'PUBLISHED',
+            'img-archived': 'NOT_PUBLISHABLE',
+         })
+         assert.deepEqual(publish.counters.reasons, { ASSET_NOT_READY: 1 })
+
+         const keyDocument = {
+            schemaVersion: 'everest.answer-key-import.v1',
+            sourcePackage: 'synthetic-package-v1',
+            bankCode: imageBankCode,
+            keySource: { filename: 'synthetic-key.pdf', sha256: 'ab'.repeat(32), pages: 1 },
+            records: [{
+               bankCode: imageBankCode,
+               questionExternalId: 'img-proposed',
+               status: 'proposed',
+               source: 'official_key',
+               answerDataExternal: { optionKeys: ['a'] },
+               explanation: { blocks: [] },
+            }],
+         }
+         const keys = await dryRunAnswerKeyImportService(reviewerId, parseAnswerKeyFileBuffer(Buffer.from(JSON.stringify(keyDocument))))
+         assert.equal(keys.valid, true, JSON.stringify(keys.errors))
+         assert.equal(keys.counters.outcomes.UNCHANGED, 1)
+
+         const directory = await mkdtemp(path.join(os.tmpdir(), 'everest-bulk-img-'))
+         directories.push(directory)
+         const keysPath = path.join(directory, 'keys.json')
+         await writeFile(keysPath, JSON.stringify(keyDocument))
+         const common = ['--actor-phone', adminPhone, '--dry-run']
+         const publishCli = await runCli('publish-questions.js', ['--bank', imageBankCode, ...common])
+         assert.equal(publishCli.code, 0, publishCli.stderr || publishCli.stdout)
+         assert.equal(JSON.parse(publishCli.stdout).counters.reasons.ASSET_NOT_READY, 1)
+         const verifyCli = await runCli('verify-answer-keys.js', ['--bank', imageBankCode, ...common])
+         assert.equal(verifyCli.code, 0, verifyCli.stderr || verifyCli.stdout)
+         const keysCli = await runCli('import-answer-keys.js', ['--keys', keysPath, ...common])
+         assert.equal(keysCli.code, 0, keysCli.stderr || keysCli.stdout)
+         assert.deepEqual(await snapshot([imageBankCode]), before)
       })
    } finally {
       await cleanup(client)

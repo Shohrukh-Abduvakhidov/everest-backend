@@ -301,9 +301,11 @@ async function countSubjectTopics(subjectId, topicIds, client) {
 }
 
 // An image may be embedded only when it is a ready PNG/JPEG the author uploaded, one already
-// used by a question in the same bank, or any ready image for an administrator.
-async function findUsableImageAssets(userId, bankId, assetIds, client) {
-   const result = await client.query(
+// used by a question in the same bank, or any ready image for an administrator. A read-only
+// lookup: the publish check calls it inside the publish transaction and, in the bulk CLI dry
+// run, without one.
+async function findUsableImageAssets(userId, bankId, assetIds, db = pool) {
+   const result = await db.query(
       `SELECT asset.id FROM assets AS asset
        WHERE asset.id = ANY($3::bigint[])
          AND asset.status = 'ready'
