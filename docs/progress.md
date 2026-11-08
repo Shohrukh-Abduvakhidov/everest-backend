@@ -4,9 +4,17 @@ Updated: 2026-11-08.
 
 ## Current increment
 
-Presigned URLs for question images on `feat/question-image-urls` (awaiting review). Bulk verify/publish is merged (PR #42).
+Fix of `publish:questions --dry-run` on `fix/publish-dry-run` (awaiting review). Question image URLs are merged (PR #43).
 
-## 2026-11-08 — Question image URLs (`feat/question-image-urls`)
+## 2026-11-08 — Dry-run publish of image questions (`fix/publish-dry-run`)
+
+- **Bug:** `npm run publish:questions -- --dry-run` stopped with `BULK_FAILED` "Cannot read properties of undefined (reading 'query')" on a bank with an image question. The dry run checks publication without a transaction, and `findUsableImageAssets` (the `ASSET_NOT_READY` check) required a client. The bug dates from PR #42, not PR #43: the earlier tests had no image questions.
+- **Fix:** `findUsableImageAssets(..., db = pool)`, a read-only lookup like `findQuestion`. The real run still passes the transaction client.
+- **Other dry runs:** `verify:keys --dry-run` and `import:answer-keys --dry-run` read only through repository methods that default to the pool. The new test covers them too.
+- **Test:** new subtest in `tests/integration/question-bulk-review.test.js`: a bank with proposed, ready-image and archived-image questions. The bulk verify, bulk publish and answer-key dry runs (services and the three CLIs) succeed, publish reports `ASSET_NOT_READY`, and nothing is written. Without the fix the subtest fails with the reported error.
+- **Checked:** `npm test` on a fresh migrated disposable database: exit 0; 377 tests, 377 passed, 0 failed, 0 skipped.
+
+## 2026-11-08 — Question image URLs (`feat/question-image-urls`, merged as PR #43)
 
 - Image blocks in admin question detail and in learner attempt/result responses carry `url` and `expiresAt` (5 minutes) when the asset is ready and linked to the question. Nothing is stored; no migration.
 - **New:** `src/services/question-image-service.js`, repository method `listQuestionImageAssets`, OpenAPI `ImageBlock`. Input parser accepts and drops `url`/`expiresAt` on image blocks.
