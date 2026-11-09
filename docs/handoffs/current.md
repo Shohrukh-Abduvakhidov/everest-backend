@@ -1,37 +1,38 @@
 ---
 project: EVEREST Backend
-current_milestone: M09 follow-up (merge duplicate Tajik subjects)
+current_milestone: M11 follow-up (NCT trainer)
 status: awaiting_review
-branch: chore/merge-tajik-subjects
-base_commit: aa00d8f
-updated_at: 2026-11-09
+branch: feat/nct-trainer
+base_commit: ff539b9
+updated_at: 2026-11-10
 ---
 
 # Current handoff
 
 ## Done
 
-- Migration `20261109010000000_merge-tajik-subjects`: merges subject `tajik_language` into `zaboni-tochiki` (banks, questions, question topics, sections, topics, courses, missing translations), then deletes `tajik_language`. Found by code, no-op when either is missing; in-migration checks for question count and leftover references; section/topic code conflicts abort. Down is a no-op.
-- Importer alias `tajik_language` → `zaboni-tochiki` with warning `SUBJECT_CODE_ALIASED`; runbook "Subject codes".
-- Tests: `tests/integration/merge-tajik-subjects.test.js`; migration-cycle count 34.
+- NCT trainer on the M11 engine: `GET /trainer/catalog`, `POST /trainer/attempts`, `GET /trainer/attempts`. Answers, submit and result use the `/tests/attempts` routes. A training is a generated test (`tests.origin = 'trainer'`) + one-student assignment + attempt in one transaction.
+- Migration `20261110010000000_add-nct-trainer`. Config `TRAINER_*` in `env.js`.
+- `correct` on reviewed questions of every attempt result.
+- Authored-test queries (admin tests, lesson links, grants, staff results, course assignment lists) filter `origin = 'authored'`.
+- Docs: frontend-handoff "NCT trainer", api, decisions, architecture, progress, ROADMAP (M11 note).
 
-## Verification (2026-11-09)
+## Verification (2026-11-10)
 
-- `npm run test:auth` on a disposable database: exit 0; 382 tests, 382 passed, 0 failed.
-- `test:migrations`, `test:sources`, `test:integrity`: exit 0.
-- Rehearsal on a disposable restore of an `everest_db` dump: 972 published questions, 999 question topics, bank, 7 sections, 5 topics now on 135; 143 deleted; repeated `migrate:up` is a no-op. Rehearsal database dropped.
-- `everest_db` was only read and dumped; no migration ran on it.
+- `npm run test:auth` on a disposable database: exit 0; 392 tests, 392 passed, 0 failed, 0 skipped.
+- `test:migrations` (35/35/34/35), `test:sources`, `test:integrity`, `test:server`: exit 0.
+- `everest_db` only read; no migration run on it.
 
 ## Not verified
 
-- `migrate:up` on `everest_db` itself.
-- A real (non-dry) import run with the alias; the dry run plan is covered.
+- Routes over HTTP with cookies/CSRF (services tested directly; route list checked by the OpenAPI test).
+- Real S3/MinIO signing (memory storage provider).
+- On `everest_db`: only Biology (course 449) has a course with a subject, so other subjects are locked until a course with that `subject_id` exists and students are enrolled.
 
 ## Next concrete task
 
-1. Review and merge `chore/merge-tajik-subjects`.
-2. Stop the dev server, run the "before" queries from the PR, `npm run migrate:up` on `everest_db`, then the "after" queries.
-3. Decide whether the canonical `tg` title should be "Забони тоҷикӣ" (the dropped duplicate's spelling) instead of "Забони Точики"; that is an admin taxonomy edit, not part of the migration.
+1. Review `feat/nct-trainer`; confirm or change the access rule (enrollment in a course of the subject).
+2. Staff view of trainer results; optional daily limit; topics in the catalog.
 
 ## Constraints
 
