@@ -68,7 +68,7 @@ async function listLearnerAssignments(userId, courseId, lessonId, db = pool) {
    const result = await db.query(
       `SELECT ${learnerHistoryColumns}
        FROM test_assignments AS assignment JOIN tests AS test ON test.id = assignment.test_id
-       WHERE test.course_id = $2
+       WHERE test.course_id = $2 AND test.origin = 'authored'
          AND ((test.status = 'published' AND ${learnerAudienceSql}) OR ${learnerOwnAttemptSql})
          AND ($3::bigint IS NULL OR EXISTS (
             SELECT 1 FROM lessons AS lesson
@@ -383,7 +383,7 @@ async function findGrantAssignment(actorId, testId, assignmentId, db = pool) {
    const result = await db.query(
       `SELECT ${grantAssignmentColumns}
        FROM test_assignments AS assignment JOIN tests AS test ON test.id = assignment.test_id
-       WHERE assignment.id = $3 AND assignment.test_id = $2 AND ${grantScopeSql}`,
+       WHERE assignment.id = $3 AND assignment.test_id = $2 AND test.origin = 'authored' AND ${grantScopeSql}`,
       [normalizeInternalId(actorId), normalizeInternalId(testId), normalizeInternalId(assignmentId)],
    )
    return result.rows[0] || null
@@ -394,7 +394,7 @@ async function lockGrantAssignment(actorId, testId, assignmentId, client) {
    const result = await client.query(
       `SELECT ${grantAssignmentColumns}
        FROM test_assignments AS assignment JOIN tests AS test ON test.id = assignment.test_id
-       WHERE assignment.id = $3 AND assignment.test_id = $2 AND ${grantScopeSql}
+       WHERE assignment.id = $3 AND assignment.test_id = $2 AND test.origin = 'authored' AND ${grantScopeSql}
        FOR SHARE OF assignment`,
       [normalizeInternalId(actorId), normalizeInternalId(testId), normalizeInternalId(assignmentId)],
    )
@@ -466,7 +466,7 @@ async function listAttemptGrants(assignmentId, userId, db = pool) {
 async function findResultsTest(userId, testId, db = pool) {
    const result = await db.query(
       `SELECT test.id, test.title, test.course_id FROM tests AS test
-       WHERE test.id = $2 AND ${resultsScopeSql}`,
+       WHERE test.id = $2 AND test.origin = 'authored' AND ${resultsScopeSql}`,
       [normalizeInternalId(userId), normalizeInternalId(testId)],
    )
    return result.rows[0] || null

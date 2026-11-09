@@ -54,7 +54,7 @@ async function lockManageableCourse(userId, courseId, client) {
 async function listTests(userId, filters, db = pool) {
    const result = await db.query(
       `SELECT ${testColumns} FROM tests AS test
-       WHERE ${courseScopeSql('test.course_id')}
+       WHERE test.origin = 'authored' AND ${courseScopeSql('test.course_id')}
          AND ($2::bigint IS NULL OR test.course_id = $2)
          AND ($3::text IS NULL OR test.status = $3)
        ORDER BY test.id DESC
@@ -73,7 +73,7 @@ async function listTests(userId, filters, db = pool) {
 async function findTest(userId, testId, db = pool) {
    const result = await db.query(
       `SELECT ${testColumns} FROM tests AS test
-       WHERE test.id = $2 AND ${courseScopeSql('test.course_id')}`,
+       WHERE test.id = $2 AND test.origin = 'authored' AND ${courseScopeSql('test.course_id')}`,
       [normalizeInternalId(userId), normalizeInternalId(testId)],
    )
    return result.rows[0] || null
@@ -82,7 +82,7 @@ async function findTest(userId, testId, db = pool) {
 async function lockTest(userId, testId, client) {
    const result = await client.query(
       `SELECT ${testColumns} FROM tests AS test
-       WHERE test.id = $2 AND ${courseScopeSql('test.course_id')}
+       WHERE test.id = $2 AND test.origin = 'authored' AND ${courseScopeSql('test.course_id')}
        FOR UPDATE OF test`,
       [normalizeInternalId(userId), normalizeInternalId(testId)],
    )

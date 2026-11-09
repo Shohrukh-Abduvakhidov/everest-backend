@@ -162,7 +162,7 @@ async function updateLesson(lessonId, changes, client) {
 // a test that is being archived.
 async function lockCourseTest(courseId, testId, client) {
    const result = await client.query(
-      'SELECT id, status FROM tests WHERE id = $1 AND course_id = $2 FOR SHARE',
+      `SELECT id, status FROM tests WHERE id = $1 AND course_id = $2 AND origin = 'authored' FOR SHARE`,
       [normalizeInternalId(testId), normalizeInternalId(courseId)],
    )
    return result.rows[0] || null
