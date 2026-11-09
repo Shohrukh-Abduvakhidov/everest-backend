@@ -660,6 +660,17 @@ Password login uses a generic invalid-credentials response for unknown phones an
 - **Video lessons** stay drafts because there is no real storage to hold a video.
 - **Report.** The run prints a summary per entity (created / existing) and a checklist of accounts and screens; `--verbose` prints every record.
 
+## 2026-11-09 — Merge of the duplicate Tajik subject
+
+- **Canonical subject:** `zaboni-tochiki` (the older one). `tajik_language` (created by the `nct-tg-2026` import) is merged into it and deleted; subjects have no archive state.
+- **Migration `20261109010000000_merge-tajik-subjects`** finds both by code and does nothing when either is missing, so it is idempotent and safe on fresh databases. It moves banks, questions, question topics, sections, topics and courses in one statement, because the composite `(id, subject_id)` foreign keys are not deferrable and are only satisfied once parents and children agree.
+- **Immutability guards.** Changing `subject_id` alters no question content, but `questions_guard` and `question_topics_guard` reject any column change on published questions. The migration disables just those two triggers inside its transaction and re-enables them before commit; services never do this.
+- **Values.** Canonical values win: existing translations (the canonical `tg` title "Забони Точики" is kept; the duplicate's "Забони тоҷикӣ" is dropped) and color. Only missing translations, and a color when the canonical one is `neutral`, move over.
+- **Conflicts.** A section or topic code present in both subjects aborts the migration (`TAJIK_SUBJECT_MERGE_CONFLICT`) rather than guessing how to merge two taxonomy entries. The real data had none.
+- **Checks inside the migration:** question count of the canonical subject after = both subjects before; no table with a `subject_id` column still references the old id.
+- **Down** is a no-op: the merge cannot be undone without the dropped id.
+- **Importer alias.** `question-import-service` maps `tajik_language` to `zaboni-tochiki` (subject entries, `subjectCode` fields, `bank.subjectCode`), warns `SUBJECT_CODE_ALIASED` and never updates the canonical titles from an aliased entry. The alias is a constant in code, not a table: one known case does not justify a schema change.
+
 ## 2026-11-05 — Lesson-test link and HTTP question import
 
 **Link direction.** `lessons.test_id`, not `tests.lesson_id`: `guard_test()` rejects any column change on a published test, so a link stored on the test could not be set after publication. It also lets several lessons share a test. Composite foreign keys `(test_id, course_id)` and `(module_id, course_id)` make cross-course links impossible in the database; a CHECK limits links to `test` and `mixed` lessons.

@@ -10,6 +10,7 @@ This runbook covers importing an `everest.question-import.v1` book package (the 
    - Teachers can import only into existing taxonomy and into their own banks.
 - **Storage.** A package with images needs S3/MinIO configured (`S3_*` in `.env`), otherwise the run stops with `STORAGE_NOT_CONFIGURED` before writing anything. A dry run never needs storage.
 - **Migrations.** Run `npm run migrate:up` once after pulling M09.
+- **Subject codes.** Use the existing subject code. Tajik language is `zaboni-tochiki`. The old code `tajik_language` (created by the first `nct-tg-2026` import and merged by migration `20261109010000000_merge-tajik-subjects`) is an importer alias: a package that still says `tajik_language` imports into `zaboni-tochiki`, never creates a new subject, never changes the `zaboni-tochiki` titles, and the report shows warning `SUBJECT_CODE_ALIASED`. Section and topic codes are then looked up inside `zaboni-tochiki`. Any other unknown subject code creates a new subject (admins) — check the dry run's `subjects.created` before a real run.
 
 ## 1. Dry run (always first)
 
