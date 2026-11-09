@@ -3,6 +3,7 @@ import express from 'express'
 import {
    createTrainerAttemptController,
    getTrainerCatalogController,
+   getTrainerOverviewController,
    listTrainerHistoryController,
 } from '../controllers/trainer-controller.js'
 import { authMiddleware } from '../middleware/auth-middleware.js'
@@ -13,6 +14,7 @@ const trainerRouter = express.Router()
 
 trainerRouter.use(authMiddleware)
 trainerRouter.get('/catalog', getTrainerCatalogController)
+trainerRouter.get('/overview', getTrainerOverviewController)
 trainerRouter.get('/attempts', listTrainerHistoryController)
 trainerRouter.post('/attempts', authenticatedCsrfMiddleware, createTrainerAttemptController)
 

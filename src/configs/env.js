@@ -73,6 +73,10 @@ function readTrainerConfig() {
     levels: Object.freeze(levels),
     questionCounts: Object.freeze(questionCounts),
     mixedShares: Object.freeze(mixedShares),
+    readinessWindow: readInteger('TRAINER_READINESS_WINDOW', 5, { max: 100 }),
+    weakTopicMinAnswers: readInteger('TRAINER_WEAK_TOPIC_MIN_ANSWERS', 5, { max: 1000 }),
+    weakTopicsLimit: readInteger('TRAINER_WEAK_TOPICS_LIMIT', 5, { max: 50 }),
+    recentResultsLimit: readInteger('TRAINER_RECENT_RESULTS_LIMIT', 5, { max: 50 }),
   });
 }
 

@@ -1,6 +1,7 @@
 import {
    createTrainerAttemptService,
    getTrainerCatalogService,
+   getTrainerOverviewService,
    listTrainerHistoryService,
 } from '../services/trainer-service.js'
 
@@ -26,6 +27,15 @@ async function createTrainerAttemptController(req, res, next) {
    }
 }
 
+async function getTrainerOverviewController(req, res, next) {
+   try {
+      const data = await getTrainerOverviewService(req.auth.userId, overrides(req))
+      res.json({ data })
+   } catch (error) {
+      next(error)
+   }
+}
+
 async function listTrainerHistoryController(req, res, next) {
    try {
       const data = await listTrainerHistoryService(req.auth.userId, req.query, overrides(req))
@@ -35,4 +45,9 @@ async function listTrainerHistoryController(req, res, next) {
    }
 }
 
-export { createTrainerAttemptController, getTrainerCatalogController, listTrainerHistoryController }
+export {
+   createTrainerAttemptController,
+   getTrainerCatalogController,
+   getTrainerOverviewController,
+   listTrainerHistoryController,
+}

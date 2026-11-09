@@ -1733,21 +1733,28 @@ const routes = [
    }],
    ['get', '/trainer/catalog', {
       tag: 'NCT trainer', summary: 'Subjects with trainable NCT questions, counts per language and difficulty',
-      description: 'Trainable = published, verified key, bank code starting with the configured prefix (nct-). accessible is true when the student has an active enrollment in a published course of the subject.',
-      response: obj({ options: anyObject('questionCounts, difficulties, levels, mixedShares'), subjects: arr(anyObject('id, code, color, primaryLanguage, titles, accessible, languages[{language,total,difficulties}], sections[{code,titles,total}]')) }, ['options', 'subjects']),
+      description: 'Trainable = published, verified key, bank code starting with the configured prefix (nct-). Any active student may use the trainer; courses do not matter.',
+      response: obj({ options: anyObject('questionCounts, difficulties, levels, mixedShares'), subjects: arr(anyObject('id, code, color, primaryLanguage, titles, languages[{language,total,difficulties}], sections[{code,titles,total}], topics[{code,sectionCode,titles,total}]')) }, ['options', 'subjects']),
+      errors: { 403: ['ACCOUNT_NOT_ACTIVE', 'TRAINER_STUDENT_ROLE_REQUIRED'] },
+   }],
+   ['get', '/trainer/overview', {
+      tag: 'NCT trainer', summary: 'Data of the /nct page: readiness, per subject, weak topics, recent results',
+      description: 'Built from my finished trainings. With none, empty is true, readinessPercent is null and the lists are empty.',
+      response: obj({ empty: bool(), readinessPercent: nullable(num()), completedTrainings: int(), readinessWindow: int(), subjects: arr(anyObject('subjectId, subjectCode, titles, color, readinessPercent, trainings, lastSubmittedAt')), weakTopics: arr(anyObject('subjectId, subjectCode, topicCode, titles, answered, correct, correctPercent')), recentResults: arr(anyObject('attemptId, subjectId, subjectCode, difficulty, sectionCode, topicCode, questionCount, percent, submittedAt')) }, ['empty', 'readinessPercent', 'completedTrainings', 'subjects', 'weakTopics', 'recentResults']),
+      errors: { 403: ['ACCOUNT_NOT_ACTIVE', 'TRAINER_STUDENT_ROLE_REQUIRED'] },
    }],
    ['post', '/trainer/attempts', {
       tag: 'NCT trainer', created: true, summary: 'Generate a practice test and start its attempt (200 when idempotencyKey repeats)',
       description: 'Answer, submit and read the result through /tests/attempts/{attemptId}. One running training per student.',
       body: body({ subject: str({ description: 'Subject id or code' }), difficulty: str(), count: int(), language: str(), sectionCode: str(), topicCode: str(), idempotencyKey: str() }, ['subject', 'difficulty', 'count']),
       response: ref('AttemptView'),
-      errors: { 400: ['VALIDATION_ERROR'], 403: ['TRAINER_ACCESS_DENIED'], 404: ['SUBJECT_NOT_FOUND'], 409: ['TRAINER_ATTEMPT_IN_PROGRESS', 'TRAINER_NOT_ENOUGH_QUESTIONS', 'IDEMPOTENCY_KEY_REUSED'] },
+      errors: { 400: ['VALIDATION_ERROR'], 403: ['ACCOUNT_NOT_ACTIVE', 'TRAINER_STUDENT_ROLE_REQUIRED'], 404: ['SUBJECT_NOT_FOUND'], 409: ['TRAINER_ATTEMPT_IN_PROGRESS', 'TRAINER_NOT_ENOUGH_QUESTIONS', 'IDEMPOTENCY_KEY_REUSED'] },
    }],
    ['get', '/trainer/attempts', {
       tag: 'NCT trainer', summary: 'My trainings, newest first, with per-subject statistics',
       query: [{ name: 'subjectId', schema: id() }, { name: 'limit', schema: int({ minimum: 1, maximum: 100 }) }, { name: 'offset', schema: int({ minimum: 0 }) }],
       response: obj({ attempts: arr(anyObject('attemptId, status, subjectId, subjectCode, difficulty, language, sectionCode, topicCode, questionCount, startedAt, submittedAt, score, maxScore, percent')), pagination: anyObject(), stats: arr(anyObject('subjectId, attempts, averagePercent, lastSubmittedAt')) }, ['attempts', 'pagination', 'stats']),
-      errors: { 400: ['VALIDATION_ERROR'] },
+      errors: { 400: ['VALIDATION_ERROR'], 403: ['ACCOUNT_NOT_ACTIVE', 'TRAINER_STUDENT_ROLE_REQUIRED'] },
    }],
    ['delete', '/admin/tests/:testId/assignments/:assignmentId', {
       tag: 'Admin: tests', ...admin('tests.assign'), summary: 'Revoke an assignment (the row stays)',
