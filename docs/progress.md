@@ -6,6 +6,14 @@ Updated: 2026-11-09.
 
 NCT trainer access and /nct overview on `feat/nct-trainer-access-overview` (awaiting review). The NCT trainer is merged (PR #46).
 
+## 2026-11-12 — Staff access to the NCT trainer (`feat/trainer-staff-access`)
+
+- **Cause:** `trainer.use` belonged to `student` only; the attempt routes had no role restriction for trainer attempts (active account only).
+- **Migration `20261112010000000_grant-trainer-use-to-staff`:** binds `trainer.use` to `admin` and `owner` (idempotent). The service check and the error code are unchanged; teachers are still refused. `scripts/test-migration-cycle.js` now expects 37 migrations.
+- **Isolation:** trainer tests stay out of authoring lists and staff results (`origin`), reads are per user, and no code yet aggregates attempts into bonuses, achievements or ratings (decision 2026-11-12).
+- **Tests:** a new subtest in `tests/integration/nct-trainer.test.js`: admin and owner create, answer, submit and read the result, with their own overview and history; they cannot read each other's attempts or open the test in staff results; student histories, statistics and attempt rows are unchanged; teacher refused; student works. `npm run test:auth`: 397 passed, 0 failed. `test:migrations`, `test:sources`, `test:integrity`, `test:server` exit 0.
+- **Frontend:** the page must not hide itself by role; the "available to students" state should follow `403 TRAINER_STUDENT_ROLE_REQUIRED` (teachers now), and its text needs to change.
+
 ## 2026-11-11 — NCT trainer access and /nct overview (`feat/nct-trainer-access-overview`)
 
 - **Access:** courses no longer matter. An active account plus the permission `trainer.use` (students) is required. Otherwise `403 ACCOUNT_NOT_ACTIVE` or `403 TRAINER_STUDENT_ROLE_REQUIRED`. `accessible` and `TRAINER_ACCESS_DENIED` are removed. Trainer attempts check only the account, so enrollment revocation does not affect them.

@@ -437,17 +437,18 @@ Show the grant button to a teacher only on group assignments of their groups.
 
 ### NCT trainer (2026-11-10, access and /nct overview 2026-11-11)
 
-A student picks a subject, a difficulty and a count. The server builds a practice test from published NCT questions with verified keys and starts its attempt. Answering, submitting and reading the result use the ordinary attempt routes above (`/tests/attempts/:attemptId...`). Every route needs a signed-in user. `POST` also needs CSRF when the request uses cookies.
+A student, an administrator or an owner picks a subject, a difficulty and a count. The server builds a practice test from published NCT questions with verified keys and starts its attempt. Answering, submitting and reading the result use the ordinary attempt routes above (`/tests/attempts/:attemptId...`). Every route needs a signed-in user. `POST` also needs CSRF when the request uses cookies.
 
-**Access.** The trainer is a separate module and does not depend on courses or enrollments. Every student whose account an administrator approved (`active`) may use every subject. All four trainer routes refuse:
+**Access.** The trainer is a separate module and does not depend on courses or enrollments. Every student, administrator and owner whose account is `active` may use every subject; teachers may not. Administrators and owners train exactly like students, with their own trainings, overview and history; nobody sees another account's trainings, and staff trainings never reach student statistics or authoring lists. All four trainer routes refuse:
 
 | Status | Code | When |
 |---|---|---|
 | 403 | `ACCOUNT_NOT_ACTIVE` | The account is pending, blocked or rejected |
-| 403 | `TRAINER_STUDENT_ROLE_REQUIRED` | Not a student (staff accounts); the permission is `trainer.use` |
+| 403 | `TRAINER_STUDENT_ROLE_REQUIRED` | The account lacks the permission `trainer.use` (held by `student`, `admin` and `owner`; a teacher gets this). The code name is historical |
 
 - A running training's attempt routes (`/tests/attempts/:id`, answers, submit) need only an active account. Revoking course enrollments changes nothing; blocking the account returns `403 ACCOUNT_NOT_ACTIVE`.
 - There is no `accessible` field and no `TRAINER_ACCESS_DENIED` code any more.
+- **Frontend:** decide by the response, not by a role list. A `403 TRAINER_STUDENT_ROLE_REQUIRED` means "no trainer for this account" (teachers); do not hide the page for admin and owner.
 
 | Method | Path | Purpose |
 |---|---|---|
