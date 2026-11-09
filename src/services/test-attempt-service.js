@@ -135,6 +135,8 @@ function safeReviewQuestion(row) {
       ...safeQuestionBase(row),
       answer: row.answer_data ?? null,
       awardedPoints: row.awarded_points,
+      correct: row.awarded_points !== null && row.awarded_points !== undefined
+         && Number(row.awarded_points) >= Number(row.max_points),
       gradingStatus: row.grading_status,
       correctAnswer: row.grading_snapshot.answerData,
       explanation: row.grading_snapshot.explanation,
@@ -442,6 +444,18 @@ async function startAttemptService(userId, assignmentIdValue, overrides) {
    return { ...await readAttemptView(deps, actorId, attemptId), resumed }
 }
 
+// Starts the first attempt of a freshly created assignment inside the caller's transaction, so
+// the trainer's generated test, its assignment and the attempt commit together.
+async function startAttemptInTransactionService(userId, assignmentId, client, overrides) {
+   const deps = dependencies(overrides)
+   const now = deps.clock()
+   await deps.repository.lockAttemptSlot(userId, assignmentId, client)
+   const assignment = await deps.repository.findLearnerAssignment(userId, assignmentId, client)
+   if (!assignment) throw assignmentNotFound()
+   await requireContentAccess(deps, userId, assignment, now, client)
+   return createNewAttempt(deps, client, userId, assignment, [], now)
+}
+
 async function getAttemptService(userId, attemptIdValue, overrides) {
    const deps = dependencies(overrides)
    const actorId = parseUserId(userId)
@@ -618,6 +632,7 @@ export {
    safeAttempt,
    safeQuestionBase,
    saveAnswerService,
+   startAttemptInTransactionService,
    startAttemptService,
    submitAttemptService,
 }
