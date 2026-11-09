@@ -36,6 +36,9 @@ const maxImageBytes = 10 * mib
 const languages = ['tg', 'ru', 'en']
 const subjectColors = ['green', 'blue', 'orange', 'purple', 'neutral']
 const taxonomyCodePattern = /^[a-z0-9][a-z0-9_-]{0,49}$/
+// Retired subject codes that resolve to their canonical subject instead of creating a
+// duplicate. tajik_language was merged into zaboni-tochiki by migration 20261109010000000.
+const subjectCodeAliases = new Map([['tajik_language', 'zaboni-tochiki']])
 const bankCodePattern = /^[a-z0-9][a-z0-9_-]{0,99}$/
 const idempotencyKeyPattern = /^[A-Za-z0-9._:-]{1,200}$/
 const namespacePattern = /^[a-z0-9][a-z0-9:._-]{0,99}$/
@@ -193,6 +196,10 @@ function parseCode(value, pattern, path) {
    return value
 }
 
+function canonicalSubjectCode(code) {
+   return subjectCodeAliases.get(code) ?? code
+}
+
 function parseTaxonomyEntry(kind, raw, path) {
    const allowed = ['code', 'primaryLanguage', 'translations']
    if (kind !== 'subject') allowed.push('subjectCode')
@@ -210,10 +217,14 @@ function parseTaxonomyEntry(kind, raw, path) {
    const optionalCode = (field) => (raw[field] === undefined || raw[field] === null
       ? null
       : parseCode(raw[field], taxonomyCodePattern, `${path}.${field}`))
+   const code = parseCode(raw.code, taxonomyCodePattern, `${path}.code`)
    return {
       path,
-      code: parseCode(raw.code, taxonomyCodePattern, `${path}.code`),
-      subjectCode: kind === 'subject' ? null : parseCode(raw.subjectCode, taxonomyCodePattern, `${path}.subjectCode`),
+      code: kind === 'subject' ? canonicalSubjectCode(code) : code,
+      aliasedFrom: kind === 'subject' && subjectCodeAliases.has(code) ? code : null,
+      subjectCode: kind === 'subject'
+         ? null
+         : canonicalSubjectCode(parseCode(raw.subjectCode, taxonomyCodePattern, `${path}.subjectCode`)),
       sectionCode: kind === 'topic' ? optionalCode('sectionCode') : null,
       parentCode: kind === 'topic' ? optionalCode('parentCode') : null,
       primaryLanguage,
@@ -274,7 +285,17 @@ async function planTaxonomy(deps, actor, manifest, report) {
                addIssue(report, 'warning', 'TAXONOMY_FIELD_MISMATCH', path,
                   `subject ${entry.code} keeps its stored primaryLanguage and color`)
             }
-            entry.action = planTranslationUpdate(report, actor, entry, existing, 'subject', report.counters.subjects)
+            // An aliased code never rewrites the canonical subject's titles.
+            if (entry.aliasedFrom) {
+               report.counters.subjects.unchanged += 1
+               entry.action = 'unchanged'
+            } else {
+               entry.action = planTranslationUpdate(report, actor, entry, existing, 'subject', report.counters.subjects)
+            }
+         }
+         if (entry.aliasedFrom) {
+            addIssue(report, 'warning', 'SUBJECT_CODE_ALIASED', `${path}.code`,
+               `subject ${entry.aliasedFrom} is imported as ${entry.code}`)
          }
          subjects.set(entry.code, entry)
       } catch (error) {
@@ -421,7 +442,7 @@ async function planBank(deps, actor, manifest, taxonomy, report) {
       if (!['private', 'staff'].includes(visibility)) {
          throw packageError('PACKAGE_SCHEMA_INVALID', 'visibility is invalid', 'bank.visibility')
       }
-      const subjectCode = parseCode(bank.subjectCode, taxonomyCodePattern, 'bank.subjectCode')
+      const subjectCode = canonicalSubjectCode(parseCode(bank.subjectCode, taxonomyCodePattern, 'bank.subjectCode'))
       let subject = taxonomy.subjects.get(subjectCode)
       if (!subject) {
          const existing = await deps.taxonomy.findEntityByCode('subject', subjectCode, null)
