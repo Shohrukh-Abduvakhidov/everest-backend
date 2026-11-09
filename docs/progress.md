@@ -1,10 +1,19 @@
 # EVEREST backend progress
 
-Updated: 2026-11-08.
+Updated: 2026-11-09.
 
 ## Current increment
 
-Fix of `publish:questions --dry-run` on `fix/publish-dry-run` (awaiting review). Question image URLs are merged (PR #43).
+Merge of the duplicate Tajik subject on `chore/merge-tajik-subjects` (awaiting review). The publish dry-run fix is merged (PR #44).
+
+## 2026-11-09 — Merge of duplicate Tajik subjects (`chore/merge-tajik-subjects`)
+
+- **Problem:** `everest_db` had `zaboni-tochiki` (id 135: 3 translations, color orange, nothing else) and `tajik_language` (id 143, from the `nct-tg-2026` import: 1 bank, 972 published questions, 999 question topics, 7 sections, 5 topics, 1 translation, no courses). Tables that reference subjects: `subject_translations`, `sections`, `topics`, `courses`, `question_banks` (FK) and `questions`, `question_topics` (composite FKs).
+- **Migration `20261109010000000_merge-tajik-subjects`:** moves everything from `tajik_language` to `zaboni-tochiki`, copies missing translations, deletes `tajik_language`. Found by code; no-op when either is missing. Checks the question count and leftover `subject_id` references before commit. Details and reasons: `docs/decisions.md` (2026-11-09).
+- **Importer:** `tajik_language` is an alias of `zaboni-tochiki` (`SUBJECT_CODE_ALIASED` warning, no subject created, canonical titles untouched). Runbook "Subject codes".
+- **Tests:** `tests/integration/merge-tajik-subjects.test.js` (4 subtests: everything moved incl. published questions and guards re-enabled; repeat and missing-subject runs change nothing; code conflict aborts; dry run of a `tajik_language` package creates no subject). `scripts/test-migration-cycle.js` now expects 34 migrations.
+- **Checked:** `npm run test:auth` on a fresh migrated disposable database: exit 0; 382 tests, 382 passed, 0 failed, 0 skipped. `test:migrations`, `test:sources`, `test:integrity`: exit 0. Rehearsal on a disposable restore of an `everest_db` dump: after `migrate:up` subject 135 has 972 published questions, 999 question topics, 1 bank, 7 sections, 5 topics, 3 translations; 143 is gone; a second `migrate:up` ran nothing. The rehearsal database was dropped.
+- **Not done:** `migrate:up` on `everest_db` itself (by request).
 
 ## 2026-11-08 — Dry-run publish of image questions (`fix/publish-dry-run`)
 
