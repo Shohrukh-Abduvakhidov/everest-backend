@@ -4,7 +4,24 @@ Updated: 2026-11-09.
 
 ## Current increment
 
-NCT trainer on `feat/nct-trainer` (awaiting review). The Tajik subject merge is merged (PR #45).
+NCT trainer access and /nct overview on `feat/nct-trainer-access-overview` (awaiting review). The NCT trainer is merged (PR #46).
+
+## 2026-11-11 — NCT trainer access and /nct overview (`feat/nct-trainer-access-overview`)
+
+- **Access:** courses no longer matter. An active account plus the permission `trainer.use` (students) is required. Otherwise `403 ACCOUNT_NOT_ACTIVE` or `403 TRAINER_STUDENT_ROLE_REQUIRED`. `accessible` and `TRAINER_ACCESS_DENIED` are removed. Trainer attempts check only the account, so enrollment revocation does not affect them.
+- **Migration `20261111010000000_trainer-access-without-course`:** `tests.course_id` is nullable for `origin = 'trainer'` only (CHECK); adds the permission `trainer.use` for `student`. New trainer tests have no course.
+- **New `GET /trainer/overview`:** readiness overall and per subject, weak topics, recent results, empty state. The catalog gained `topics[]`. Config: `TRAINER_READINESS_WINDOW`, `TRAINER_WEAK_TOPIC_MIN_ANSWERS`, `TRAINER_WEAK_TOPICS_LIMIT`, `TRAINER_RECENT_RESULTS_LIMIT`. Formulas: `docs/decisions.md` (2026-11-11). Contract: `docs/frontend-handoff.md` "NCT trainer".
+- **Tests:** `tests/integration/nct-trainer.test.js` grew to 13 subtests:
+   - pending, blocked and teacher accounts are refused on all routes;
+   - a student without any enrollment trains, and the test has `course_id` NULL;
+   - catalog topics;
+   - empty overview;
+   - overview readiness 54.55, weak topics spelling 0% and grammar 75%, recent results;
+   - isolation between students;
+   - revoking enrollments keeps a running training working, and blocking the account stops it.
+   `scripts/test-migration-cycle.js` now expects 36 migrations.
+- **Checked:** `npm run test:auth` on a fresh migrated disposable database: exit 0; 396 tests, 396 passed, 0 failed, 0 skipped. `test:migrations`, `test:sources`, `test:integrity` and `test:server` exit 0. Nothing was run on `everest_db`.
+- **Not done (by request):** mock NCT exam, staff view of trainer results, limits.
 
 ## 2026-11-10 — NCT trainer (`feat/nct-trainer`)
 
