@@ -7,6 +7,7 @@ import { withTransaction } from '../repositories/transaction-repository.js'
 import AppError from '../utils/app-error.js'
 import { scorePercent } from '../utils/attempt-grading.js'
 import { normalizeInternalId } from '../utils/internal-id.js'
+import { authorizePermissionService } from './authorization-service.js'
 import { parseUserId, validateBody, validationError } from './course-service.js'
 import { getAttemptService, startAttemptInTransactionService } from './test-attempt-service.js'
 
@@ -24,7 +25,20 @@ function dependencies(overrides = {}) {
       clock: overrides.clock || (() => new Date()),
       config: overrides.trainerConfig || env.trainer,
       attempts: overrides,
+      authorization: overrides.authorization,
    }
+}
+
+// The trainer is its own module: no course or enrollment. A student (permission trainer.use)
+// with an account an administrator approved and did not block.
+async function requireTrainerLearner(deps, actorId, db) {
+   if (await deps.repository.findAccountStatus(actorId, db) !== 'active') {
+      throw new AppError(403, 'ACCOUNT_NOT_ACTIVE', 'Account is not active')
+   }
+   await authorizePermissionService(actorId, 'trainer.use', {
+      errorCode: 'TRAINER_STUDENT_ROLE_REQUIRED',
+      message: 'The trainer is available to students',
+   }, deps.authorization)
 }
 
 function iso(value) {
@@ -56,15 +70,15 @@ function trainerOptions(config) {
 async function getTrainerCatalogService(userId, overrides) {
    const deps = dependencies(overrides)
    const actorId = parseUserId(userId)
+   await requireTrainerLearner(deps, actorId)
    const { config } = deps
    const counts = await deps.repository.listTrainableCounts(config.bankCodePrefix)
    const subjectIds = [...new Set(counts.map((row) => row.subject_id))]
-   const [subjects, sections, courses] = await Promise.all([
+   const [subjects, sections, topics] = await Promise.all([
       deps.repository.listSubjects(subjectIds),
       deps.repository.listTrainableSections(config.bankCodePrefix),
-      deps.repository.listTrainerCourses(actorId, subjectIds, deps.clock()),
+      deps.repository.listTrainableTopics(config.bankCodePrefix),
    ])
-   const accessible = new Set(courses.map((row) => row.subject_id))
    return {
       options: trainerOptions(config),
       subjects: subjects.map((subject) => {
@@ -87,11 +101,18 @@ async function getTrainerCatalogService(userId, overrides) {
             color: subject.color,
             primaryLanguage: subject.primary_language,
             titles: subject.titles,
-            accessible: accessible.has(subject.id),
             languages: [...byLanguage.values()],
             sections: sections
                .filter((section) => section.subject_id === subject.id)
                .map((section) => ({ code: section.code, titles: section.titles, total: section.total })),
+            topics: topics
+               .filter((topic) => topic.subject_id === subject.id)
+               .map((topic) => ({
+                  code: topic.code,
+                  sectionCode: topic.section_code,
+                  titles: topic.titles,
+                  total: topic.total,
+               })),
          }
       }),
    }
@@ -212,6 +233,7 @@ async function createTrainerAttemptService(userId, body, overrides) {
    const { attemptId, resumed } = await deps.transaction(async (client) => {
       const now = deps.clock()
       await deps.repository.lockTrainerSlot(actorId, client)
+      await requireTrainerLearner(deps, actorId, client)
       const subject = await deps.repository.findSubject(request.subject, client)
       if (request.idempotencyKey) {
          const existing = await deps.repository.findTrainerAttemptByKey(actorId, request.idempotencyKey, client)
@@ -228,10 +250,6 @@ async function createTrainerAttemptService(userId, body, overrides) {
          throw new AppError(409, 'TRAINER_ATTEMPT_IN_PROGRESS', 'Finish the current training first', [
             { field: 'attemptId', message: String(open.id) },
          ])
-      }
-      const [course] = await deps.repository.listTrainerCourses(actorId, [subject.id], now, client)
-      if (!course) {
-         throw new AppError(403, 'TRAINER_ACCESS_DENIED', 'An active enrollment in a course of this subject is required')
       }
       const filters = {
          subjectId: subject.id,
@@ -263,7 +281,6 @@ async function createTrainerAttemptService(userId, body, overrides) {
       }
       const title = subject.titles?.[filters.language] ?? subject.titles?.[subject.primary_language] ?? subject.code
       const testId = await deps.repository.createTrainerTest({
-         courseId: course.course_id,
          title,
          generationFilters,
          createdBy: actorId,
@@ -332,6 +349,7 @@ async function listTrainerHistoryService(userId, query = {}, overrides) {
    const deps = dependencies(overrides)
    const actorId = parseUserId(userId)
    const paging = parsePaging(query)
+   await requireTrainerLearner(deps, actorId)
    const [rows, stats] = await Promise.all([
       deps.repository.listTrainerAttempts(actorId, paging),
       deps.repository.listTrainerStats(actorId),
@@ -348,8 +366,83 @@ async function listTrainerHistoryService(userId, query = {}, overrides) {
    }
 }
 
+// ------------------------------------------------------------------ overview (/nct page)
+
+function roundPercent(value) {
+   return Math.round(value * 100) / 100
+}
+
+// Readiness of a subject: points over questions of its last readinessWindow finished trainings
+// (each question is 1 point, so this is the share of correct answers). Overall readiness: the
+// mean of the subject values, every trained subject counting equally.
+function subjectReadiness(rows) {
+   const score = rows.reduce((sum, row) => sum + Number(row.score), 0)
+   const maxScore = rows.reduce((sum, row) => sum + Number(row.max_score), 0)
+   return roundPercent((score * 100) / maxScore)
+}
+
+async function getTrainerOverviewService(userId, overrides) {
+   const deps = dependencies(overrides)
+   const actorId = parseUserId(userId)
+   await requireTrainerLearner(deps, actorId)
+   const { config } = deps
+   const [windowRows, topicRows, recentRows] = await Promise.all([
+      deps.repository.listRecentFinishedBySubject(actorId, config.readinessWindow),
+      deps.repository.listTopicResults(actorId, config.weakTopicMinAnswers, config.weakTopicsLimit),
+      deps.repository.listRecentFinished(actorId, config.recentResultsLimit),
+   ])
+   const bySubject = new Map()
+   for (const row of windowRows) {
+      bySubject.set(row.subject_id, [...(bySubject.get(row.subject_id) ?? []), row])
+   }
+   const subjectRows = await deps.repository.listSubjects([...bySubject.keys()])
+   const subjects = subjectRows.map((subject) => {
+      const rows = bySubject.get(subject.id)
+      return {
+         subjectId: subject.id,
+         subjectCode: subject.code,
+         titles: subject.titles,
+         color: subject.color,
+         readinessPercent: subjectReadiness(rows),
+         trainings: rows[0].total,
+         lastSubmittedAt: iso(rows[0].submitted_at),
+      }
+   })
+   const completedTrainings = subjects.reduce((sum, subject) => sum + subject.trainings, 0)
+   return {
+      empty: completedTrainings === 0,
+      readinessPercent: subjects.length
+         ? roundPercent(subjects.reduce((sum, subject) => sum + subject.readinessPercent, 0) / subjects.length)
+         : null,
+      completedTrainings,
+      readinessWindow: config.readinessWindow,
+      subjects,
+      weakTopics: topicRows.map((row) => ({
+         subjectId: row.subject_id,
+         subjectCode: row.subject_code,
+         topicCode: row.code,
+         titles: row.titles,
+         answered: row.answered,
+         correct: row.correct,
+         correctPercent: roundPercent((row.correct * 100) / row.answered),
+      })),
+      recentResults: recentRows.map((row) => ({
+         attemptId: row.id,
+         subjectId: row.generation_filters.subjectId,
+         subjectCode: row.generation_filters.subjectCode,
+         difficulty: row.generation_filters.difficulty,
+         sectionCode: row.generation_filters.sectionCode,
+         topicCode: row.generation_filters.topicCode,
+         questionCount: row.question_count,
+         percent: scorePercent(row.score, row.max_score),
+         submittedAt: iso(row.submitted_at),
+      })),
+   }
+}
+
 export {
    createTrainerAttemptService,
+   getTrainerOverviewService,
    getTrainerCatalogService,
    listTrainerHistoryService,
    splitByShares,

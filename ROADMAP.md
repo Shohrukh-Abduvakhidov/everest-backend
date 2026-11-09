@@ -318,7 +318,8 @@ This roadmap orders implementation; it does not replace the [current architectur
    - Migrations `20261107010000000` and `20261107020000000`.
    - `npm test` on a disposable database: 339 tests, 338 passed, 0 failed, 1 skipped. `test:migrations`: 32/32/31/32.
 - **Exclusions:** Unapproved partial scoring or reveal policy.
-- **NCT trainer (2026-11-10, `feat/nct-trainer`, awaiting review):** generated practice tests from published NCT questions on the M11 engine; `/trainer/catalog`, `/trainer/attempts`. Migration `20261110010000000`. `npm run test:auth` on a disposable database: 392 passed, 0 failed. Access by subject course enrollment is a proposed rule (see `docs/decisions.md`). It covers parameter-based selection for practice only; the M10 constructor deliverable stays open.
+- **NCT trainer (2026-11-10, merged in PR #46):** generated practice tests from published NCT questions on the M11 engine; `/trainer/catalog`, `/trainer/attempts`. Migration `20261110010000000`. `npm run test:auth` on a disposable database: 392 passed, 0 failed. Its course-enrollment access rule was replaced on 2026-11-11. It covers parameter-based selection for practice only; the M10 constructor deliverable stays open.
+- **NCT trainer access and overview (2026-11-11, `feat/nct-trainer-access-overview`, awaiting review):** access by active student account (`trainer.use`), no course; `GET /trainer/overview`; catalog topics. Migration `20261111010000000`. `npm run test:auth` on a disposable database: 396 passed, 0 failed.
 - **Follow-up (2026-11-07, merged in PR #36):** server-side lesson completion by test (submit, expiry, worker, regrade) by the owner's rule; `passPercent` in results; attempt history after revocation; `testId` in lesson lists; course `progress`. `npm test` on a disposable database: 330 tests, 329 passed, 0 failed, 1 skipped. No migration.
 
 ## M12 — Learning progress and analytics

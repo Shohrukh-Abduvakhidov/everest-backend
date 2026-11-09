@@ -3,7 +3,7 @@ import { normalizeInternalId } from '../utils/internal-id.js'
 
 const assignmentColumns = `assignment.id, assignment.test_id, assignment.opens_at,
    assignment.closes_at, assignment.personal_window_minutes, assignment.group_id, assignment.user_id,
-   test.course_id, test.module_id, test.title, test.mode, test.status AS test_status,
+   test.course_id, test.module_id, test.origin, test.title, test.mode, test.status AS test_status,
    test.duration_seconds, test.max_attempts, test.result_policy, test.answer_reveal_policy,
    test.shuffle_questions, test.shuffle_options, test.grading_policy,
    (SELECT count(*)::integer FROM test_questions WHERE test_id = test.id) AS question_count`
@@ -28,7 +28,7 @@ const attemptColumns = `attempt.id, attempt.test_id, attempt.assignment_id, atte
    attempt.submitted_at, attempt.graded_at, attempt.score, attempt.max_score,
    attempt.policy_snapshot`
 
-const attemptContextColumns = `${attemptColumns}, test.title, test.course_id, test.module_id,
+const attemptContextColumns = `${attemptColumns}, test.title, test.course_id, test.module_id, test.origin,
    assignment.closes_at`
 
 const attemptContextFrom = `FROM test_attempts AS attempt
@@ -97,6 +97,14 @@ async function hasActiveEnrollment(userId, courseId, at, db = pool) {
            AND (expires_at IS NULL OR expires_at > $3)
        ) AS active`,
       [normalizeInternalId(userId), normalizeInternalId(courseId), at],
+   )
+   return result.rows[0].active
+}
+
+async function isActiveAccount(userId, db = pool) {
+   const result = await db.query(
+      `SELECT EXISTS (SELECT 1 FROM users WHERE id = $1 AND status = 'active') AS active`,
+      [normalizeInternalId(userId)],
    )
    return result.rows[0].active
 }
@@ -584,6 +592,7 @@ export {
    finishAttempt,
    hasActiveEnrollment,
    hasActiveModuleGrant,
+   isActiveAccount,
    hasSavedAnswer,
    insertAttemptGrant,
    isAssignmentStudent,

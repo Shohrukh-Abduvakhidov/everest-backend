@@ -435,17 +435,26 @@ Show the grant button to a teacher only on group assignments of their groups.
 - Learner screens need no change: `maxAttempts` and `remainingAttempts` already include grants.
 - After a grant, the result of an `after_submission` test may hide the answers again (`revealed: false`) until the extra attempts are used.
 
-### NCT trainer (2026-11-10)
+### NCT trainer (2026-11-10, access and /nct overview 2026-11-11)
 
 A student picks a subject, a difficulty and a count. The server builds a practice test from published NCT questions with verified keys and starts its attempt. Answering, submitting and reading the result use the ordinary attempt routes above (`/tests/attempts/:attemptId...`). Every route needs a signed-in user. `POST` also needs CSRF when the request uses cookies.
 
-**Access.** A subject is `accessible` when the student has an active enrollment in a **published course whose subject is that subject**. Otherwise `POST` returns `403 TRAINER_ACCESS_DENIED`. Show such subjects as locked. When the enrollment is revoked, a running training stops too: its attempt routes return `403 COURSE_ENROLLMENT_REQUIRED`.
+**Access.** The trainer is a separate module and does not depend on courses or enrollments. Every student whose account an administrator approved (`active`) may use every subject. All four trainer routes refuse:
+
+| Status | Code | When |
+|---|---|---|
+| 403 | `ACCOUNT_NOT_ACTIVE` | The account is pending, blocked or rejected |
+| 403 | `TRAINER_STUDENT_ROLE_REQUIRED` | Not a student (staff accounts); the permission is `trainer.use` |
+
+- A running training's attempt routes (`/tests/attempts/:id`, answers, submit) need only an active account. Revoking course enrollments changes nothing; blocking the account returns `403 ACCOUNT_NOT_ACTIVE`.
+- There is no `accessible` field and no `TRAINER_ACCESS_DENIED` code any more.
 
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/trainer/catalog` | Options and the subjects with trainable questions |
 | POST | `/trainer/attempts` | Generate and start a training: `201`, or `200` for a repeated `idempotencyKey` |
 | GET | `/trainer/attempts` | My trainings, newest first, plus statistics per subject |
+| GET | `/trainer/overview` | Everything the /nct page shows: readiness, per subject, weak topics, recent results |
 
 **`GET /trainer/catalog`** returns:
 
@@ -460,9 +469,9 @@ A student picks a subject, a difficulty and a count. The server builds a practic
   "subjects": [{
     "id": "135", "code": "zaboni-tochiki", "color": "orange", "primaryLanguage": "tg",
     "titles": { "tg": "…", "ru": "…" },
-    "accessible": true,
     "languages": [{ "language": "tg", "total": 972, "difficulties": { "easy": 333, "medium": 605, "hard": 34 } }],
-    "sections": [{ "code": "syntax", "titles": { "tg": "…" }, "total": 120 }]
+    "sections": [{ "code": "syntax", "titles": { "tg": "…" }, "total": 120 }],
+    "topics": [{ "code": "verbs", "sectionCode": "morphology", "titles": { "tg": "…" }, "total": 40 }]
   }]
 } }
 ```
@@ -488,7 +497,7 @@ The response is the same `AttemptView` as `GET /tests/attempts/:attemptId`, plus
 | Status | Code | Meaning / UI |
 |---|---|---|
 | 400 | `VALIDATION_ERROR` | `details[0].field` names the field (`count` outside the allowed set, unknown `difficulty`, an unknown body field, …) |
-| 403 | `TRAINER_ACCESS_DENIED` | No active enrollment in a course of this subject |
+| 403 | `ACCOUNT_NOT_ACTIVE`, `TRAINER_STUDENT_ROLE_REQUIRED` | See "Access" |
 | 404 | `SUBJECT_NOT_FOUND` | Unknown id or code |
 | 409 | `TRAINER_NOT_ENOUGH_QUESTIONS` | `details[0].field = "available"`, `details[0].message` = how many questions match (as a string). Offer a smaller count |
 | 409 | `TRAINER_ATTEMPT_IN_PROGRESS` | One running training per student. `details[0].message` = the running `attemptId`. Offer "continue" (open it) or "finish" (`POST /tests/attempts/:id/submit`) |
@@ -519,6 +528,33 @@ Then use the ordinary attempt routes:
 
 - `score`, `maxScore` and `percent` are `null` while a training is `in_progress`.
 - `stats` counts finished trainings only and does not depend on `subjectId`.
+**`GET /trainer/overview`** is computed from my **finished** trainings (`graded` or `expired`; a running one does not count):
+
+```json
+{ "data": {
+  "empty": false,
+  "readinessPercent": 54.55,
+  "completedTrainings": 2,
+  "readinessWindow": 5,
+  "subjects": [{ "subjectId": "135", "subjectCode": "zaboni-tochiki", "titles": { "tg": "…" }, "color": "orange",
+    "readinessPercent": 54.55, "trainings": 2, "lastSubmittedAt": "…" }],
+  "weakTopics": [{ "subjectId": "135", "subjectCode": "zaboni-tochiki", "topicCode": "spelling", "titles": { "tg": "…" },
+    "answered": 4, "correct": 0, "correctPercent": 0 }],
+  "recentResults": [{ "attemptId": "9", "subjectId": "135", "subjectCode": "zaboni-tochiki", "difficulty": "mixed",
+    "sectionCode": null, "topicCode": null, "questionCount": 10, "percent": 60, "submittedAt": "…" }]
+} }
+```
+
+- **Readiness of a subject:** points ÷ questions over its last `readinessWindow` finished trainings (`TRAINER_READINESS_WINDOW`, default 5), × 100. Every question is 1 point, so this is the share of correct answers, and longer trainings weigh more.
+- **Overall `readinessPercent`:** the average of the subject values, where every trained subject counts equally.
+- **`subjects[].trainings`** counts all finished trainings of the subject. **`completedTrainings`** is their sum.
+- **Weak topics:** taken from all finished trainings.
+   - A topic needs at least `TRAINER_WEAK_TOPIC_MIN_ANSWERS` (5) questions and must be below 100% correct. An unanswered question counts as wrong.
+   - Sorted by the lowest share of correct answers, then by the most questions. At most `TRAINER_WEAK_TOPICS_LIMIT` (5).
+   - "Repeat" = `POST /trainer/attempts` with `{ subject: subjectId, topicCode, difficulty: "mixed", count }`. Check `catalog.subjects[].topics[].total` first.
+- **Recent results:** the last `TRAINER_RECENT_RESULTS_LIMIT` (5) finished trainings, newest first. Build the title on the frontend.
+- **No trainings yet:** `200` with `empty: true`, `readinessPercent: null`, `completedTrainings: 0` and empty lists.
+
 - Trainings never appear in course test lists (`/courses/:courseId/test-assignments`) or in admin test screens.
 
 ### Admin: tests (M10)
@@ -690,7 +726,7 @@ Names only; put values in `.env` (never commit it).
 | Auth (needed for any login; each ≥32 characters, different values; without them auth routes return `503`) | `JWT_ACCESS_SECRET`, `OTP_HMAC_SECRET` |
 | Auth tuning (optional) | `AUTH_SESSION_TTL_SECONDS`, `AUTH_REFRESH_TTL_SECONDS`, `AUTH_RATE_WINDOW_SECONDS`, `AUTH_RATE_BLOCK_SECONDS`, `AUTH_LOGIN_MAX_ATTEMPTS`, `AUTH_PUBLIC_RATE_LIMIT`, `AUTH_ADMIN_RATE_LIMIT`, `PLAYBACK_RATE_LIMIT` |
 | Attempts (optional) | `ATTEMPT_SWEEP_INTERVAL_MS` (30000), used by `npm run worker:attempts` |
-| NCT trainer (optional) | `TRAINER_BANK_CODE_PREFIX` (`nct-`), `TRAINER_QUESTION_COUNTS` (`10,20,30,50`), `TRAINER_MAX_QUESTIONS` (50; upper bound for the counts), `TRAINER_DIFFICULTY_LEVELS` (`easy:1-2,medium:3,hard:4-5`), `TRAINER_MIXED_SHARES` (`30,40,30`, one per level, sum 100) |
+| NCT trainer (optional) | `TRAINER_BANK_CODE_PREFIX` (`nct-`), `TRAINER_QUESTION_COUNTS` (`10,20,30,50`), `TRAINER_MAX_QUESTIONS` (50; upper bound for the counts), `TRAINER_DIFFICULTY_LEVELS` (`easy:1-2,medium:3,hard:4-5`), `TRAINER_MIXED_SHARES` (`30,40,30`, one per level, sum 100), `TRAINER_READINESS_WINDOW` (5), `TRAINER_WEAK_TOPIC_MIN_ANSWERS` (5), `TRAINER_WEAK_TOPICS_LIMIT` (5), `TRAINER_RECENT_RESULTS_LIMIT` (5) |
 | Password recovery (optional) | `RECOVERY_CHALLENGE_TTL_SECONDS`, `RECOVERY_RESET_TTL_SECONDS`, `RECOVERY_RESEND_COOLDOWN_SECONDS`, `RECOVERY_MAX_ATTEMPTS`, `RECOVERY_MAX_REQUESTS_PER_HOUR` |
 | Telegram (optional; Telegram login, link, recovery) | `TELEGRAM_CLIENT_ID`, `TELEGRAM_CLIENT_SECRET`, `TELEGRAM_REDIRECT_URI`, `TELEGRAM_BOT_USERNAME`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `TELEGRAM_OIDC_STATE_TTL_SECONDS` |
 | Storage (optional; otherwise storage routes return `503 STORAGE_NOT_CONFIGURED`) | `S3_ENDPOINT`, `S3_PUBLIC_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE`, `STORAGE_PART_SIZE_BYTES`, `STORAGE_PRESIGN_TTL_SECONDS`, `STORAGE_UPLOAD_TTL_HOURS` |

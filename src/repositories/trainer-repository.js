@@ -65,18 +65,95 @@ async function findSubject({ id = null, code = null }, db = pool) {
    return result.rows[0] || null
 }
 
-// Trainer access: an active enrollment in a published course of the subject. The earliest
-// such course hosts the generated test, so revoking every enrollment also stops the attempt.
-async function listTrainerCourses(userId, subjectIds, at, db = pool) {
+async function findAccountStatus(userId, db = pool) {
+   const result = await db.query('SELECT status FROM users WHERE id = $1', [normalizeInternalId(userId)])
+   return result.rows[0]?.status ?? null
+}
+
+// Topics that hold trainable questions, with their section, for the "repeat a topic" choice.
+async function listTrainableTopics(bankCodePrefix, db = pool) {
    const result = await db.query(
-      `SELECT DISTINCT ON (course.subject_id) course.subject_id, course.id AS course_id
-       FROM courses AS course
-       JOIN course_enrollments AS enrollment ON enrollment.course_id = course.id
-       WHERE enrollment.user_id = $1 AND course.subject_id = ANY($2::bigint[])
-         AND course.status = 'published' AND enrollment.revoked_at IS NULL
-         AND enrollment.begins_at <= $3 AND (enrollment.expires_at IS NULL OR enrollment.expires_at > $3)
-       ORDER BY course.subject_id, course.id`,
-      [normalizeInternalId(userId), subjectIds.map(normalizeInternalId), at],
+      `SELECT topic.subject_id, topic.code,
+         (SELECT code FROM sections WHERE id = topic.section_id) AS section_code,
+         (SELECT COALESCE(jsonb_object_agg(language_code, title), '{}')
+          FROM topic_translations WHERE topic_id = topic.id) AS titles,
+         count(DISTINCT question.id)::integer AS total
+       FROM topics AS topic
+       JOIN question_topics AS link ON link.topic_id = topic.id
+       JOIN questions AS question ON question.id = link.question_id
+       JOIN question_banks AS bank ON bank.id = question.bank_id
+       JOIN question_answer_keys AS answer_key
+          ON answer_key.question_id = question.id AND answer_key.status = 'verified'
+       WHERE question.status = 'published' AND starts_with(bank.code, $1)
+       GROUP BY topic.id
+       ORDER BY topic.subject_id, topic.code`,
+      [bankCodePrefix],
+   )
+   return result.rows
+}
+
+const finishedTrainerSql = `attempt.user_id = $1 AND attempt.status IN ('graded', 'expired')
+   AND attempt.max_score > 0`
+
+// The last `window` finished trainings of every subject, newest first, numbered per subject.
+async function listRecentFinishedBySubject(userId, window, db = pool) {
+   const result = await db.query(
+      `SELECT subject_id, score, max_score, submitted_at, total
+       FROM (
+          SELECT (test.generation_filters ->> 'subjectId')::bigint AS subject_id,
+             attempt.score, attempt.max_score, attempt.submitted_at,
+             row_number() OVER subject_window AS position,
+             count(*) OVER (PARTITION BY test.generation_filters ->> 'subjectId')::integer AS total
+          ${trainerAttemptFrom}
+          WHERE ${finishedTrainerSql}
+          WINDOW subject_window AS (
+             PARTITION BY test.generation_filters ->> 'subjectId'
+             ORDER BY attempt.submitted_at DESC, attempt.id DESC
+          )
+       ) AS ranked
+       WHERE position <= $2
+       ORDER BY subject_id, submitted_at DESC`,
+      [normalizeInternalId(userId), window],
+   )
+   return result.rows
+}
+
+// Per topic over every finished training: questions met and questions with full points.
+// An unanswered question counts as wrong.
+async function listTopicResults(userId, minAnswers, limit, db = pool) {
+   const result = await db.query(
+      `SELECT topic.subject_id, topic.code,
+         (SELECT code FROM subjects WHERE id = topic.subject_id) AS subject_code,
+         (SELECT COALESCE(jsonb_object_agg(language_code, title), '{}')
+          FROM topic_translations WHERE topic_id = topic.id) AS titles,
+         count(*)::integer AS answered,
+         count(*) FILTER (
+            WHERE COALESCE(answer.awarded_points, 0) >= item.max_points
+         )::integer AS correct
+       ${trainerAttemptFrom}
+       JOIN attempt_questions AS item ON item.attempt_id = attempt.id
+       LEFT JOIN student_answers AS answer ON answer.attempt_question_id = item.id
+       JOIN question_topics AS link ON link.question_id = item.question_id
+       JOIN topics AS topic ON topic.id = link.topic_id
+       WHERE ${finishedTrainerSql}
+       GROUP BY topic.id
+       HAVING count(*) >= $2
+          AND count(*) FILTER (WHERE COALESCE(answer.awarded_points, 0) >= item.max_points) < count(*)
+       ORDER BY count(*) FILTER (WHERE COALESCE(answer.awarded_points, 0) >= item.max_points)::numeric
+          / count(*), count(*) DESC, topic.id
+       LIMIT $3`,
+      [normalizeInternalId(userId), minAnswers, limit],
+   )
+   return result.rows
+}
+
+async function listRecentFinished(userId, limit, db = pool) {
+   const result = await db.query(
+      `SELECT ${trainerAttemptColumns} ${trainerAttemptFrom}
+       WHERE ${finishedTrainerSql}
+       ORDER BY attempt.submitted_at DESC, attempt.id DESC
+       LIMIT $2`,
+      [normalizeInternalId(userId), limit],
    )
    return result.rows
 }
@@ -170,15 +247,15 @@ async function pickCandidates(bankCodePrefix, filters, { userId, excludeIds, lim
    return result.rows
 }
 
+// No course: the trainer is its own module (tests_course_required_check allows it).
 async function createTrainerTest(test, client) {
    const result = await client.query(
       `INSERT INTO tests (
-         course_id, title, mode, origin, max_attempts, result_policy, answer_reveal_policy,
+         title, mode, origin, max_attempts, result_policy, answer_reveal_policy,
          shuffle_questions, shuffle_options, generation_filters, created_by
-       ) VALUES ($1, $2, 'practice', 'trainer', 1, 'first', 'after_submission', FALSE, FALSE, $3, $4)
+       ) VALUES ($1, 'practice', 'trainer', 1, 'first', 'after_submission', FALSE, FALSE, $2, $3)
        RETURNING id`,
       [
-         normalizeInternalId(test.courseId),
          test.title,
          test.generationFilters,
          normalizeInternalId(test.createdBy),
@@ -248,6 +325,7 @@ export {
    countCandidates,
    createTrainerAssignment,
    createTrainerTest,
+   findAccountStatus,
    findOpenTrainerAttempt,
    findSubject,
    findTrainerAttemptByKey,
@@ -255,7 +333,10 @@ export {
    listTrainableCounts,
    listTrainableSections,
    listTrainerAttempts,
-   listTrainerCourses,
+   listRecentFinished,
+   listRecentFinishedBySubject,
+   listTopicResults,
+   listTrainableTopics,
    listTrainerStats,
    lockTrainerSlot,
    pickCandidates,

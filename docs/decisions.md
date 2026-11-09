@@ -660,6 +660,28 @@ Password login uses a generic invalid-credentials response for unknown phones an
 - **Video lessons** stay drafts because there is no real storage to hold a video.
 - **Report.** The run prints a summary per entity (created / existing) and a checklist of accounts and screens; `--verbose` prints every record.
 
+## 2026-11-11 — NCT trainer access and the /nct overview
+
+- **Access replaces the 2026-11-10 rule.** The trainer is its own module and does not depend on courses or enrollments. Access needs two things, both existing mechanisms:
+   - `users.status = 'active'`, i.e. an administrator approved the account and did not block it. Failing that returns the code login already uses, `403 ACCOUNT_NOT_ACTIVE`.
+   - The RBAC permission `trainer.use`, granted to the `student` role by migration `20261111010000000`. Failing that returns `403 TRAINER_STUDENT_ROLE_REQUIRED`.
+   - The authentication middleware checks neither the status nor the role, so the trainer service checks both.
+   - `TRAINER_ACCESS_DENIED` and the catalog's `accessible` are removed.
+- **No course for trainer tests.** `tests.course_id` is nullable only for `origin = 'trainer'` (`tests_course_required_check`). A service container course was rejected:
+   - its tests would still need enrollments to pass the attempt access check;
+   - it would show up in course lists;
+   - it could be mistaken for real content.
+   - Risk of NULL: code that reads `course_id` of a test must not assume it exists. Every authored-test query already filters `origin = 'authored'`.
+   - The attempt service's `requireContentAccess` handles `origin = 'trainer'` first and checks only the account. Revoking enrollments therefore never affects a running training, while blocking the account stops it.
+   - Trainer tests created before this change keep their course but follow the same rule.
+- **Overview formulas.**
+   - Subject readiness = Σ score ÷ Σ max score over the last `TRAINER_READINESS_WINDOW` (5) finished trainings of the subject, × 100. This is the share of correct answers, weighted by questions.
+   - Overall readiness = the mean of the subject values (each trained subject equally); `null` when there are none.
+   - Weak topics are computed over all finished trainings: per topic, questions met and questions with full points. A topic needs at least `TRAINER_WEAK_TOPIC_MIN_ANSWERS` (5) questions and must be below 100%. The lowest share comes first, then the most questions. The limit is `TRAINER_WEAK_TOPICS_LIMIT` (5).
+   - Recent results: the last `TRAINER_RECENT_RESULTS_LIMIT` (5) finished trainings.
+   - Only finished trainings (`graded`, `expired`) count.
+- **Empty state** is `200` with `empty: true`, never an error.
+
 ## 2026-11-10 — NCT trainer
 
 - **No second engine.** A training is a test generated for one student (`tests.origin = 'trainer'`, mode `practice`) with test questions, a one-student assignment and an attempt, all in one transaction. Start, autosave, timer, grading, reveal and result come from M11 unchanged, so the rules match regular tests exactly.

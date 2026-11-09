@@ -12,7 +12,7 @@ import {
    replaceAnswerKeyService,
    verifyAnswerKeyService,
 } from '../../src/services/question-bank-service.js'
-import { createSubjectService } from '../../src/services/taxonomy-service.js'
+import { createSectionService, createSubjectService, createTopicService } from '../../src/services/taxonomy-service.js'
 import {
    getAttemptResultService,
    getAttemptService,
@@ -23,6 +23,7 @@ import { listTestsService } from '../../src/services/test-service.js'
 import {
    createTrainerAttemptService,
    getTrainerCatalogService,
+   getTrainerOverviewService,
    listTrainerHistoryService,
    splitByShares,
 } from '../../src/services/trainer-service.js'
@@ -31,6 +32,7 @@ import { createMemoryStorageProvider } from '../helpers/memory-storage-provider.
 const { Client } = pg
 const suffix = randomUUID().slice(0, 8)
 const text = (value) => ({ blocks: [{ type: 'text', text: value }] })
+const topicByDifficulty = (difficulty) => (difficulty <= 2 ? 'grammar' : difficulty === 3 ? 'spelling' : 'reading')
 
 test('NCT trainer integration', async (t) => {
    const client = new Client(env.database)
@@ -42,12 +44,19 @@ test('NCT trainer integration', async (t) => {
       ...env.trainer,
       bankCodePrefix: `nct-${suffix}-`,
       questionCounts: [1, 2, 4, 10, 20],
+      readinessWindow: 5,
+      weakTopicMinAnswers: 2,
+      weakTopicsLimit: 5,
+      recentResultsLimit: 5,
    }
    const deps = { storage, trainerConfig }
 
-   async function createUser(role) {
+   async function createUser(role, status = 'active') {
       const { rows } = await client.query(
-         `INSERT INTO users (status, onboarding_completed_at) VALUES ('active', CURRENT_TIMESTAMP) RETURNING id`,
+         `INSERT INTO users (status, onboarding_completed_at, blocked_at)
+          VALUES ($1::varchar, CURRENT_TIMESTAMP, CASE WHEN $1::varchar = 'blocked' THEN CURRENT_TIMESTAMP END)
+          RETURNING id`,
+         [status],
       )
       await client.query('INSERT INTO user_roles (user_id, role_id) SELECT $1, id FROM roles WHERE code = $2', [rows[0].id, role])
       return String(rows[0].id)
@@ -65,17 +74,31 @@ test('NCT trainer integration', async (t) => {
    const adminId = await createUser('admin')
    const studentId = await createUser('student')
    const outsiderId = await createUser('student')
+   const enrolledId = await createUser('student')
+   const pendingId = await createUser('student', 'pending')
+   const blockedId = await createUser('student', 'blocked')
+   const teacherId = await createUser('teacher')
    const subject = await createSubjectService(adminId, {
       code: `trainer-${suffix}`, primaryLanguage: 'en', translations: { en: { title: 'Trainer subject' } },
    })
+   // Only enrolledId has a course enrollment, to show that it plays no part in the trainer.
    const course = await client.query(
       `INSERT INTO courses (title, subject_id, status, created_by) VALUES ($1, $2, 'published', $3) RETURNING id`,
       [`Trainer ${suffix}`, subject.id, adminId],
    )
    await client.query(
       'INSERT INTO course_enrollments (user_id, course_id, granted_by) VALUES ($1, $2, $3)',
-      [studentId, course.rows[0].id, adminId],
+      [enrolledId, course.rows[0].id, adminId],
    )
+   const section = await createSectionService(adminId, subject.id, {
+      code: 'part-a', primaryLanguage: 'en', translations: { en: { title: 'Part A' } },
+   })
+   const topicIds = {}
+   for (const code of ['grammar', 'spelling', 'reading']) {
+      topicIds[code] = (await createTopicService(adminId, subject.id, {
+         code, primaryLanguage: 'en', translations: { en: { title: code } }, sectionId: section.id,
+      })).id
+   }
    const bank = await createQuestionBankService(adminId, {
       code: `nct-${suffix}-bank`, title: 'NCT', subjectId: subject.id, visibility: 'staff',
    })
@@ -83,8 +106,8 @@ test('NCT trainer integration', async (t) => {
       code: `other-${suffix}`, title: 'Not NCT', subjectId: subject.id, visibility: 'staff',
    })
 
-   // Correct option per question id, to answer later.
-   const keys = new Map()
+   // Topic per question id: easy = grammar, medium = spelling, hard = reading. The key is B.
+   const topicOf = new Map()
    async function addQuestion(bankId, difficulty, { publish = true, withImage = false } = {}) {
       const content = withImage
          ? { blocks: [{ type: 'text', text: 'Look' }, { type: 'image', assetId: await insertAsset(adminId), alt: 'fig' }] }
@@ -94,6 +117,7 @@ test('NCT trainer integration', async (t) => {
          languageCode: 'en',
          difficulty,
          difficultySource: 'expert',
+         topicIds: [topicIds[topicByDifficulty(difficulty)]],
          content,
          options: [{ key: 'A', content: text('A') }, { key: 'B', content: text('B') }],
       })
@@ -104,7 +128,7 @@ test('NCT trainer integration', async (t) => {
          await verifyAnswerKeyService(adminId, question.id, { source: 'expert_review' })
          await publishQuestionService(adminId, question.id)
       }
-      keys.set(String(question.id), 'B')
+      topicOf.set(String(question.id), topicByDifficulty(difficulty))
       return String(question.id)
    }
 
@@ -124,22 +148,36 @@ test('NCT trainer integration', async (t) => {
       assert.deepEqual(splitByShares(1, [30, 40, 30]), [0, 1, 0])
    })
 
-   await t.test('catalog counts published verified NCT questions per difficulty', async () => {
+   await t.test('catalog counts published verified NCT questions per difficulty, section and topic', async () => {
       const catalog = await getTrainerCatalogService(studentId, deps)
       assert.deepEqual(catalog.options.difficulties, ['easy', 'medium', 'hard', 'mixed'])
       assert.deepEqual(catalog.options.mixedShares, { easy: 30, medium: 40, hard: 30 })
       const entry = catalog.subjects.find((row) => row.code === subject.code)
-      assert.equal(entry.accessible, true)
+      assert.equal(Object.hasOwn(entry, 'accessible'), false)
       assert.deepEqual(entry.languages, [{ language: 'en', total: 12, difficulties: { easy: 4, medium: 5, hard: 3 } }])
-      const outsider = await getTrainerCatalogService(outsiderId, deps)
-      assert.equal(outsider.subjects.find((row) => row.code === subject.code).accessible, false)
+      assert.deepEqual(entry.sections, [{ code: 'part-a', titles: { en: 'Part A' }, total: 12 }])
+      assert.deepEqual(entry.topics.map((topic) => [topic.code, topic.sectionCode, topic.total]), [
+         ['grammar', 'part-a', 4], ['reading', 'part-a', 3], ['spelling', 'part-a', 5],
+      ])
    })
 
-   await t.test('validation, access and shortage are refused with stable codes', async () => {
+   await t.test('only active students may use the trainer; courses play no part', async () => {
+      for (const userId of [pendingId, blockedId]) {
+         await assert.rejects(getTrainerCatalogService(userId, deps), { code: 'ACCOUNT_NOT_ACTIVE' })
+         await assert.rejects(createTrainerAttemptService(userId, request(), deps), { code: 'ACCOUNT_NOT_ACTIVE' })
+         await assert.rejects(getTrainerOverviewService(userId, deps), { code: 'ACCOUNT_NOT_ACTIVE' })
+         await assert.rejects(listTrainerHistoryService(userId, {}, deps), { code: 'ACCOUNT_NOT_ACTIVE' })
+      }
+      await assert.rejects(getTrainerCatalogService(teacherId, deps), { code: 'TRAINER_STUDENT_ROLE_REQUIRED' })
+      await assert.rejects(createTrainerAttemptService(teacherId, request(), deps), { code: 'TRAINER_STUDENT_ROLE_REQUIRED' })
+      const { rows } = await client.query('SELECT count(*)::integer AS total FROM course_enrollments WHERE user_id = $1', [studentId])
+      assert.equal(rows[0].total, 0)
+   })
+
+   await t.test('validation and shortage are refused with stable codes', async () => {
       await assert.rejects(createTrainerAttemptService(studentId, request({ count: 7 }), deps), { code: 'VALIDATION_ERROR' })
       await assert.rejects(createTrainerAttemptService(studentId, request({ difficulty: 'extreme' }), deps), { code: 'VALIDATION_ERROR' })
       await assert.rejects(createTrainerAttemptService(studentId, request({ subject: 'missing-subject' }), deps), { code: 'SUBJECT_NOT_FOUND' })
-      await assert.rejects(createTrainerAttemptService(outsiderId, request(), deps), { code: 'TRAINER_ACCESS_DENIED' })
       await assert.rejects(
          createTrainerAttemptService(studentId, request({ difficulty: 'easy', count: 10 }), deps),
          (error) => error.code === 'TRAINER_NOT_ENOUGH_QUESTIONS' && error.details[0].message === '4',
@@ -150,11 +188,28 @@ test('NCT trainer integration', async (t) => {
       )
    })
 
-   await t.test('mixed creates a 30/40/30 attempt without keys', async () => {
+   await t.test('an empty overview is a state, not an error', async () => {
+      assert.deepEqual(await getTrainerOverviewService(studentId, deps), {
+         empty: true,
+         readinessPercent: null,
+         completedTrainings: 0,
+         readinessWindow: 5,
+         subjects: [],
+         weakTopics: [],
+         recentResults: [],
+      })
+   })
+
+   await t.test('a student without enrollments creates a 30/40/30 training without keys', async () => {
       const view = await createTrainerAttemptService(studentId, request({ idempotencyKey: `key-${suffix}-1` }), deps)
       assert.equal(view.resumed, false)
       attemptId = view.attempt.id
       assert.equal(view.questions.length, 10)
+      const created = await client.query(
+         'SELECT course_id, origin FROM tests WHERE id = (SELECT test_id FROM test_attempts WHERE id = $1)',
+         [attemptId],
+      )
+      assert.deepEqual(created.rows[0], { course_id: null, origin: 'trainer' })
       const serialized = JSON.stringify(view)
       for (const secret of ['correctAnswer', 'answerData', 'grading', 'explanation', 'Because B']) {
          assert.equal(serialized.includes(secret), false, secret)
@@ -193,9 +248,15 @@ test('NCT trainer integration', async (t) => {
 
    await t.test('submit grades with the engine and reveals keys; a repeat changes nothing', async () => {
       const view = await getAttemptService(studentId, attemptId, deps)
-      // Right on the first six, wrong on the rest.
-      for (const [index, question] of view.questions.entries()) {
-         await saveAnswerService(studentId, attemptId, question.id, { answer: { optionKey: index < 6 ? 'B' : 'A' }, revision: 1 }, deps)
+      const items = await client.query(
+         'SELECT id::text AS id, question_id::text AS question_id FROM attempt_questions WHERE attempt_id = $1',
+         [attemptId],
+      )
+      const questionOf = new Map(items.rows.map((row) => [row.id, row.question_id]))
+      // Grammar and reading right (3 + 3), spelling wrong (4).
+      for (const question of view.questions) {
+         const wrong = topicOf.get(questionOf.get(String(question.id))) === 'spelling'
+         await saveAnswerService(studentId, attemptId, question.id, { answer: { optionKey: wrong ? 'A' : 'B' }, revision: 1 }, deps)
       }
       const result = await submitAttemptService(studentId, attemptId, deps)
       assert.equal(result.revealed, true)
@@ -214,7 +275,7 @@ test('NCT trainer integration', async (t) => {
 
    await t.test('unseen questions are picked first', async () => {
       const { rows } = await client.query(
-         `SELECT item.question_id::text AS id FROM attempt_questions AS item WHERE item.attempt_id = $1`,
+         'SELECT item.question_id::text AS id FROM attempt_questions AS item WHERE item.attempt_id = $1',
          [attemptId],
       )
       const seen = new Set(rows.map((row) => row.id))
@@ -223,6 +284,7 @@ test('NCT trainer integration', async (t) => {
       const view = await createTrainerAttemptService(studentId, request({ difficulty: 'easy', count: 1 }), deps)
       const picked = await client.query('SELECT question_id::text AS id FROM attempt_questions WHERE attempt_id = $1', [view.attempt.id])
       assert.deepEqual(picked.rows.map((row) => row.id), unseenEasy)
+      // Submitted unanswered: one wrong grammar question.
       await submitAttemptService(studentId, view.attempt.id, deps)
    })
 
@@ -237,15 +299,12 @@ test('NCT trainer integration', async (t) => {
       ])
       assert.equal((await listTrainerHistoryService(outsiderId, {}, deps)).attempts.length, 0)
 
-      const tests = await listTestsService(adminId, { courseId: String(course.rows[0].id) })
-      assert.equal(tests.tests.length, 0)
+      const trainerTests = await client.query(`SELECT id::text AS id FROM tests WHERE origin = 'trainer'`)
+      const listed = (await listTestsService(adminId, { limit: '100' })).tests.map((row) => String(row.id))
+      assert.equal(listed.some((id) => trainerTests.rows.some((row) => row.id === id)), false)
    })
 
    await t.test('parallel creates start exactly one training', async () => {
-      await client.query(
-         'INSERT INTO course_enrollments (user_id, course_id, granted_by) VALUES ($1, $2, $3)',
-         [outsiderId, course.rows[0].id, adminId],
-      )
       const outcomes = await Promise.allSettled([1, 2, 3].map(() => (
          createTrainerAttemptService(outsiderId, request({ difficulty: 'medium', count: 2 }), deps)
       )))
@@ -260,5 +319,60 @@ test('NCT trainer integration', async (t) => {
          [outsiderId],
       )
       assert.equal(rows[0].total, 1)
+   })
+
+   await t.test('overview: readiness, weak topics and recent results of my own trainings only', async () => {
+      // The outsider finishes its training of two unanswered spelling questions.
+      const running = await client.query(
+         `SELECT id FROM test_attempts WHERE user_id = $1 AND status = 'in_progress'`,
+         [outsiderId],
+      )
+      await submitAttemptService(outsiderId, running.rows[0].id, deps)
+
+      const overview = await getTrainerOverviewService(studentId, deps)
+      assert.equal(overview.empty, false)
+      assert.equal(overview.completedTrainings, 2)
+      // (6 + 0) / (10 + 1) over both trainings of the subject.
+      assert.equal(overview.readinessPercent, 54.55)
+      assert.deepEqual(overview.subjects.map((row) => [row.subjectCode, row.readinessPercent, row.trainings]), [
+         [subject.code, 54.55, 2],
+      ])
+      assert.ok(overview.subjects[0].lastSubmittedAt)
+      assert.deepEqual(overview.weakTopics.map((row) => [row.topicCode, row.answered, row.correct, row.correctPercent]), [
+         ['spelling', 4, 0, 0],
+         ['grammar', 4, 3, 75],
+      ])
+      assert.equal(overview.weakTopics[0].subjectCode, subject.code)
+      assert.deepEqual(overview.recentResults.map((row) => [row.difficulty, row.questionCount, row.percent]), [
+         ['easy', 1, 0],
+         ['mixed', 10, 60],
+      ])
+      assert.equal(overview.recentResults[1].attemptId, attemptId)
+
+      const other = await getTrainerOverviewService(outsiderId, deps)
+      assert.equal(other.completedTrainings, 1)
+      assert.equal(other.readinessPercent, 0)
+      assert.deepEqual(other.weakTopics.map((row) => [row.topicCode, row.answered]), [['spelling', 2]])
+      assert.equal(other.recentResults.length, 1)
+   })
+
+   await t.test('a running training does not depend on course enrollments; blocking stops it', async () => {
+      const view = await createTrainerAttemptService(enrolledId, request({ difficulty: 'hard', count: 2 }), deps)
+      await client.query(
+         'UPDATE course_enrollments SET revoked_at = CURRENT_TIMESTAMP, revoked_by = $2 WHERE user_id = $1',
+         [enrolledId, adminId],
+      )
+      await saveAnswerService(enrolledId, view.attempt.id, view.questions[0].id, { answer: { optionKey: 'B' }, revision: 1 }, deps)
+      assert.equal((await getAttemptService(enrolledId, view.attempt.id, deps)).questions.length, 2)
+      const result = await submitAttemptService(enrolledId, view.attempt.id, deps)
+      assert.equal(Number(result.attempt.score), 1)
+
+      const next = await createTrainerAttemptService(enrolledId, request({ difficulty: 'easy', count: 1 }), deps)
+      await client.query(`UPDATE users SET status = 'blocked', blocked_at = CURRENT_TIMESTAMP WHERE id = $1`, [enrolledId])
+      await assert.rejects(getAttemptService(enrolledId, next.attempt.id, deps), { code: 'ACCOUNT_NOT_ACTIVE' })
+      await assert.rejects(
+         saveAnswerService(enrolledId, next.attempt.id, next.questions[0].id, { answer: { optionKey: 'B' }, revision: 1 }, deps),
+         { code: 'ACCOUNT_NOT_ACTIVE' },
+      )
    })
 })
