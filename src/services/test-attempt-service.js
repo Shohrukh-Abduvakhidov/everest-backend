@@ -197,7 +197,15 @@ function safeLearnerAssignment(row, attempts, now, extraAttempts = 0) {
    }
 }
 
-async function requireContentAccess(deps, actorId, { course_id: courseId, module_id: moduleId }, now, db) {
+async function requireContentAccess(deps, actorId, { course_id: courseId, module_id: moduleId, origin }, now, db) {
+   // Trainer attempts belong to no course: an active account is the whole rule, so revoking a
+   // course enrollment never stops a running training.
+   if (origin === 'trainer') {
+      if (!await deps.repository.isActiveAccount(actorId, db)) {
+         throw new AppError(403, 'ACCOUNT_NOT_ACTIVE', 'Account is not active')
+      }
+      return
+   }
    if (!await deps.repository.hasActiveEnrollment(actorId, courseId, now, db)) {
       throw new AppError(403, 'COURSE_ENROLLMENT_REQUIRED', 'An active course enrollment is required')
    }
