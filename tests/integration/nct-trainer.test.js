@@ -19,6 +19,7 @@ import {
    saveAnswerService,
    submitAttemptService,
 } from '../../src/services/test-attempt-service.js'
+import { listTestAttemptsService } from '../../src/services/test-results-service.js'
 import { listTestsService } from '../../src/services/test-service.js'
 import {
    createTrainerAttemptService,
@@ -78,6 +79,7 @@ test('NCT trainer integration', async (t) => {
    const pendingId = await createUser('student', 'pending')
    const blockedId = await createUser('student', 'blocked')
    const teacherId = await createUser('teacher')
+   const ownerId = await createUser('owner')
    const subject = await createSubjectService(adminId, {
       code: `trainer-${suffix}`, primaryLanguage: 'en', translations: { en: { title: 'Trainer subject' } },
    })
@@ -161,7 +163,7 @@ test('NCT trainer integration', async (t) => {
       ])
    })
 
-   await t.test('only active students may use the trainer; courses play no part', async () => {
+   await t.test('only active students, administrators and owners may use the trainer; courses play no part', async () => {
       for (const userId of [pendingId, blockedId]) {
          await assert.rejects(getTrainerCatalogService(userId, deps), { code: 'ACCOUNT_NOT_ACTIVE' })
          await assert.rejects(createTrainerAttemptService(userId, request(), deps), { code: 'ACCOUNT_NOT_ACTIVE' })
@@ -374,5 +376,65 @@ test('NCT trainer integration', async (t) => {
          saveAnswerService(enrolledId, next.attempt.id, next.questions[0].id, { answer: { optionKey: 'B' }, revision: 1 }, deps),
          { code: 'ACCOUNT_NOT_ACTIVE' },
       )
+   })
+   await t.test('administrators and owners train like students, in isolation from students and each other', async () => {
+      const readStudentSide = async () => JSON.stringify([
+         await getTrainerOverviewService(studentId, deps),
+         await listTrainerHistoryService(studentId, {}, deps),
+         await listTrainerHistoryService(outsiderId, {}, deps),
+         (await client.query(
+            `SELECT count(*)::integer AS total, coalesce(sum(score), 0)::text AS points
+             FROM test_attempts WHERE user_id = ANY($1::bigint[])`,
+            [[studentId, outsiderId, enrolledId]],
+         )).rows,
+      ])
+      const before = await readStudentSide()
+      const attemptsOf = {}
+
+      for (const [label, userId] of [['admin', adminId], ['owner', ownerId]]) {
+         const catalog = await getTrainerCatalogService(userId, deps)
+         assert.equal(catalog.subjects.some((item) => item.code === subject.code), true)
+         assert.equal((await getTrainerOverviewService(userId, deps)).empty, true, label)
+
+         const view = await createTrainerAttemptService(userId, request({ difficulty: 'easy', count: 2 }), deps)
+         assert.equal(view.questions.length, 2)
+         assert.equal(JSON.stringify(view).includes('correctAnswer'), false)
+         // One running training per account, and only its own.
+         await assert.rejects(
+            createTrainerAttemptService(userId, request({ difficulty: 'easy', count: 4 }), deps),
+            (error) => error.code === 'TRAINER_ATTEMPT_IN_PROGRESS' && error.details[0].message === String(view.attempt.id),
+         )
+
+         await saveAnswerService(userId, view.attempt.id, view.questions[0].id, { answer: { optionKey: 'B' }, revision: 1 }, deps)
+         assert.equal((await getAttemptService(userId, view.attempt.id, deps)).questions.length, 2)
+         const submitted = await submitAttemptService(userId, view.attempt.id, deps)
+         assert.equal(Number(submitted.attempt.score), 1)
+         const result = await getAttemptResultService(userId, view.attempt.id, deps)
+         assert.equal(result.revealed, true)
+         assert.equal(result.questions.filter((question) => question.correct).length, 1)
+
+         const overview = await getTrainerOverviewService(userId, deps)
+         assert.equal(overview.completedTrainings, 1)
+         assert.equal(overview.recentResults[0].attemptId, String(view.attempt.id))
+         const history = await listTrainerHistoryService(userId, {}, deps)
+         assert.deepEqual(history.attempts.map((row) => row.attemptId), [String(view.attempt.id)])
+         attemptsOf[label] = String(view.attempt.id)
+      }
+
+      // Own trainings only: the other staff account cannot read them, and no authoring screen lists them.
+      await assert.rejects(getAttemptService(adminId, attemptsOf.owner, deps), { code: 'ATTEMPT_NOT_FOUND' })
+      await assert.rejects(getAttemptResultService(ownerId, attemptsOf.admin, deps), { code: 'ATTEMPT_NOT_FOUND' })
+      const { rows } = await client.query('SELECT test_id::text AS id FROM test_attempts WHERE id = $1', [attemptsOf.owner])
+      await assert.rejects(listTestAttemptsService(adminId, rows[0].id, {}), { code: 'TEST_NOT_FOUND' })
+      const listed = (await listTestsService(ownerId, { limit: '100' })).tests.map((row) => String(row.id))
+      assert.equal(listed.includes(rows[0].id), false)
+
+      // Student statistics, histories and attempt rows are exactly as before.
+      assert.equal(await readStudentSide(), before)
+
+      // Teachers stay out; students still work.
+      await assert.rejects(getTrainerOverviewService(teacherId, deps), { code: 'TRAINER_STUDENT_ROLE_REQUIRED' })
+      await assert.rejects(listTrainerHistoryService(teacherId, {}, deps), { code: 'TRAINER_STUDENT_ROLE_REQUIRED' })
+      assert.equal((await getTrainerCatalogService(studentId, deps)).subjects.length > 0, true)
    })
 })

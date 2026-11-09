@@ -660,6 +660,13 @@ Password login uses a generic invalid-credentials response for unknown phones an
 - **Video lessons** stay drafts because there is no real storage to hold a video.
 - **Report.** The run prints a summary per entity (created / existing) and a checklist of accounts and screens; `--verbose` prints every record.
 
+## 2026-11-12 — Administrators and owners use the NCT trainer
+
+- **Why staff could not.** Only one thing: `trainer.use` was bound to the `student` role alone. Nothing else is role-specific: the attempt routes (`/tests/attempts/:id`, answers, submit, result) check only the owner of the attempt and, for `origin = 'trainer'`, an active account; there is no `attempts.take`-style permission.
+- **Change.** Migration `20261112010000000` binds `trainer.use` to `admin` and `owner` (idempotent, by role code; `down` removes only these two bindings). The service still checks the permission, not a role list, and the error code for an account without it stays `TRAINER_STUDENT_ROLE_REQUIRED`. Teachers still lack it.
+- **Visibility.** Trainer tests are `origin = 'trainer'`, so authoring lists, assignment lists and staff results (`origin = 'authored'`) never show them, also to their author. The author reads own attempts through the learner routes, which filter by `attempt.user_id` only.
+- **Isolation.** All trainer reads are per user. The only cross-user aggregates over attempts in the code are the staff results of authored tests, which exclude trainer tests. Bonus, achievement and rating tables exist but nothing computes them from attempts yet; when that code is written it must filter `origin = 'authored'` (or exclude trainer tests) so staff and practice attempts do not count.
+
 ## 2026-11-11 — NCT trainer access and the /nct overview
 
 - **Access replaces the 2026-11-10 rule.** The trainer is its own module and does not depend on courses or enrollments. Access needs two things, both existing mechanisms:
