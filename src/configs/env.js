@@ -39,6 +39,43 @@ function readBoolean(name, fallback = false) {
   return raw === 'true';
 }
 
+function readIntegerList(name, fallback, { min = 1, max = 1000 } = {}) {
+  const values = readString(name, fallback).split(',').map((value) => Number(value.trim()));
+  if (!values.length || values.some((value) => !Number.isSafeInteger(value) || value < min || value > max)) {
+    throw new Error(`Invalid integer list environment variable: ${name}`);
+  }
+  return values;
+}
+
+// NCT trainer. Difficulty levels map names to ranges of questions.difficulty (1..5), e.g.
+// "easy:1-2,medium:3,hard:4-5". Mixed shares follow the level order and are percentages.
+function readTrainerConfig() {
+  const name = 'TRAINER_DIFFICULTY_LEVELS';
+  const levels = readString(name, 'easy:1-2,medium:3,hard:4-5').split(',').map((entry) => {
+    const match = /^([a-z]+):([1-5])(?:-([1-5]))?$/.exec(entry.trim());
+    if (!match || match[1] === 'mixed') throw new Error(`Invalid environment variable: ${name}`);
+    const low = Number(match[2]);
+    const high = Number(match[3] ?? match[2]);
+    if (high < low) throw new Error(`Invalid environment variable: ${name}`);
+    return Object.freeze({ name: match[1], min: low, max: high });
+  });
+  if (new Set(levels.map((level) => level.name)).size !== levels.length) {
+    throw new Error(`Invalid environment variable: ${name}`);
+  }
+  const maxQuestions = readInteger('TRAINER_MAX_QUESTIONS', 50, { max: 200 });
+  const questionCounts = readIntegerList('TRAINER_QUESTION_COUNTS', '10,20,30,50', { max: maxQuestions });
+  const mixedShares = readIntegerList('TRAINER_MIXED_SHARES', '30,40,30', { min: 0, max: 100 });
+  if (mixedShares.length !== levels.length || mixedShares.reduce((sum, value) => sum + value, 0) !== 100) {
+    throw new Error('TRAINER_MIXED_SHARES must give one percentage per level and sum to 100');
+  }
+  return Object.freeze({
+    bankCodePrefix: readString('TRAINER_BANK_CODE_PREFIX', 'nct-'),
+    levels: Object.freeze(levels),
+    questionCounts: Object.freeze(questionCounts),
+    mixedShares: Object.freeze(mixedShares),
+  });
+}
+
 export const databaseConfig = Object.freeze({
   host: readRequired('DB_HOST'),
   port: readInteger('DB_PORT', 5432, { max: 65535 }),
@@ -81,6 +118,7 @@ const env = Object.freeze({
   questionImportUploadTtlHours: readInteger('QUESTION_IMPORT_UPLOAD_TTL_HOURS', 24, { max: 720 }),
   questionImportWorkerIntervalMs: readInteger('QUESTION_IMPORT_WORKER_INTERVAL_MS', 5000),
   attemptSweepIntervalMs: readInteger('ATTEMPT_SWEEP_INTERVAL_MS', 30000),
+  trainer: readTrainerConfig(),
   otpHmacSecret: readString('OTP_HMAC_SECRET'),
   recoveryChallengeTtlSeconds: readInteger('RECOVERY_CHALLENGE_TTL_SECONDS', 600),
   recoveryResetTtlSeconds: readInteger('RECOVERY_RESET_TTL_SECONDS', 600),

@@ -9,6 +9,7 @@ import groupsRouter from './groups.js'
 import offlineLicensesRouter from './offline-licenses.js'
 import profileRouter from './profile.js'
 import testsRouter from './tests.js'
+import trainerRouter from './trainer.js'
 
 const router = express.Router()
 
@@ -24,6 +25,7 @@ const routeMounts = Object.freeze([
    ['/offline-licenses', offlineLicensesRouter],
    ['/profile', profileRouter],
    ['/tests', testsRouter],
+   ['/trainer', trainerRouter],
 ])
 
 for (const [mountPath, mountedRouter] of routeMounts) router.use(mountPath, mountedRouter)

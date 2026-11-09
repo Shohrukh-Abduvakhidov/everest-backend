@@ -4,7 +4,25 @@ Updated: 2026-11-09.
 
 ## Current increment
 
-Merge of the duplicate Tajik subject on `chore/merge-tajik-subjects` (awaiting review). The publish dry-run fix is merged (PR #44).
+NCT trainer on `feat/nct-trainer` (awaiting review). The Tajik subject merge is merged (PR #45).
+
+## 2026-11-10 — NCT trainer (`feat/nct-trainer`)
+
+- **Routes:** `GET /trainer/catalog`, `POST /trainer/attempts`, `GET /trainer/attempts`. Answering, submit and result use the existing `/tests/attempts` routes. Contract: `docs/frontend-handoff.md` "NCT trainer". Decisions: `docs/decisions.md` (2026-11-10).
+- **New:** migration `20261110010000000_add-nct-trainer` (`tests.origin`, trainer indexes), `routes/trainer.js`, `trainer-controller`, `trainer-service`, `trainer-repository`, `TRAINER_*` config in `env.js`. `test-attempt-service` exports `startAttemptInTransactionService`, and reviewed questions gained `correct`. Authored-test queries filter `origin = 'authored'`.
+- **Tests:** `tests/integration/nct-trainer.test.js` (9 subtests):
+   - share split;
+   - catalog counts and access flag;
+   - validation, access, unknown subject and shortage codes;
+   - mixed 3/4/3 with no keys in the view and signed images;
+   - idempotent repeat, reused key, running training, foreign attempt, result before submit;
+   - submit grading with `correct`, keys, explanations and images, and a repeated submit;
+   - unseen questions first;
+   - history and stats, and no trainer tests in admin lists;
+   - parallel creates start one training.
+   `scripts/test-migration-cycle.js` now expects 35 migrations.
+- **Checked:** `npm run test:auth` on a fresh migrated disposable database: exit 0; 392 tests, 392 passed, 0 failed, 0 skipped. `test:migrations`, `test:sources`, `test:integrity` and `test:server` exit 0. `everest_db` was only read (question counts per bank, difficulty and type).
+- **Not done:** staff view of trainer results; per-day limits; topic list in the catalog; trainer on HTTP-level tests (services were tested directly, routes are covered by the OpenAPI route test only); real S3 signing.
 
 ## 2026-11-09 — Merge of duplicate Tajik subjects (`chore/merge-tajik-subjects`)
 

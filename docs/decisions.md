@@ -660,6 +660,18 @@ Password login uses a generic invalid-credentials response for unknown phones an
 - **Video lessons** stay drafts because there is no real storage to hold a video.
 - **Report.** The run prints a summary per entity (created / existing) and a checklist of accounts and screens; `--verbose` prints every record.
 
+## 2026-11-10 — NCT trainer
+
+- **No second engine.** A training is a test generated for one student (`tests.origin = 'trainer'`, mode `practice`) with test questions, a one-student assignment and an attempt, all in one transaction. Start, autosave, timer, grading, reveal and result come from M11 unchanged, so the rules match regular tests exactly.
+- **Snapshot.** As for every attempt: keys, explanations and option/item keys are frozen in `attempt_questions.grading_snapshot` at start, and the shown content comes from published questions, which cannot change.
+- **Access (proposed minimum, open for review).** The platform has no paid trainer entitlement. The trainer for a subject therefore requires an active enrollment in a published course with that `subject_id`, which an administrator grants. The earliest such course hosts the generated test, so the ordinary `COURSE_ENROLLMENT_REQUIRED` check covers the running attempt too. Module grants do not apply, because the test has no module. In `everest_db` today only Biology has such a course.
+- **Policy of a training:** no timer, `max_attempts` 1, `result_policy` first, `answer_reveal_policy` after_submission (revealed immediately after submit), 1 point per question, questions shuffled once at creation, options in book order.
+- **Selection:** published, key `verified`, bank code prefix `nct-` (config), subject, language (default: the subject's primary language), optional section/topic code. Difficulty levels map to `questions.difficulty` ranges from config (`easy 1-2, medium 3, hard 4-5`). `mixed` splits the count 30/40/30 by largest remainder and fills a short level from all levels. Questions the student met in earlier trainings are picked last (`ORDER BY seen, random()`).
+- **Counts** come from a configured set (`10,20,30,50`, capped by `TRAINER_MAX_QUESTIONS`). Too few matches return `409 TRAINER_NOT_ENOUGH_QUESTIONS` with the available number.
+- **Concurrency/idempotency.** A per-student advisory lock serialises generation, so a student has one running training at a time (`409 TRAINER_ATTEMPT_IN_PROGRESS`). An optional `idempotencyKey` is stored in `generation_filters`, with a partial unique index per student; a repeat returns the same attempt, and the same key with other parameters returns `409 IDEMPOTENCY_KEY_REUSED`. Submit is the existing idempotent submit.
+- **Hidden from staff screens.** Admin test lists, test detail/edit, lesson links, extra-attempt grants, staff results and course assignment lists filter `origin = 'authored'`. Staff can therefore not see trainer results yet (next step).
+- **Result DTO:** `correct` added to reviewed questions (full points), for all attempts. It is additive.
+
 ## 2026-11-09 — Merge of the duplicate Tajik subject
 
 - **Canonical subject:** `zaboni-tochiki` (the older one). `tajik_language` (created by the `nct-tg-2026` import) is merged into it and deleted; subjects have no archive state.

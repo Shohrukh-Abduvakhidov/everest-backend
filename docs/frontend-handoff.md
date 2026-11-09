@@ -435,6 +435,92 @@ Show the grant button to a teacher only on group assignments of their groups.
 - Learner screens need no change: `maxAttempts` and `remainingAttempts` already include grants.
 - After a grant, the result of an `after_submission` test may hide the answers again (`revealed: false`) until the extra attempts are used.
 
+### NCT trainer (2026-11-10)
+
+A student picks a subject, a difficulty and a count. The server builds a practice test from published NCT questions with verified keys and starts its attempt. Answering, submitting and reading the result use the ordinary attempt routes above (`/tests/attempts/:attemptId...`). Every route needs a signed-in user. `POST` also needs CSRF when the request uses cookies.
+
+**Access.** A subject is `accessible` when the student has an active enrollment in a **published course whose subject is that subject**. Otherwise `POST` returns `403 TRAINER_ACCESS_DENIED`. Show such subjects as locked. When the enrollment is revoked, a running training stops too: its attempt routes return `403 COURSE_ENROLLMENT_REQUIRED`.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/trainer/catalog` | Options and the subjects with trainable questions |
+| POST | `/trainer/attempts` | Generate and start a training: `201`, or `200` for a repeated `idempotencyKey` |
+| GET | `/trainer/attempts` | My trainings, newest first, plus statistics per subject |
+
+**`GET /trainer/catalog`** returns:
+
+```json
+{ "data": {
+  "options": {
+    "questionCounts": [10, 20, 30, 50],
+    "difficulties": ["easy", "medium", "hard", "mixed"],
+    "levels": [{ "name": "easy", "minDifficulty": 1, "maxDifficulty": 2 }, { "name": "medium", "minDifficulty": 3, "maxDifficulty": 3 }, { "name": "hard", "minDifficulty": 4, "maxDifficulty": 5 }],
+    "mixedShares": { "easy": 30, "medium": 40, "hard": 30 }
+  },
+  "subjects": [{
+    "id": "135", "code": "zaboni-tochiki", "color": "orange", "primaryLanguage": "tg",
+    "titles": { "tg": "…", "ru": "…" },
+    "accessible": true,
+    "languages": [{ "language": "tg", "total": 972, "difficulties": { "easy": 333, "medium": 605, "hard": 34 } }],
+    "sections": [{ "code": "syntax", "titles": { "tg": "…" }, "total": 120 }]
+  }]
+} }
+```
+
+- Disable a difficulty and count pair when `difficulties[level] < count`.
+- For `mixed`, compare against `total`. Mixed takes about 30/40/30 from the levels and fills any shortfall from the other levels. A question without a difficulty counts only in `total`.
+- `sections[].total` counts all languages. Section and topic filters are optional, so a combination can still be too small; the server answers that with `409`.
+
+**`POST /trainer/attempts`** takes this body:
+
+| Field | Required | Value |
+|---|---|---|
+| `subject` | yes | Subject id (`"135"`) or code (`"zaboni-tochiki"`) |
+| `difficulty` | yes | One of `options.difficulties` |
+| `count` | yes | One of `options.questionCounts` (number) |
+| `language` | no | `tg`, `ru` or `en`; defaults to the subject's `primaryLanguage` |
+| `sectionCode` | no | Code from `sections` |
+| `topicCode` | no | Topic code |
+| `idempotencyKey` | no | 8–100 characters `A-Z a-z 0-9 . _ : -`. Generate one per click and reuse it on retry |
+
+The response is the same `AttemptView` as `GET /tests/attempts/:attemptId`, plus `resumed`. It has no keys, no explanations and no grading data. Image blocks carry `url` and `expiresAt` (5 minutes), like every attempt view, so re-read the attempt to get fresh URLs. Questions come in a random order. Options keep their book order, because their labels (А, Б, …) are part of the content.
+
+| Status | Code | Meaning / UI |
+|---|---|---|
+| 400 | `VALIDATION_ERROR` | `details[0].field` names the field (`count` outside the allowed set, unknown `difficulty`, an unknown body field, …) |
+| 403 | `TRAINER_ACCESS_DENIED` | No active enrollment in a course of this subject |
+| 404 | `SUBJECT_NOT_FOUND` | Unknown id or code |
+| 409 | `TRAINER_NOT_ENOUGH_QUESTIONS` | `details[0].field = "available"`, `details[0].message` = how many questions match (as a string). Offer a smaller count |
+| 409 | `TRAINER_ATTEMPT_IN_PROGRESS` | One running training per student. `details[0].message` = the running `attemptId`. Offer "continue" (open it) or "finish" (`POST /tests/attempts/:id/submit`) |
+| 409 | `IDEMPOTENCY_KEY_REUSED` | The same key was sent with different parameters |
+
+Then use the ordinary attempt routes:
+
+- `PUT /tests/attempts/:attemptId/answers/:attemptQuestionId` with `{ answer, revision }`. The answer formats are the same as for tests.
+- `POST /tests/attempts/:attemptId/submit`. A repeat returns the same result.
+- `GET /tests/attempts/:attemptId/result`. A training has no timer, one attempt and `answerRevealPolicy: "after_submission"`, so the result is `revealed: true` right after submit. Each question has:
+   - `answer`, `awardedPoints`, `points` (1);
+   - **`correct`** (boolean, new): full points;
+   - `correctAnswer`;
+   - `explanation` (blocks; image URLs signed).
+- `percent`, `attempt.score` and `attempt.maxScore` are the total.
+
+**`GET /trainer/attempts`** takes the query `subjectId`, `limit` (1–100, default 20) and `offset`. It returns:
+
+```json
+{ "data": {
+  "attempts": [{ "attemptId": "9", "status": "graded", "subjectId": "135", "subjectCode": "zaboni-tochiki",
+    "difficulty": "mixed", "language": "tg", "sectionCode": null, "topicCode": null, "questionCount": 10,
+    "startedAt": "…", "submittedAt": "…", "score": "6.00", "maxScore": "10.00", "percent": 60 }],
+  "pagination": { "limit": 20, "offset": 0, "hasMore": false },
+  "stats": [{ "subjectId": "135", "attempts": 2, "averagePercent": 30, "lastSubmittedAt": "…" }]
+} }
+```
+
+- `score`, `maxScore` and `percent` are `null` while a training is `in_progress`.
+- `stats` counts finished trainings only and does not depend on `subjectId`.
+- Trainings never appear in course test lists (`/courses/:courseId/test-assignments`) or in admin test screens.
+
 ### Admin: tests (M10)
 
 | Method | Path | Permission | Purpose |
@@ -604,6 +690,7 @@ Names only; put values in `.env` (never commit it).
 | Auth (needed for any login; each ≥32 characters, different values; without them auth routes return `503`) | `JWT_ACCESS_SECRET`, `OTP_HMAC_SECRET` |
 | Auth tuning (optional) | `AUTH_SESSION_TTL_SECONDS`, `AUTH_REFRESH_TTL_SECONDS`, `AUTH_RATE_WINDOW_SECONDS`, `AUTH_RATE_BLOCK_SECONDS`, `AUTH_LOGIN_MAX_ATTEMPTS`, `AUTH_PUBLIC_RATE_LIMIT`, `AUTH_ADMIN_RATE_LIMIT`, `PLAYBACK_RATE_LIMIT` |
 | Attempts (optional) | `ATTEMPT_SWEEP_INTERVAL_MS` (30000), used by `npm run worker:attempts` |
+| NCT trainer (optional) | `TRAINER_BANK_CODE_PREFIX` (`nct-`), `TRAINER_QUESTION_COUNTS` (`10,20,30,50`), `TRAINER_MAX_QUESTIONS` (50; upper bound for the counts), `TRAINER_DIFFICULTY_LEVELS` (`easy:1-2,medium:3,hard:4-5`), `TRAINER_MIXED_SHARES` (`30,40,30`, one per level, sum 100) |
 | Password recovery (optional) | `RECOVERY_CHALLENGE_TTL_SECONDS`, `RECOVERY_RESET_TTL_SECONDS`, `RECOVERY_RESEND_COOLDOWN_SECONDS`, `RECOVERY_MAX_ATTEMPTS`, `RECOVERY_MAX_REQUESTS_PER_HOUR` |
 | Telegram (optional; Telegram login, link, recovery) | `TELEGRAM_CLIENT_ID`, `TELEGRAM_CLIENT_SECRET`, `TELEGRAM_REDIRECT_URI`, `TELEGRAM_BOT_USERNAME`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `TELEGRAM_OIDC_STATE_TTL_SECONDS` |
 | Storage (optional; otherwise storage routes return `503 STORAGE_NOT_CONFIGURED`) | `S3_ENDPOINT`, `S3_PUBLIC_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE`, `STORAGE_PART_SIZE_BYTES`, `STORAGE_PRESIGN_TTL_SECONDS`, `STORAGE_UPLOAD_TTL_HOURS` |

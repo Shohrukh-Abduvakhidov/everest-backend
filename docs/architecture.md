@@ -745,3 +745,7 @@ Detailed column-level schema remains in `../schema_tables.md`; implemented endpo
 ## Background jobs
 
 `src/jobs/question-import-worker.js` runs confirmed package uploads. It is started only by `npm run worker:imports`, never by importing the app. Claims use `SKIP LOCKED` with a renewed lease, so several processes are safe, but packages wait on local disk, so workers and the API must share a host.
+
+## NCT trainer (2026-11-10)
+
+`routes/trainer.js` → `trainer-controller` → `trainer-service` → `trainer-repository`. A training is an ordinary test with `tests.origin = 'trainer'` (mode `practice`, one attempt, reveal after submission, 1 point per question), a one-student assignment and an attempt, created in one transaction. The attempt itself is run by `test-attempt-service` (`startAttemptInTransactionService` for the start; the existing `/tests/attempts` routes for the rest). Repositories that list or edit authored tests filter `origin = 'authored'`.

@@ -435,7 +435,7 @@ const schemas = {
       revealed: bool(),
       revealsAt: nullable(dt()),
       remainingAttempts: nullable(int()),
-      questions: arr(anyObject('Question with answer, awardedPoints, gradingStatus, correctAnswer and explanation'), { description: 'Empty until the reveal policy allows it.' }),
+      questions: arr(anyObject('Question with answer, awardedPoints, correct, gradingStatus, correctAnswer and explanation'), { description: 'Empty until the reveal policy allows it.' }),
       serverNow: dt(),
    }, ['attempt', 'percent', 'passPercent', 'revealed', 'questions', 'serverNow']),
    AssignmentResult: obj({
@@ -1730,6 +1730,24 @@ const routes = [
       tag: 'Learner tests', summary: 'Result of a finished attempt; details follow the reveal policy',
       response: ref('AttemptResult'),
       errors: { 400: ['VALIDATION_ERROR', 'INVALID_ATTEMPT_ID'], 404: ['ATTEMPT_NOT_FOUND'], 409: ['RESULT_NOT_READY'] },
+   }],
+   ['get', '/trainer/catalog', {
+      tag: 'NCT trainer', summary: 'Subjects with trainable NCT questions, counts per language and difficulty',
+      description: 'Trainable = published, verified key, bank code starting with the configured prefix (nct-). accessible is true when the student has an active enrollment in a published course of the subject.',
+      response: obj({ options: anyObject('questionCounts, difficulties, levels, mixedShares'), subjects: arr(anyObject('id, code, color, primaryLanguage, titles, accessible, languages[{language,total,difficulties}], sections[{code,titles,total}]')) }, ['options', 'subjects']),
+   }],
+   ['post', '/trainer/attempts', {
+      tag: 'NCT trainer', created: true, summary: 'Generate a practice test and start its attempt (200 when idempotencyKey repeats)',
+      description: 'Answer, submit and read the result through /tests/attempts/{attemptId}. One running training per student.',
+      body: body({ subject: str({ description: 'Subject id or code' }), difficulty: str(), count: int(), language: str(), sectionCode: str(), topicCode: str(), idempotencyKey: str() }, ['subject', 'difficulty', 'count']),
+      response: ref('AttemptView'),
+      errors: { 400: ['VALIDATION_ERROR'], 403: ['TRAINER_ACCESS_DENIED'], 404: ['SUBJECT_NOT_FOUND'], 409: ['TRAINER_ATTEMPT_IN_PROGRESS', 'TRAINER_NOT_ENOUGH_QUESTIONS', 'IDEMPOTENCY_KEY_REUSED'] },
+   }],
+   ['get', '/trainer/attempts', {
+      tag: 'NCT trainer', summary: 'My trainings, newest first, with per-subject statistics',
+      query: [{ name: 'subjectId', schema: id() }, { name: 'limit', schema: int({ minimum: 1, maximum: 100 }) }, { name: 'offset', schema: int({ minimum: 0 }) }],
+      response: obj({ attempts: arr(anyObject('attemptId, status, subjectId, subjectCode, difficulty, language, sectionCode, topicCode, questionCount, startedAt, submittedAt, score, maxScore, percent')), pagination: anyObject(), stats: arr(anyObject('subjectId, attempts, averagePercent, lastSubmittedAt')) }, ['attempts', 'pagination', 'stats']),
+      errors: { 400: ['VALIDATION_ERROR'] },
    }],
    ['delete', '/admin/tests/:testId/assignments/:assignmentId', {
       tag: 'Admin: tests', ...admin('tests.assign'), summary: 'Revoke an assignment (the row stays)',

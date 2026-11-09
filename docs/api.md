@@ -816,3 +816,12 @@ Missing messaging permission returns `409 TELEGRAM_CONNECTION_UNAVAILABLE`. Tele
 - Archiving a test used by a published lesson, or deleting a draft test used by any lesson, returns `409 TEST_LINKED_TO_LESSON`; `details[].message` holds the lesson ids. Copying a test changes no lesson. Publishing a test never depends on lessons.
 - `POST /admin/courses/:id/copy` does not copy tests, so copied lessons have no link; `copied.clearedTestLinks` counts them.
 - `GET` learner lesson with access adds `test: { id, title, questionCount, timeLimitMinutes, maxAttempts, assignment: { state, opensAt, closesAt } }` or `null`. `state` is `open|upcoming|closed|none`, taken from the student's own and group assignments, best window first. It never contains questions or answers. Starting an attempt arrives with M11.
+
+## NCT trainer
+
+Full contract with examples and error table: `docs/frontend-handoff.md` → "NCT trainer". Summary:
+
+- `GET /api/v1/trainer/catalog`: `options` (`questionCounts`, `difficulties`, `levels`, `mixedShares`) and `subjects[]` with `accessible`, `languages[{ language, total, difficulties }]`, `sections[{ code, titles, total }]`. Trainable means a published question with a verified key in a bank whose code starts with `TRAINER_BANK_CODE_PREFIX` (`nct-`).
+- `POST /api/v1/trainer/attempts` `{ subject, difficulty, count, language?, sectionCode?, topicCode?, idempotencyKey? }`: `201 AttemptView` (+ `resumed`), `200` for a repeated key. Errors: `400 VALIDATION_ERROR`, `403 TRAINER_ACCESS_DENIED`, `404 SUBJECT_NOT_FOUND`, `409 TRAINER_NOT_ENOUGH_QUESTIONS` (`details[0].message` = available), `409 TRAINER_ATTEMPT_IN_PROGRESS` (`details[0].message` = running attempt id), `409 IDEMPOTENCY_KEY_REUSED`.
+- `GET /api/v1/trainer/attempts?subjectId&limit&offset`: `attempts[]`, `pagination`, `stats[{ subjectId, attempts, averagePercent, lastSubmittedAt }]`.
+- Answers, submit and result: the `/tests/attempts/:attemptId` routes. Reviewed questions in every attempt result now also carry `correct` (full points).
