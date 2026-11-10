@@ -18,7 +18,8 @@ updated_at: 2026-11-13
 
 ## Verification (2026-11-13)
 
-- Full suite on a disposable database, skipping only the live S3 round trip: exit 0; 415 tests, 415 passed, 0 failed.
+- `npm run test:auth` on a disposable database (including the live S3 round trip): exit 0; 416 tests, 416 passed, 0 failed (6 870 s, see below).
+- The same suite skipping only the live S3 round trip: exit 0; 415 passed, 0 failed, about 85 s.
 - `test:migrations` (38/38/37/38), `test:sources`, `test:integrity`, `test:server`: exit 0.
 - `everest_db`: only read-only counts. `test:integrity` runs inside `BEGIN … ROLLBACK` there, as `npm test` always does.
 
@@ -29,13 +30,13 @@ updated_at: 2026-11-13
 
 ## Known issue (environment, not this branch)
 
-- S3 storage is configured and reachable here, so `real-storage.test.js` runs. It passes, but the test process then never exits, and plain `npm run test:auth` hangs after its last result. Leftover disposable databases from killed runs: `everest_test_37cf6a4cfb11`, `everest_test_5c106eaff141` (safe to drop).
+- S3 storage is configured and reachable here, so `real-storage.test.js` runs. It passes, but the test process then stays idle for about 1.5–2 hours before it exits, so plain `npm run test:auth` looks hung after its last result. No disposable databases are left over.
 
 ## Next concrete task
 
 1. Review the PR for `feat/nct-mock-exam`; after the merge run `npm run migrate:up` on `everest_db`.
 2. Owner decisions: per-position difficulty distribution for `nct-a5` (now easy to hard within each range, no bounds); leading zeros in cells (now ignored).
-3. Make the live S3 test close its client so `npm test` exits.
+3. Make the live S3 test close its client so `npm test` exits promptly.
 
 ## Constraints
 
