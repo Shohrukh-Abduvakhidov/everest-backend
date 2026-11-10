@@ -1,10 +1,32 @@
 # EVEREST backend progress
 
-Updated: 2026-11-09.
+Updated: 2026-11-13.
 
 ## Current increment
 
-NCT trainer access and /nct overview on `feat/nct-trainer-access-overview` (awaiting review). The NCT trainer is merged (PR #46).
+NCT mock exam on `feat/nct-mock-exam` (awaiting review). The trainer, its access rule and staff access are merged (PRs #46–#48).
+
+## 2026-11-13 — NCT mock exam (`feat/nct-mock-exam`)
+
+- **What:** full exam simulation by answer-sheet blueprint, separate from the trainer. Routes under `/trainer/exams`: blueprints catalog, create, history, view, answer, flag, submit, result. Contract: `docs/frontend-handoff.md` "NCT mock exam". Decisions: `docs/decisions.md` (2026-11-13).
+- **Migration `20261113010000000_add-nct-mock-exam`:** `tests.origin` gains `mock_exam` (no course allowed); tables `exam_blueprints`, `exam_blueprint_sections`, `exam_blueprint_items`, `mock_exam_items`; seeds `nct-a5` (105 questions, 220 min, 4 × 40 = 160). `scripts/test-migration-cycle.js` now expects 38 migrations and 93 tables after up.
+- **Engine changes (additive):** `origin = 'mock_exam'` uses the account-only access rule; cells questions carry `answerFormat: 'digits'` in the grading snapshot, accept only `{ digits }` of 1–4 digits and grade 2/0; `listAttemptQuestionViewsService` exported for the mock exam result.
+- **Code:** `src/repositories/mock-exam-repository.js`, `src/services/mock-exam-service.js`, `src/controllers/mock-exam-controller.js`, routes in `src/routes/trainer.js`, OpenAPI entries.
+- **Read-only count in `everest_db` (2026-11-13; published, verified, `nct-` banks, all in `tg`):**
+
+  | Subject | single (4 options) | matching 4×5 | cells (1–4 digit whole key) | Exams without repeats |
+  | --- | --- | --- | --- | --- |
+  | zaboni-tochiki | 789 (need 20 → 39) | 183 (need 5 → 36) | — | 36 |
+  | biologiya | 551 (20 → 27) | 119 (4 → 29) | 25 (2 → 12) | 12 |
+  | khimiya | 535 (18 → 29) | 64 (2 → 32) | 239 (7 → 34) | 29 |
+  | fizika | 550 (18 → 30) | 133 (2 → 66) | 218 (7 → 31) | 30 |
+
+  Every published verified NCT question fits one of the three kinds (no excluded numeric/short_text keys). 12 complete exams without any repeated question; biology cells are the limit. No kind is short.
+- **Tests:** `tests/unit/mock-exam-grading.test.js` (cells input and 2/0, matching 0–4 per pair) and `tests/integration/nct-mock-exam.test.js` (15 subtests on a private copy of the seeded blueprint: seed values and sums 40/160, access, shortage error, assembly kinds/numbers/no repeats/no decoys/easy-to-hard, keys hidden, one running exam and idempotency, foreign attempt, cells input, flags, answers in any order, scoring 126/160 with matching 4/3/2/1/0 and cells 2/0, repeated submit, deadline rejection and lazy expiry, sweep expiry, history, isolation from the trainer, admin lists and staff results).
+- **Cells filter on real keys (read-only, 2026-11-13):** all 482 numeric/short_text keys in `nct-` banks qualify: biologiya 7 numeric (25, 50, 96) and 18 short_text (one accepted answer each, 1–3 digits, e.g. `"52"`, `"234"`, `"642"`), khimiya 239 numeric, fizika 218 numeric; lengths 1–4 digits, none longer, no fractions, signs or units. Nothing was excluded.
+- **Checked:** `node scripts/test-disposable-database.js --test-skip-pattern="real S3-compatible storage"` on a fresh migrated disposable database: exit 0; 415 tests, 415 passed, 0 failed. `test:migrations` (38/38/37/38, 93 tables after up), `test:sources`, `test:integrity`, `test:server`: exit 0.
+- **Environment finding:** S3 storage is configured and reachable on this machine, so `tests/integration/real-storage.test.js` runs instead of skipping. It passes, but afterwards the test process never exits (most likely the S3 client's keep-alive sockets), so plain `npm run test:auth` prints every result and then hangs before the summary. Two runs that had to be killed left the disposable databases `everest_test_37cf6a4cfb11` and `everest_test_5c106eaff141`. Not fixed in this branch.
+- **Not verified:** HTTP routes with cookies/CSRF (services called directly); assembly speed on `everest_db` (each range is one random-ordered query over the subject's candidates).
 
 ## 2026-11-12 — Staff access to the NCT trainer (`feat/trainer-staff-access`)
 

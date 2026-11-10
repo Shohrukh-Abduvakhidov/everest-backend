@@ -1,37 +1,41 @@
 ---
 project: EVEREST Backend
-current_milestone: M11 follow-up (NCT trainer access and /nct overview)
+current_milestone: M11 follow-up (NCT mock exam)
 status: awaiting_review
-branch: feat/nct-trainer-access-overview
-base_commit: 31be1f5
-updated_at: 2026-11-11
+branch: feat/nct-mock-exam
+base_commit: cfaa312
+updated_at: 2026-11-13
 ---
 
 # Current handoff
 
 ## Done
 
-- Trainer access without courses: an active account (`403 ACCOUNT_NOT_ACTIVE`) and the permission `trainer.use`, granted to students (`403 TRAINER_STUDENT_ROLE_REQUIRED`). `accessible` and `TRAINER_ACCESS_DENIED` are removed.
-- Migration `20261111010000000_trainer-access-without-course`: `tests.course_id` is nullable only for `origin = 'trainer'`; adds the `trainer.use` permission for `student`.
-- Attempt engine: `requireContentAccess` checks only the account for trainer attempts.
-- `GET /trainer/overview` (readiness, subjects, weak topics, recent results, `empty`). The catalog gained `topics[]`. Four new `TRAINER_*` settings.
-- Docs: frontend-handoff, api, decisions, architecture, progress, ROADMAP.
+- NCT mock exam, separate from the trainer: `GET /trainer/exams/blueprints`, `POST /trainer/exams`, `GET /trainer/exams`, `GET /trainer/exams/:attemptId`, `PUT .../answers/:attemptQuestionId`, `PUT .../questions/:attemptQuestionId/flag`, `POST .../submit`, `GET .../result`. Access: active account plus `trainer.use`.
+- Migration `20261113010000000_add-nct-mock-exam`: origin `mock_exam` (no course), tables `exam_blueprints`, `exam_blueprint_sections`, `exam_blueprint_items`, `mock_exam_items`, seed `nct-a5` (105 questions, 220 minutes, 40 per subject, 160 in total).
+- Engine (additive): account-only access for `mock_exam`; cells questions get `answerFormat: 'digits'` in the grading snapshot (`{ digits }` of 1–4 digits, 2/0 points, leading zeros ignored).
+- Docs: frontend-handoff "NCT mock exam", api, decisions, architecture, progress, ROADMAP.
 
-## Verification (2026-11-11)
+## Verification (2026-11-13)
 
-- `npm run test:auth` on a disposable database: exit 0; 396 tests, 396 passed, 0 failed, 0 skipped.
-- `test:migrations` (36/36/35/36), `test:sources`, `test:integrity`, `test:server`: exit 0.
-- Nothing was run on `everest_db`.
+- Full suite on a disposable database, skipping only the live S3 round trip: exit 0; 415 tests, 415 passed, 0 failed.
+- `test:migrations` (38/38/37/38), `test:sources`, `test:integrity`, `test:server`: exit 0.
+- `everest_db`: only read-only counts. `test:integrity` runs inside `BEGIN … ROLLBACK` there, as `npm test` always does.
 
 ## Not verified
 
 - HTTP routes with cookies and CSRF (services were called directly).
-- Overview speed on large histories: the queries aggregate all finished trainings of one student, and there is no dedicated index beyond the trainer test index.
+- Assembly time on `everest_db` volumes.
+
+## Known issue (environment, not this branch)
+
+- S3 storage is configured and reachable here, so `real-storage.test.js` runs. It passes, but the test process then never exits, and plain `npm run test:auth` hangs after its last result. Leftover disposable databases from killed runs: `everest_test_37cf6a4cfb11`, `everest_test_5c106eaff141` (safe to drop).
 
 ## Next concrete task
 
-1. Review `feat/nct-trainer-access-overview`; run `npm run migrate:up` on `everest_db` after the merge.
-2. Separate tasks: mock NCT exam, staff view of trainer results, limits.
+1. Review the PR for `feat/nct-mock-exam`; after the merge run `npm run migrate:up` on `everest_db`.
+2. Owner decisions: per-position difficulty distribution for `nct-a5` (now easy to hard within each range, no bounds); leading zeros in cells (now ignored).
+3. Make the live S3 test close its client so `npm test` exits.
 
 ## Constraints
 

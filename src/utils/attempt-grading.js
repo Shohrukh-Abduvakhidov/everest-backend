@@ -22,6 +22,21 @@ function normalizeText(value) {
    return value.normalize('NFC').trim().toLowerCase()
 }
 
+// Answer-sheet cells: only digits fit, at most maxDigits of them. Leading zeros carry no value,
+// so '012' and '12' are the same answer.
+function canonicalDigits(value) {
+   return value.replace(/^0+(?=[0-9])/, '')
+}
+
+function parseDigitsAnswer(value, snapshot) {
+   const maxDigits = snapshot.maxDigits ?? 4
+   if (Object.keys(value).join() !== 'digits' || typeof value.digits !== 'string'
+      || !new RegExp(`^[0-9]{1,${maxDigits}}$`).test(value.digits)) {
+      throw invalidAnswer(`digits must be a string of 1-${maxDigits} digits 0-9`)
+   }
+   return { digits: value.digits }
+}
+
 function parseMatchingAnswer(value, snapshot) {
    const left = new Set(snapshot.leftKeys)
    const right = new Set(snapshot.rightKeys)
@@ -50,6 +65,7 @@ function parseMatchingAnswer(value, snapshot) {
 function parseStudentAnswer(value, snapshot) {
    if (value === null) return null
    if (!isPlainObject(value)) throw invalidAnswer('answer must be an object or null')
+   if (snapshot.answerFormat === 'digits') return parseDigitsAnswer(value, snapshot)
    const keys = Object.keys(value)
    const optionKeys = new Set(snapshot.optionKeys)
    switch (snapshot.questionType) {
@@ -98,6 +114,9 @@ function sameSet(left, right) {
 function gradeShare(answer, snapshot) {
    const key = snapshot.answerData
    if (answer === null || answer === undefined) return [0, 1]
+   if (snapshot.answerFormat === 'digits') {
+      return [snapshot.acceptedDigits.includes(canonicalDigits(answer.digits)) ? 1 : 0, 1]
+   }
    switch (snapshot.questionType) {
       case 'single_choice':
          return [answer.optionKey === key.optionKey ? 1 : 0, 1]
@@ -128,4 +147,4 @@ function scorePercent(score, maxScore) {
    return Number(((toHundredths(score) / toHundredths(maxScore)) * 100).toFixed(2))
 }
 
-export { gradeAnswer, parseStudentAnswer, scorePercent, sumPoints, toHundredths }
+export { canonicalDigits, gradeAnswer, parseStudentAnswer, scorePercent, sumPoints, toHundredths }
