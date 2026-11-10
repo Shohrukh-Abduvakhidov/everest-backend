@@ -558,6 +558,186 @@ Then use the ordinary attempt routes:
 
 - Trainings never appear in course test lists (`/courses/:courseId/test-assignments`) or in admin test screens.
 
+### NCT mock exam (2026-11-13)
+
+A full exam simulation by an answer-sheet blueprint. It is a separate mode: the trainer (`/trainer/catalog`, `/trainer/attempts`, `/trainer/overview`) is unchanged. Mock exams never count in the trainer overview, readiness or training history, and trainings never count in mock exam history.
+
+**Access** is the trainer's rule: an `active` account (`403 ACCOUNT_NOT_ACTIVE`) and the permission `trainer.use` (student, admin, owner; teachers get `403 TRAINER_STUDENT_ROLE_REQUIRED`). Every route below checks both. Nobody sees another account's exams (`404 MOCK_EXAM_NOT_FOUND`).
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/trainer/exams/blueprints` | Blueprints: subjects, ranges, eligible question counts, `canAssemble` |
+| POST | `/trainer/exams` | Assemble and start an exam: `201`, or `200` for a repeated `idempotencyKey` |
+| GET | `/trainer/exams` | My finished exams with points per subject, plus `openAttemptId` |
+| GET | `/trainer/exams/:attemptId` | The running exam by subject, without keys; timer |
+| PUT | `/trainer/exams/:attemptId/answers/:attemptQuestionId` | Autosave one answer |
+| PUT | `/trainer/exams/:attemptId/questions/:attemptQuestionId/flag` | "Review later" mark |
+| POST | `/trainer/exams/:attemptId/submit` | Finish and grade; repeating returns the same result |
+| GET | `/trainer/exams/:attemptId/result` | Result and answer sheet with keys |
+
+Mutations need CSRF like every cookie-authenticated mutation. `attemptId` is a `test_attempts.id`; the `/tests/attempts/:attemptId` routes also accept it, but use the routes above: only they return subjects, sheet numbers, flags and the answer sheet.
+
+**Blueprint nct-a5** (answer sheet A.5), stored in the database (`exam_blueprints`, `exam_blueprint_sections`, `exam_blueprint_items`), not in code:
+
+| # | Subject code | Single (4 options, 1 point) | Matching (4 × 5, 1 point per right pair, max 4) | Cells (1–4 digits, 2 or 0) | Max |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `zaboni-tochiki` | 1–20 | 21–25 | — | 40 |
+| 2 | `biologiya` | 1–20 | 21–24 | 25–26 | 40 |
+| 3 | `khimiya` | 1–18 | 19–20 | 21–27 | 40 |
+| 4 | `fizika` | 1–18 | 19–20 | 21–27 | 40 |
+
+105 questions, 220 minutes for all four subjects together, 160 points. Questions are in Tajik (`tg`). Within each range questions go from easy to hard (by `questions.difficulty`).
+
+**Eligible questions.** Published, key `verified`, bank code starting with `nct-`, the section's subject, the blueprint's language, and the form of the kind:
+
+- `single`: `single_choice` with exactly 4 options;
+- `matching`: exactly 4 left and 5 right items and a key of 4 pairs;
+- `cells`: `numeric` or `short_text` whose key is a whole non-negative number of 1–4 digits once spaces are removed (every accepted answer of a `short_text` must qualify). Fractions, units, letters or 5+ digits are left out of the mock exam; they stay in the trainer.
+
+**`GET /trainer/exams/blueprints`**:
+
+```json
+{
+  "data": {
+    "blueprints": [{
+      "code": "nct-a5",
+      "titles": { "ru": "Пробный НЦТ — лист ответов A.5", "tg": "ММТ-и озмоишӣ — варақаи ҷавобҳои A.5", "en": "Mock NCT — answer sheet A.5" },
+      "language": "tg", "durationMinutes": 220, "questionCount": 105, "maxScore": "160.00",
+      "canAssemble": true, "distinctVariants": 12, "shortages": [],
+      "sections": [{
+        "position": 2, "subjectCode": "biologiya", "subjectId": "3", "titles": { "tg": "Биология" }, "color": "green",
+        "questionCount": 26, "maxScore": "40.00",
+        "items": [
+          { "kind": "single", "firstPosition": 1, "lastPosition": 20, "questionCount": 20, "points": "1.00", "scoring": "all_or_nothing", "maxScore": "20.00", "requirements": { "optionCount": 4 }, "difficulty": { "min": null, "max": null, "order": "ascending" }, "available": 551 },
+          { "kind": "matching", "firstPosition": 21, "lastPosition": 24, "questionCount": 4, "points": "4.00", "scoring": "per_pair", "maxScore": "16.00", "requirements": { "leftCount": 4, "rightCount": 5 }, "difficulty": { "min": null, "max": null, "order": "ascending" }, "available": 119 },
+          { "kind": "cells", "firstPosition": 25, "lastPosition": 26, "questionCount": 2, "points": "2.00", "scoring": "all_or_nothing", "maxScore": "4.00", "requirements": { "maxDigits": 4, "wholeNumber": true }, "difficulty": { "min": null, "max": null, "order": "ascending" }, "available": 25 }
+        ]
+      }]
+    }]
+  }
+}
+```
+
+- `canAssemble: false` means `POST` would fail now; `shortages[]` lists `{ subjectCode, kind, needed, available }`. A subject code with no subject in the database counts as `available: 0` with `subjectId: null`.
+- `distinctVariants`: how many exams could be built with no question repeated across them (the smallest `floor(available / questionCount)` over all ranges).
+
+**`POST /trainer/exams`** body `{ "blueprint": "nct-a5", "idempotencyKey": "mock-2026-11-13-abc123" }`. `idempotencyKey` is optional (8–100 chars of `A-Z a-z 0-9 . _ : -`); repeating it returns the same exam with `200` and `resumed: true`. The response is the exam view below.
+
+| Status | Code | When |
+| --- | --- | --- |
+| 400 | `VALIDATION_ERROR` | Unknown field, bad `blueprint` or `idempotencyKey` |
+| 404 | `MOCK_EXAM_BLUEPRINT_NOT_FOUND` | No active blueprint with this code |
+| 409 | `MOCK_EXAM_IN_PROGRESS` | An exam is running; `details: [{ "field": "attemptId", "message": "<id>" }]` — open it |
+| 409 | `MOCK_EXAM_NOT_ENOUGH_QUESTIONS` | `details` lists every short range: `{ "field": "biologiya.cells", "message": "needed 2, available 1" }` |
+| 409 | `IDEMPOTENCY_KEY_REUSED` | The key was used for another blueprint |
+
+Assembly takes each range in order, no question twice in one exam, questions this account has not met in an earlier mock exam first, then random; within a range easy to hard. The questions, their points and keys are frozen when the exam is created.
+
+**`GET /trainer/exams/:attemptId`** (also the `POST` response):
+
+```json
+{
+  "data": {
+    "exam": {
+      "attemptId": "812", "status": "in_progress", "finished": false, "autoSubmitted": false,
+      "blueprintCode": "nct-a5", "titles": { "ru": "Пробный НЦТ — лист ответов A.5" }, "language": "tg",
+      "durationMinutes": 220, "questionCount": 105,
+      "startedAt": "2026-11-13T08:00:00.000Z", "deadlineAt": "2026-11-13T11:40:00.000Z", "submittedAt": null,
+      "remainingSeconds": 13137, "score": null, "maxScore": "160.00", "percent": null
+    },
+    "sections": [{
+      "position": 1, "subjectCode": "zaboni-tochiki", "subjectId": "1", "titles": { "tg": "Забони Точики" }, "color": "orange",
+      "questionCount": 25, "maxScore": "40.00", "answered": 3, "flagged": 1,
+      "questions": [{
+        "attemptQuestionId": "90211", "number": 1, "examPosition": 1, "kind": "single", "questionType": "single_choice",
+        "points": "1.00", "flagged": false, "content": { "blocks": [] }, "interactionSettings": {},
+        "options": [{ "key": "A", "content": { "blocks": [] } }], "matching": null,
+        "answer": { "optionKey": "B" }, "revision": 2, "savedAt": "2026-11-13T08:03:10.000Z"
+      }]
+    }],
+    "serverNow": "2026-11-13T08:21:03.000Z",
+    "resumed": false
+  }
+}
+```
+
+- `number` is the sheet number inside the subject (1..N), `examPosition` the number across the exam (1..105).
+- Image blocks carry presigned `url`/`expiresAt` like other attempts.
+- **Timer:** the server owns it. Show `remainingSeconds` and correct drift with `serverNow`; re-read the exam when the countdown ends. A finished exam (`status` `graded` or `expired`) returns `questions: []` in every section; read the result.
+- **Expiry:** at `deadlineAt` the exam finishes by itself (`status: "expired"`, `autoSubmitted: true`, `submittedAt` = `deadlineAt`). Saved answers are graded. This happens on the next request to any exam route and, without any request, by the attempt sweep worker (`npm run worker:attempts`).
+
+**Answers** — `PUT /trainer/exams/:attemptId/answers/:attemptQuestionId` with `{ "answer": ..., "revision": n }`. Same autosave rules as other attempts: send a higher `revision` each time, `answer: null` clears it, answers can be given in any order and changed until the exam ends.
+
+| Kind | `answer` |
+| --- | --- |
+| `single` | `{ "optionKey": "B" }` |
+| `matching` | `{ "pairs": [{ "left": "l1", "right": "r3" }, ...] }` — rows may be left out; a right item at most once |
+| `cells` | `{ "digits": "120" }` — a string of 1–4 digits `0-9`, nothing else. Leading zeros do not matter (`"0120"` = `"120"`) |
+
+Response: `{ attemptQuestionId, answer, revision, savedAt, serverNow }`.
+
+| Status | Code | When |
+| --- | --- | --- |
+| 400 | `VALIDATION_ERROR` | Wrong shape; for cells anything but 1–4 digits (`"12a"`, `"12345"`, `"1,5"`, `"-1"`, a number) |
+| 404 | `MOCK_EXAM_NOT_FOUND` / `ATTEMPT_QUESTION_NOT_FOUND` | Not my exam / not a question of it |
+| 409 | `ATTEMPT_DEADLINE_PASSED` | The deadline passed: the answer is not saved and the exam is now finished |
+| 409 | `ATTEMPT_NOT_IN_PROGRESS` | The exam is already finished |
+| 409 | `ANSWER_REVISION_CONFLICT` | A newer revision is saved; `details[0].message` is the stored revision |
+
+**Flag** — `PUT /trainer/exams/:attemptId/questions/:attemptQuestionId/flag` with `{ "flagged": true }` returns `{ attemptQuestionId, flagged, flaggedAt, serverNow }`. Same `404`/`409` codes as answers. The flag does not affect scoring.
+
+**`POST /trainer/exams/:attemptId/submit`** finishes and grades; repeating it returns the same result. **`GET /trainer/exams/:attemptId/result`** returns the same data; before the end `409 RESULT_NOT_READY`. Keys, explanations and the sheet exist only here, after the end.
+
+```json
+{
+  "data": {
+    "exam": { "attemptId": "812", "status": "graded", "finished": true, "score": "126.00", "maxScore": "160.00", "percent": 78.75, "remainingSeconds": 0 },
+    "sections": [{
+      "position": 2, "subjectCode": "biologiya", "questionCount": 26, "maxScore": "40.00",
+      "score": "32.00", "percent": 80, "answered": 26, "correct": 22,
+      "questions": [
+        { "number": 1, "kind": "single", "points": "1.00", "awardedPoints": "1.00", "answered": true, "correct": true,
+          "answer": { "optionKey": "o2" }, "correctAnswer": { "optionKey": "o2" }, "explanation": { "blocks": [] },
+          "sheet": { "selectedOptionKey": "o2", "selectedOptionNumber": 2, "correctOptionKey": "o2", "correctOptionNumber": 2 } },
+        { "number": 22, "kind": "matching", "points": "4.00", "awardedPoints": "3.00", "correct": false,
+          "sheet": { "correctPairs": 3, "totalPairs": 4, "rows": [
+            { "row": "A", "leftKey": "l1", "selectedRightKey": "r2", "selectedColumn": 2, "correctRightKey": "r2", "correctColumn": 2, "correct": true },
+            { "row": "D", "leftKey": "l4", "selectedRightKey": "r5", "selectedColumn": 5, "correctRightKey": "r1", "correctColumn": 1, "correct": false }
+          ] } },
+        { "number": 25, "kind": "cells", "points": "2.00", "awardedPoints": "2.00", "correct": true,
+          "sheet": { "digits": "0012", "correctDigits": "12", "acceptedDigits": ["12"], "maxDigits": 4 } }
+      ]
+    }],
+    "serverNow": "2026-11-13T11:02:00.000Z"
+  }
+}
+```
+
+(Abbreviated: every question also carries `attemptQuestionId`, `examPosition`, `questionType`, `flagged`, `content`, `options`, `matching` and `interactionSettings`; every section `subjectId`, `titles`, `color`.)
+
+- **Scoring** (from the blueprint): single 1 or 0; matching 1 point per right pair (4/3/2/1/0); cells 2 for the right number, else 0. Unanswered = 0. `correct` = full points; `answered` = an answer was saved.
+- **Drawing the sheet:** single → mark option `selectedOptionNumber` and `correctOptionNumber` (1–4, in the order shown; letters are the frontend's choice). Matching → rows A–D are the left items, columns 1–5 the right items, in the order shown; `selectedColumn` is `null` for an empty row. Cells → `digits` as typed (`null` when empty) and `correctDigits`.
+
+**`GET /trainer/exams`** — query `limit` (1–100, default 20), `offset`. Finished exams only, newest first:
+
+```json
+{
+  "data": {
+    "exams": [{
+      "attemptId": "812", "status": "graded", "autoSubmitted": false, "blueprintCode": "nct-a5",
+      "titles": { "ru": "Пробный НЦТ — лист ответов A.5" },
+      "startedAt": "2026-11-13T08:00:00.000Z", "submittedAt": "2026-11-13T11:02:00.000Z",
+      "score": "126.00", "maxScore": "160.00", "percent": 78.75,
+      "subjects": [{ "subjectCode": "zaboni-tochiki", "subjectId": "1", "titles": {}, "score": "40.00", "maxScore": "40.00", "percent": 100 }]
+    }],
+    "pagination": { "limit": 20, "offset": 0, "hasMore": false },
+    "openAttemptId": null
+  }
+}
+```
+
+`openAttemptId` is the running exam, if any ("continue" button).
+
 ### Admin: tests (M10)
 
 | Method | Path | Permission | Purpose |
