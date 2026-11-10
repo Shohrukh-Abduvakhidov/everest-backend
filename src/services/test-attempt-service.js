@@ -198,9 +198,9 @@ function safeLearnerAssignment(row, attempts, now, extraAttempts = 0) {
 }
 
 async function requireContentAccess(deps, actorId, { course_id: courseId, module_id: moduleId, origin }, now, db) {
-   // Trainer attempts belong to no course: an active account is the whole rule, so revoking a
-   // course enrollment never stops a running training.
-   if (origin === 'trainer') {
+   // Trainer and mock exam attempts belong to no course: an active account is the whole rule,
+   // so revoking a course enrollment never stops a running training or exam.
+   if (origin === 'trainer' || origin === 'mock_exam') {
       if (!await deps.repository.isActiveAccount(actorId, db)) {
          throw new AppError(403, 'ACCOUNT_NOT_ACTIVE', 'Account is not active')
       }
@@ -304,7 +304,9 @@ function requireStartable(assignment, now) {
    }
 }
 
-function buildAttemptQuestions(deps, assignment, source) {
+// snapshotExtensions: optional Map of question id -> extra grading snapshot fields (the mock
+// exam marks answer-sheet cells with answerFormat 'digits' and their accepted digits).
+function buildAttemptQuestions(deps, assignment, source, snapshotExtensions = null) {
    const order = assignment.shuffle_questions ? deps.shuffle(source) : source
    const arrange = (keys) => (assignment.shuffle_options ? deps.shuffle(keys) : keys)
    return order.map((row, index) => ({
@@ -322,6 +324,7 @@ function buildAttemptQuestions(deps, assignment, source) {
          optionKeys: row.option_keys,
          leftKeys: row.left_keys,
          rightKeys: row.right_keys,
+         ...(snapshotExtensions?.get(String(row.question_id)) ?? {}),
       },
    }))
 }
@@ -337,7 +340,7 @@ function policySnapshot(assignment) {
    }
 }
 
-async function createNewAttempt(deps, client, actorId, assignment, attempts, now) {
+async function createNewAttempt(deps, client, actorId, assignment, attempts, now, snapshotExtensions = null) {
    requireStartable(assignment, now)
    // The slot lock is held, and grants take the same lock, so this count cannot race a grant.
    const extra = (await extraAttemptsFor(deps, actorId, [assignment.id], client)).get(assignment.id) ?? 0
@@ -372,7 +375,7 @@ async function createNewAttempt(deps, client, actorId, assignment, attempts, now
    await deps.repository.addAttemptQuestions(
       attemptId,
       assignment.test_id,
-      buildAttemptQuestions(deps, assignment, source),
+      buildAttemptQuestions(deps, assignment, source, snapshotExtensions),
       client,
    )
    await deps.auth.appendAuditEvent({
@@ -453,15 +456,31 @@ async function startAttemptService(userId, assignmentIdValue, overrides) {
 }
 
 // Starts the first attempt of a freshly created assignment inside the caller's transaction, so
-// the trainer's generated test, its assignment and the attempt commit together.
-async function startAttemptInTransactionService(userId, assignmentId, client, overrides) {
+// the trainer's or mock exam's generated test, its assignment and the attempt commit together.
+async function startAttemptInTransactionService(
+   userId,
+   assignmentId,
+   client,
+   overrides,
+   { snapshotExtensions = null } = {},
+) {
    const deps = dependencies(overrides)
    const now = deps.clock()
    await deps.repository.lockAttemptSlot(userId, assignmentId, client)
    const assignment = await deps.repository.findLearnerAssignment(userId, assignmentId, client)
    if (!assignment) throw assignmentNotFound()
    await requireContentAccess(deps, userId, assignment, now, client)
-   return createNewAttempt(deps, client, userId, assignment, [], now)
+   return createNewAttempt(deps, client, userId, assignment, [], now, snapshotExtensions)
+}
+
+// Question views of an attempt whose ownership the caller already checked: the learner shape
+// (no keys) or, with review, the shape with keys, points and explanations. Rows come back
+// aligned by index, for callers that need the grading snapshot (loaded only for review).
+async function listAttemptQuestionViewsService(attemptId, { review = false } = {}, overrides) {
+   const deps = dependencies(overrides)
+   const rows = await deps.repository.listAttemptQuestions(attemptId, { withSnapshot: review })
+   const views = rows.map(review ? safeReviewQuestion : safeLearnerQuestion)
+   return { rows, questions: await withAttemptImages(deps, rows, views) }
 }
 
 async function getAttemptService(userId, attemptIdValue, overrides) {
@@ -636,6 +655,7 @@ export {
    getAssignmentResultService,
    getAttemptResultService,
    getAttemptService,
+   listAttemptQuestionViewsService,
    listMyAssignmentsService,
    safeAttempt,
    safeQuestionBase,
