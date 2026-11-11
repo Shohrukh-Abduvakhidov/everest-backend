@@ -1,5 +1,14 @@
 # Decisions
 
+## 2026-11-11 — Single-host production deployment
+
+- Docker Compose (project `everest`) behind the host's existing nginx and certbot; no second reverse proxy, because ports 80/443 are shared with another site. Images are built on the server; no registry or CI for now.
+- Storage is SeaweedFS (pinned tag) in the same stack; only its S3 port is published, on loopback. CORS comes from the bucket rule written by `storage:configure`, not from nginx.
+- The app host routes `/api/v1/` directly to the backend (one proxy hop), so `TRUST_PROXY=loopback,172.16.0.0/12` gives the real client IP.
+- `worker-attempts` is required; `worker-imports` runs too because admin web imports depend on it.
+- Memory limits fit about 2.3 GB for EVEREST on a 3.7 GB host shared with another project.
+- Local dumps stay unencrypted with mode 600; off-site copies (Backblaze B2 through rclone) are encrypted with an age public key.
+
 ## 2026-11-11 — Client IP behind a reverse proxy (`TRUST_PROXY`)
 
 - Behind nginx and Docker every request reached Express from the proxy or Docker gateway address, so the per-IP limits (`login.ip`, `refresh.ip`, `recovery.*.ip`, `register.ip`) were shared by all clients.

@@ -9,6 +9,13 @@ updated_at: 2026-11-13
 
 # Current handoff
 
+## Production deployment, stage 2a (PR `chore/deploy-to-main`)
+
+- Added: `Dockerfile`, `deploy/docker-compose.prod.yml` (db, backend, worker-attempts, worker-imports, SeaweedFS 4.51, frontend), env/backup/S3 templates, nginx examples, `deploy/scripts/` (deploy with rollback, backup, restore check) and `docs/deploy.md`. `TRUST_PROXY` is merged (PR #50).
+- Verified: `bash -n` on the scripts only. Not verified: `docker compose config` (no Docker locally), SeaweedFS 4.51 flags and healthcheck, the backup scripts end to end, anything on the server.
+- Next: merge the frontend deploy changes (`Dockerfile`, `output: "standalone"`, `STUDENT_HOSTS`, `NEXT_PUBLIC_APP_URL_STUDENT`) into frontend `main`; add `TRUST_PROXY=` to the root `.env.example`; stage 2b on the server after the owner approves.
+- On the server never touch the other project on the host; use only `docker compose -p everest` and `docker builder prune`.
+
 ## Done
 
 - NCT mock exam, separate from the trainer: `GET /trainer/exams/blueprints`, `POST /trainer/exams`, `GET /trainer/exams`, `GET /trainer/exams/:attemptId`, `PUT .../answers/:attemptQuestionId`, `PUT .../questions/:attemptQuestionId/flag`, `POST .../submit`, `GET .../result`. Access: active account plus `trainer.use`.

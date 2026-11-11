@@ -1,0 +1,214 @@
+# EVEREST single-host production stack: PostgreSQL, migrations, API, workers, S3 storage, frontend.
+# The host nginx (shared with other sites) terminates TLS and proxies to the 127.0.0.1 ports below.
+#
+# Layout on the server:
+#   /opt/everest/backend/deploy/   this file, .env (600), seaweedfs/s3.json (600), scripts/
+#   /opt/everest/frontend/         frontend clone (build context, override with FRONTEND_CONTEXT)
+#
+# Always address this project explicitly so nothing outside it is touched:
+#   docker compose -p everest -f docker-compose.prod.yml <command>
+# Deploys and rollbacks: scripts/deploy.sh (see docs/deploy.md).
+#
+# Memory budget (host has 3.7 GB shared with another project, which uses about 1 GB with the OS):
+#   db 640m + backend 384m + worker-attempts 192m + worker-imports 384m + frontend 512m + s3 256m = 2.3 GB.
+# Node heaps are capped below each container limit so V8 collects garbage before the cgroup kills it.
+# Building the frontend needs up to 1.5 GB more; deploy.sh builds one image at a time and warns when memory is low.
+
+name: everest
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
+x-backend-build: &backend-build
+  context: ..
+  dockerfile: Dockerfile
+
+x-backend-service: &backend-service
+  image: everest-backend:current
+  env_file: .env
+  logging: *logging
+  restart: unless-stopped
+
+services:
+  db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${POSTGRES_SUPERUSER:-${DB_USER}}
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:-${DB_PASSWORD}}
+    command:
+      - postgres
+      - -c
+      - shared_buffers=160MB
+      - -c
+      - work_mem=8MB
+      - -c
+      - max_connections=60
+      - -c
+      - log_min_duration_statement=500
+    shm_size: 128m
+    volumes:
+      # Volume name kept from the first deployment so existing data is reused.
+      - everest-db:/var/lib/postgresql
+    mem_limit: 640m
+    cpus: 1.0
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+  migrate:
+    <<: *backend-service
+    build: *backend-build
+    command: ["npm", "run", "migrate:up"]
+    restart: "no"
+    environment:
+      DB_HOST: db
+      NODE_OPTIONS: --max-old-space-size=192
+    mem_limit: 256m
+    cpus: 0.5
+    profiles: ["ops"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  storage-configure:
+    <<: *backend-service
+    command: ["npm", "run", "storage:configure"]
+    restart: "no"
+    environment:
+      DB_HOST: db
+      S3_ENDPOINT: http://s3:8333
+      NODE_OPTIONS: --max-old-space-size=128
+    mem_limit: 192m
+    cpus: 0.25
+    profiles: ["ops"]
+    depends_on:
+      s3:
+        condition: service_healthy
+
+  backend:
+    <<: *backend-service
+    build: *backend-build
+    environment:
+      NODE_ENV: production
+      PORT: "4100"
+      DB_HOST: db
+      S3_ENDPOINT: http://s3:8333
+      NODE_OPTIONS: --max-old-space-size=288
+    ports:
+      - "127.0.0.1:4100:4100"
+    volumes:
+      - question-imports:/app/uploads/question-imports
+    mem_limit: 384m
+    cpus: 1.0
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:4100/api/v1/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # Finalizes attempts whose time ran out. Required: without it expired exams stay open.
+  worker-attempts:
+    <<: *backend-service
+    command: ["npm", "run", "worker:attempts"]
+    environment:
+      DB_HOST: db
+      NODE_OPTIONS: --max-old-space-size=128
+    mem_limit: 192m
+    cpus: 0.25
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # Processes question packages uploaded through the admin API. Idle polling is cheap; it shares the
+  # upload volume with the backend. Stop it (docker compose stop worker-imports) if web imports are unused.
+  worker-imports:
+    <<: *backend-service
+    command: ["npm", "run", "worker:imports"]
+    environment:
+      DB_HOST: db
+      S3_ENDPOINT: http://s3:8333
+      NODE_OPTIONS: --max-old-space-size=288
+    volumes:
+      - question-imports:/app/uploads/question-imports
+    mem_limit: 384m
+    cpus: 0.5
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # S3-compatible object storage. Only the S3 API is published, and only on loopback for host nginx and
+  # SSH tunnels; master, volume, filer and admin ports stay inside the Docker network.
+  s3:
+    image: ${SEAWEEDFS_IMAGE:-chrislusf/seaweedfs:4.51}
+    restart: unless-stopped
+    logging: *logging
+    command:
+      - server
+      - -dir=/data
+      - -ip=s3
+      - -ip.bind=0.0.0.0
+      - -master.volumeSizeLimitMB=1024
+      - -volume.max=0
+      - -s3
+      - -s3.port=8333
+      - -s3.config=/etc/seaweedfs/s3.json
+    ports:
+      - "127.0.0.1:8333:8333"
+    volumes:
+      - s3-data:/data
+      - ./seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
+    mem_limit: 256m
+    cpus: 0.5
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9333/cluster/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  frontend:
+    build:
+      context: ${FRONTEND_CONTEXT:-../../frontend}
+      dockerfile: Dockerfile
+      args:
+        API_ORIGIN: http://backend:4100
+        NEXT_PUBLIC_DATA_SOURCE: api
+        NEXT_PUBLIC_APP_URL_STUDENT: ${APP_URL_STUDENT:-}
+    image: everest-frontend:current
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      API_ORIGIN: http://backend:4100
+      STUDENT_HOSTS: ${STUDENT_HOSTS:-}
+      NODE_OPTIONS: --max-old-space-size=384
+    ports:
+      - "127.0.0.1:3100:3100"
+    mem_limit: 512m
+    cpus: 1.0
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3100/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  everest-db:
+  s3-data:
+  question-imports:
