@@ -6,6 +6,12 @@ Updated: 2026-11-13.
 
 NCT mock exam on `feat/nct-mock-exam` (awaiting review). The trainer, its access rule and staff access are merged (PRs #46–#48).
 
+## 2026-11-11 — Client IP behind a proxy (`fix/trust-proxy`)
+
+- **What:** `TRUST_PROXY` env (`src/utils/trust-proxy.js`, validated in `src/configs/env.js`, applied in `src/app.js`); production startup warns when it is unset. Decision: `docs/decisions.md` (2026-11-11).
+- **Tests:** `tests/unit/trust-proxy.test.js` (parsing, trusted/untrusted socket, forged left-hand entry) and a new case in `tests/integration/auth-protection.test.js` (login limit counted per real client behind a trusted proxy).
+- **Next:** set `TRUST_PROXY=loopback,172.16.0.0/12` on the server and confirm the logged session IP is the client, not the Docker gateway.
+
 ## 2026-11-13 — NCT mock exam (`feat/nct-mock-exam`)
 
 - **What:** full exam simulation by answer-sheet blueprint, separate from the trainer. Routes under `/trainer/exams`: blueprints catalog, create, history, view, answer, flag, submit, result. Contract: `docs/frontend-handoff.md` "NCT mock exam". Decisions: `docs/decisions.md` (2026-11-13).

@@ -192,6 +192,7 @@ All values are server-side unless explicitly marked public metadata. Empty value
 | `DB_IDLE_TIMEOUT_MS` | Positive integer milliseconds | Optional, default 30000 | No need to expose |
 | `DB_SSL` | `true`/`false` | Optional, default false | No need to expose |
 | `CORS_ORIGINS` | Comma-separated origins | Optional, default localhost frontend; `app.js` | Safe configuration metadata |
+| `TRUST_PROXY` | Unset/`false`, a hop count `1`–`10`, or a comma list of `loopback`, `linklocal`, `uniquelocal`, IPs and CIDRs; `true` is rejected | Optional, default false; `app.js` `trust proxy`. Behind a proxy it decides `req.ip` for rate limits and session IPs. Production without it logs a warning | Safe configuration metadata |
 | `SHUTDOWN_TIMEOUT_MS` | Positive integer milliseconds | Optional, default 10000; `server.js` | No need to expose |
 | `JWT_ACCESS_SECRET` | At least 32 characters | Required for implemented authentication; session-token service | **No** |
 | `AUTH_SESSION_TTL_SECONDS` | Positive integer seconds | Optional, default 900; access-token lifetime | No need to expose |

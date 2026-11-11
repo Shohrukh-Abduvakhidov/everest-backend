@@ -1,5 +1,13 @@
 # Decisions
 
+## 2026-11-11 — Client IP behind a reverse proxy (`TRUST_PROXY`)
+
+- Behind nginx and Docker every request reached Express from the proxy or Docker gateway address, so the per-IP limits (`login.ip`, `refresh.ip`, `recovery.*.ip`, `register.ip`) were shared by all clients.
+- `TRUST_PROXY` sets Express `trust proxy`. Accepted: unset/`false` (default), a hop count, or a list of names/IPs/CIDRs. `true` is rejected because it would believe any client-supplied `X-Forwarded-For`. Invalid values stop startup with a clear error.
+- An address list is preferred over a hop count: Express returns the right-most address that is not trusted, so entries a client forges on the left are ignored. For the Docker-plus-host-nginx layout the value is `loopback,172.16.0.0/12`.
+- The edge proxy should overwrite `X-Forwarded-For` with `$remote_addr` instead of appending; the list setting stays correct either way.
+- In production without `TRUST_PROXY` the server logs a warning at startup.
+
 ## 2026-11-08 — Presigned URLs for question images
 
 - **Response only.** `url`/`expiresAt` are added to a copy of the content when a response is built and are never written. On input the parser accepts and drops them, so a client can send back what it received.
