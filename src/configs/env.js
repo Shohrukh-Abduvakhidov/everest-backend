@@ -3,6 +3,8 @@ import { fileURLToPath } from 'node:url';
 
 import dotenv from 'dotenv';
 
+import { parseTrustProxy } from '../utils/trust-proxy.js';
+
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(currentDirectory, '../../.env'), quiet: true });
 
@@ -96,6 +98,8 @@ const env = Object.freeze({
   // API docs are off in production unless explicitly enabled.
   swaggerEnabled: readBoolean('SWAGGER_ENABLED', nodeEnv !== 'production'),
   port: readInteger('PORT', 4000, { max: 65535 }),
+  // Proxies whose X-Forwarded-For is believed when computing req.ip (rate limits, session IPs).
+  trustProxy: parseTrustProxy(readString('TRUST_PROXY')),
   corsOrigins: readString('CORS_ORIGINS', 'http://localhost:3000')
     .split(',')
     .map((origin) => origin.trim())
