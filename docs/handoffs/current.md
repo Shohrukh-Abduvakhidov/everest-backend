@@ -29,3 +29,11 @@ updated_at: 2026-11-11
 1. Review and merge PR #50 and the deploy PR; merge the frontend deploy changes (`Dockerfile`, `output: "standalone"`, `STUDENT_HOSTS`, `NEXT_PUBLIC_APP_URL_STUDENT`) into frontend `main`.
 2. Add `TRUST_PROXY=` with a comment to the root `.env.example` (not edited in these PRs).
 3. Stage 2b on the server after the owner's approval: data migration, SeaweedFS, nginx `everest-app`/`everest-files`, backups.
+
+## Constraints
+
+- Preserve route → middleware → controller → service → repository → PostgreSQL.
+- Do not edit applied migrations. Never merge, force-push, or push to `main`.
+- Point `DB_NAME` at a disposable database for `npm test`. Never delete data in `everest_db`.
+- Never commit `import-packages/`.
+- On the server never touch the other project on the host (containers, nginx sites, database, cron, users); use only `docker compose -p everest` and `docker builder prune`.
