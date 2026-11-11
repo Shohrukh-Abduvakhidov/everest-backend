@@ -187,6 +187,7 @@ services:
         API_ORIGIN: http://backend:4100
         NEXT_PUBLIC_DATA_SOURCE: api
         NEXT_PUBLIC_APP_URL_STUDENT: ${APP_URL_STUDENT:-}
+        NEXT_PUBLIC_APP_URL_MARKETING: ${APP_URL_MARKETING:-}
     image: everest-frontend:current
     restart: unless-stopped
     logging: *logging
