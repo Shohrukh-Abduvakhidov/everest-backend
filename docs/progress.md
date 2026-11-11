@@ -6,6 +6,12 @@ Updated: 2026-11-13.
 
 NCT mock exam on `feat/nct-mock-exam` (awaiting review). The trainer, its access rule and staff access are merged (PRs #46–#48).
 
+## 2026-11-11 — Production deployment files (`chore/deploy-to-main`)
+
+- **What:** Docker image, `deploy/docker-compose.prod.yml`, env/backup/S3 templates, nginx examples and `deploy/scripts/` (deploy with rollback, backup, restore check). Guide: `docs/deploy.md`. Decisions: `docs/decisions.md` (2026-11-11, deployment).
+- **Checked:** `bash -n` on the scripts. Not checked: `docker compose config` (no Docker locally), any run on the server.
+- **Next:** stage 2b on the server after approval.
+
 ## 2026-11-11 — Client IP behind a proxy (`fix/trust-proxy`)
 
 - **What:** `TRUST_PROXY` env (`src/utils/trust-proxy.js`, validated in `src/configs/env.js`, applied in `src/app.js`); production startup warns when it is unset. Decision: `docs/decisions.md` (2026-11-11).
