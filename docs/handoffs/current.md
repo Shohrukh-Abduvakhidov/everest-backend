@@ -1,34 +1,49 @@
 ---
 project: EVEREST Backend
-current_milestone: Production deployment (stage 2a, code and documents)
+current_milestone: M11 follow-up (NCT mock exam)
 status: awaiting_review
-branch: chore/deploy-to-main (PR), fix/trust-proxy (PR #50)
-base_commit: d43228a
-updated_at: 2026-11-11
+branch: feat/nct-mock-exam
+base_commit: cfaa312
+updated_at: 2026-11-13
 ---
 
 # Current handoff
 
+## Production deployment, stage 2a (PR `chore/deploy-to-main`)
+
+- Added: `Dockerfile`, `deploy/docker-compose.prod.yml` (db, backend, worker-attempts, worker-imports, SeaweedFS 4.51, frontend), env/backup/S3 templates, nginx examples, `deploy/scripts/` (deploy with rollback, backup, restore check) and `docs/deploy.md`. `TRUST_PROXY` is merged (PR #50).
+- Verified: `bash -n` on the scripts only. Not verified: `docker compose config` (no Docker locally), SeaweedFS 4.51 flags and healthcheck, the backup scripts end to end, anything on the server.
+- Next: merge the frontend deploy changes (`Dockerfile`, `output: "standalone"`, `STUDENT_HOSTS`, `NEXT_PUBLIC_APP_URL_STUDENT`) into frontend `main`; add `TRUST_PROXY=` to the root `.env.example`; stage 2b on the server after the owner approves.
+- On the server never touch the other project on the host; use only `docker compose -p everest` and `docker builder prune`.
+
 ## Done
 
-- `fix/trust-proxy` (PR #50): `TRUST_PROXY` env for Express `trust proxy` (hop count or list of names/IPs/CIDRs; `true` rejected; production warning when unset). Tests: unit `trust-proxy.test.js`, integration login limit per real client. `npm test`: 422 tests, 421 pass, 0 fail, 1 skipped.
-- `chore/deploy-to-main`: `Dockerfile` and `.dockerignore` from `deploy/temp-vps`; `deploy/docker-compose.prod.yml` (db, backend, worker-attempts, worker-imports, SeaweedFS 4.51, frontend; ops profile `migrate`, `storage-configure`; loopback-only ports, memory/CPU limits, log rotation, capped Node heaps); `deploy/env.example`, `deploy/backup.env.example`, `deploy/seaweedfs/s3.example.json`; nginx examples `deploy/nginx/everest-app.conf` (`/api/v1/` straight to the backend, `X-Forwarded-For $remote_addr`) and `everest-files.conf`; scripts `deploy.sh` (memory check, one build at a time, pre-deploy dump, migrate, health checks, rollback to `:prev`), `backup-db.sh` (7 daily + 4 weekly, age + rclone off-site prepared, Telegram alert), `restore-check.sh`; `docs/deploy.md`.
+- NCT mock exam, separate from the trainer: `GET /trainer/exams/blueprints`, `POST /trainer/exams`, `GET /trainer/exams`, `GET /trainer/exams/:attemptId`, `PUT .../answers/:attemptQuestionId`, `PUT .../questions/:attemptQuestionId/flag`, `POST .../submit`, `GET .../result`. Access: active account plus `trainer.use`.
+- Migration `20261113010000000_add-nct-mock-exam`: origin `mock_exam` (no course), tables `exam_blueprints`, `exam_blueprint_sections`, `exam_blueprint_items`, `mock_exam_items`, seed `nct-a5` (105 questions, 220 minutes, 40 per subject, 160 in total).
+- Engine (additive): account-only access for `mock_exam`; cells questions get `answerFormat: 'digits'` in the grading snapshot (`{ digits }` of 1–4 digits, 2/0 points, leading zeros ignored).
+- Docs: frontend-handoff "NCT mock exam", api, decisions, architecture, progress, ROADMAP.
 
-## Verification
+## Verification (2026-11-13)
 
-- Shell scripts: `bash -n` only. No shellcheck and no Docker on the development machine, so the compose file was not validated with `docker compose config`, and nothing was run on the server.
-- The server was only inspected read-only.
+- `npm run test:auth` on a disposable database (including the live S3 round trip): exit 0; 416 tests, 416 passed, 0 failed (6 870 s, see below).
+- The same suite skipping only the live S3 round trip: exit 0; 415 passed, 0 failed, about 85 s.
+- `test:migrations` (38/38/37/38), `test:sources`, `test:integrity`, `test:server`: exit 0.
+- `everest_db`: only read-only counts. `test:integrity` runs inside `BEGIN … ROLLBACK` there, as `npm test` always does.
 
 ## Not verified
 
-- SeaweedFS `server -s3` flags, the `/cluster/healthz` healthcheck and bucket CORS support of 4.51 on the server.
-- `backup-db.sh` and `restore-check.sh` end to end.
+- HTTP routes with cookies and CSRF (services were called directly).
+- Assembly time on `everest_db` volumes.
+
+## Known issue (environment, not this branch)
+
+- S3 storage is configured and reachable here, so `real-storage.test.js` runs. It passes, but the test process then stays idle for about 1.5–2 hours before it exits, so plain `npm run test:auth` looks hung after its last result. No disposable databases are left over.
 
 ## Next concrete task
 
-1. Review and merge PR #50 and the deploy PR; merge the frontend deploy changes (`Dockerfile`, `output: "standalone"`, `STUDENT_HOSTS`, `NEXT_PUBLIC_APP_URL_STUDENT`) into frontend `main`.
-2. Add `TRUST_PROXY=` with a comment to the root `.env.example` (not edited in these PRs).
-3. Stage 2b on the server after the owner's approval: data migration, SeaweedFS, nginx `everest-app`/`everest-files`, backups.
+1. Review the PR for `feat/nct-mock-exam`; after the merge run `npm run migrate:up` on `everest_db`.
+2. Owner decisions: per-position difficulty distribution for `nct-a5` (now easy to hard within each range, no bounds); leading zeros in cells (now ignored).
+3. Make the live S3 test close its client so `npm test` exits promptly.
 
 ## Constraints
 
@@ -36,4 +51,3 @@ updated_at: 2026-11-11
 - Do not edit applied migrations. Never merge, force-push, or push to `main`.
 - Point `DB_NAME` at a disposable database for `npm test`. Never delete data in `everest_db`.
 - Never commit `import-packages/`.
-- On the server never touch the other project on the host (containers, nginx sites, database, cron, users); use only `docker compose -p everest` and `docker builder prune`.
