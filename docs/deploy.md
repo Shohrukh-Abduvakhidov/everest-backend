@@ -126,6 +126,7 @@ Backend variables are validated in `src/configs/env.js`; the full list with defa
 | `STORAGE_CORS_ORIGINS` | Origins written into the bucket CORS rule |
 | `STUDENT_HOSTS` | Frontend runtime: hosts served as the student app without `/platform` |
 | `APP_URL_STUDENT` | Frontend build time: absolute student URL used in links |
+| `APP_URL_MARKETING` | Frontend build time: landing URL used in links (the app URL while there is no landing) |
 | `TELEGRAM_*` | Telegram login; empty keeps it disabled |
 
 `API_ORIGIN` for the frontend is fixed to `http://backend:4100` in compose and does not depend on the host.
@@ -144,6 +145,7 @@ user signs in again. Presigned URLs live 15 minutes and the database stores obje
 | `TELEGRAM_REDIRECT_URI` | New callback URL; also update the domain in BotFather |
 | `STUDENT_HOSTS` | `app.<domain>` (runtime; recreate `frontend`) |
 | `APP_URL_STUDENT` | `https://app.<domain>` (build time; `deploy.sh frontend`) |
+| `APP_URL_MARKETING` | `https://<domain>` once the landing exists (build time) |
 | `API_ORIGIN` | No change (`http://backend:4100`) |
 | nginx | New `server_name` in `everest-app` and `everest-files`; optional 301 from the old hosts |
 | Certificates | `sudo certbot --nginx -d app.<domain> -d files.<domain>` |
