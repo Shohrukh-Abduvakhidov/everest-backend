@@ -15,6 +15,7 @@ import './unit/openapi.test.js';
 import './unit/attempt-rules.test.js';
 import './unit/m11-gaps.test.js';
 import './unit/mock-exam-grading.test.js';
+import './unit/trust-proxy.test.js';
 import './integration/password-auth.test.js';
 import './integration/auth-protection.test.js';
 import './integration/account-admin.test.js';

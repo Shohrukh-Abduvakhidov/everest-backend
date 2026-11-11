@@ -7,6 +7,9 @@ import * as healthService from './services/health-service.js';
 
 async function start({ port = env.port, registerSignals = true } = {}) {
   await healthService.getReadiness();
+  if (env.nodeEnv === 'production' && env.trustProxy === false) {
+    console.warn('TRUST_PROXY is not set: behind a reverse proxy every client shares the proxy IP for rate limits');
+  }
 
   const server = await new Promise((resolve, reject) => {
     // Express 5 passes listen errors such as EADDRINUSE to this callback.

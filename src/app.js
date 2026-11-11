@@ -11,6 +11,7 @@ function createApp(serviceDependencies = {}) {
 
    app.locals.serviceDependencies = serviceDependencies
    app.disable('x-powered-by')
+   app.set('trust proxy', serviceDependencies.trustProxy ?? env.trustProxy)
    app.use(cors({ origin: env.corsOrigins, credentials: true }))
    app.use(express.json({ limit: '1mb' }))
    // Swagger UI is opt-in in production (SWAGGER_ENABLED) and never part of /api/v1.
