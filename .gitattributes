@@ -6,3 +6,7 @@
 *.yaml text eol=lf
 # Import fixtures carry sha256 hashes of their own bytes: never convert line endings.
 tests/fixtures/** -text
+*.sh text eol=lf
+*.conf text eol=lf
+*.example text eol=lf
+Dockerfile text eol=lf

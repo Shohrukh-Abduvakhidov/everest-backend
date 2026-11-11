@@ -1,0 +1,13 @@
+.git
+.github
+.claude
+.agents
+node_modules
+.env
+.env.*
+!.env.example
+uploads
+import-packages
+coverage
+*.log
+deploy
