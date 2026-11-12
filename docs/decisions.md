@@ -766,3 +766,9 @@ Password login uses a generic invalid-credentials response for unknown phones an
 - All-or-nothing on storage means: no database write and no run when storage is missing. It is checked at confirm and again in the shared importer. A storage failure partway through image uploads can leave unreferenced content-addressed objects, as before; the database stays untouched.
 - The ZIP reader gained a total unpacked limit (512 MiB, from declared sizes that also bound inflation) and rejects control characters in paths.
 - Matching defaults are an import option rather than a bulk endpoint: they apply to drafts only, reuse the importer and are reported per question.
+
+## 2026-11-12 — Trainer cells questions use the mock exam digits format
+
+- **Rule:** a trainer question is a cells question exactly when the mock exam would take it for a `cells` item: its subject has a `cells` item in an active blueprint, and its verified key passes the shared `cellsKeyFilter` (`numeric`/`short_text`, whole number of 1..maxDigits digits). `max_digits` and `points` come from that blueprint item (nct-a5: 4 digits, 2 points). No new rule and no migration.
+- **Snapshot:** cells trainer questions get the mock exam's digits grading snapshot (`digitsSnapshot`) plus `acceptsValue: true`, so `{ value }` from an old client is stored as `{ digits }`; the mock exam keeps rejecting `{ value }`. Attempts created earlier keep their snapshot and `{ value }` grading.
+- **Views:** `kind`, `answerFormat`, `maxDigits` come from the snapshot (not the key) and appear only on digits questions; review views add the mock exam `sheet`. Lesson tests are unchanged.

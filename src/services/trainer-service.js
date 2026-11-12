@@ -5,7 +5,7 @@ import * as authRepository from '../repositories/auth-repository.js'
 import * as trainerRepository from '../repositories/trainer-repository.js'
 import { withTransaction } from '../repositories/transaction-repository.js'
 import AppError from '../utils/app-error.js'
-import { scorePercent } from '../utils/attempt-grading.js'
+import { digitsSnapshot, scorePercent } from '../utils/attempt-grading.js'
 import { normalizeInternalId } from '../utils/internal-id.js'
 import { authorizePermissionService } from './authorization-service.js'
 import { parseUserId, validateBody, validationError } from './course-service.js'
@@ -226,6 +226,24 @@ function sameRequest(stored, request, subjectId) {
       && stored.topicCode === request.topicCode
 }
 
+// Answer-sheet cells, chosen by the mock exam's rule: the subject has a cells item in an active
+// blueprint and the question's verified key passes the same filter. Those questions get the
+// mock exam's digits snapshot and points; acceptsValue keeps { value } clients working.
+async function cellsExtensions(deps, subjectCode, questionIds, client) {
+   const extensions = new Map()
+   const points = new Map()
+   const rule = await deps.repository.findCellsRule(subjectCode, client)
+   if (!rule) return { extensions, points }
+   const rows = await deps.repository.listCellsQuestions(questionIds, rule.max_digits, client)
+   for (const row of rows) {
+      extensions.set(String(row.id), digitsSnapshot(row.question_type, row.answer_data, rule.max_digits, {
+         acceptsValue: true,
+      }))
+      points.set(String(row.id), rule.points)
+   }
+   return { extensions, points }
+}
+
 async function createTrainerAttemptService(userId, body, overrides) {
    const deps = dependencies(overrides)
    const actorId = parseUserId(userId)
@@ -285,10 +303,19 @@ async function createTrainerAttemptService(userId, body, overrides) {
          generationFilters,
          createdBy: actorId,
       }, client)
-      await deps.repository.addTrainerQuestions(testId, shuffled(picked).map((row) => row.id), client)
+      const questionIds = shuffled(picked).map((row) => String(row.id))
+      const cells = await cellsExtensions(deps, subject.code, questionIds, client)
+      await deps.repository.addTrainerQuestions(
+         testId,
+         questionIds,
+         client,
+         questionIds.map((questionId) => cells.points.get(questionId) ?? null),
+      )
       await deps.repository.publishTrainerTest(testId, client)
       const assignmentId = await deps.repository.createTrainerAssignment(testId, actorId, now, client)
-      const id = await startAttemptInTransactionService(actorId, assignmentId, client, deps.attempts)
+      const id = await startAttemptInTransactionService(actorId, assignmentId, client, deps.attempts, {
+         snapshotExtensions: cells.extensions,
+      })
       await deps.auth.appendAuditEvent({
          actorUserId: actorId,
          subjectUserId: actorId,
@@ -373,7 +400,7 @@ function roundPercent(value) {
 }
 
 // Readiness of a subject: points over questions of its last readinessWindow finished trainings
-// (each question is 1 point, so this is the share of correct answers). Overall readiness: the
+// (a cells question weighs its blueprint points, every other question 1 point). Overall readiness: the
 // mean of the subject values, every trained subject counting equally.
 function subjectReadiness(rows) {
    const score = rows.reduce((sum, row) => sum + Number(row.score), 0)

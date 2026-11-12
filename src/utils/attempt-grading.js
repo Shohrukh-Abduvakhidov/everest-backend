@@ -28,8 +28,40 @@ function canonicalDigits(value) {
    return value.replace(/^0+(?=[0-9])/, '')
 }
 
+// The grading snapshot fields of a cells question: its accepted digits as the grader compares
+// them. Numeric keys are whole numbers; short_text keys may contain spaces, which are removed.
+function digitsSnapshot(questionType, answerData, maxDigits, extra = {}) {
+   const accepted = questionType === 'numeric'
+      ? [String(answerData.value)]
+      : answerData.acceptedAnswers.map((value) => value.replace(/\s/g, ''))
+   return {
+      answerFormat: 'digits',
+      maxDigits,
+      acceptedDigits: [...new Set(accepted.map(canonicalDigits))],
+      ...extra,
+   }
+}
+
+// The answer-sheet view of a cells question in a result.
+function digitsSheet(answer, snapshot) {
+   return {
+      digits: answer?.digits ?? null,
+      correctDigits: snapshot.acceptedDigits[0],
+      acceptedDigits: snapshot.acceptedDigits,
+      maxDigits: snapshot.maxDigits,
+   }
+}
+
+// acceptsValue (trainer only): a client that still sends { value } for a cells question gets a
+// whole non-negative number of 1..maxDigits digits stored as { digits }.
 function parseDigitsAnswer(value, snapshot) {
    const maxDigits = snapshot.maxDigits ?? 4
+   if (snapshot.acceptsValue === true && Object.keys(value).join() === 'value') {
+      if (!Number.isSafeInteger(value.value) || value.value < 0 || String(value.value).length > maxDigits) {
+         throw invalidAnswer(`value must be a whole number of 1-${maxDigits} digits`)
+      }
+      return { digits: String(value.value) }
+   }
    if (Object.keys(value).join() !== 'digits' || typeof value.digits !== 'string'
       || !new RegExp(`^[0-9]{1,${maxDigits}}$`).test(value.digits)) {
       throw invalidAnswer(`digits must be a string of 1-${maxDigits} digits 0-9`)
@@ -147,4 +179,13 @@ function scorePercent(score, maxScore) {
    return Number(((toHundredths(score) / toHundredths(maxScore)) * 100).toFixed(2))
 }
 
-export { canonicalDigits, gradeAnswer, parseStudentAnswer, scorePercent, sumPoints, toHundredths }
+export {
+   canonicalDigits,
+   digitsSheet,
+   digitsSnapshot,
+   gradeAnswer,
+   parseStudentAnswer,
+   scorePercent,
+   sumPoints,
+   toHundredths,
+}

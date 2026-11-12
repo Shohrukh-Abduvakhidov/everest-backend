@@ -558,6 +558,40 @@ Then use the ordinary attempt routes:
 
 - Trainings never appear in course test lists (`/courses/:courseId/test-assignments`) or in admin test screens.
 
+#### Trainer cells questions (digit boxes, 2026-11-12)
+
+The trainer marks answer-sheet cells questions the same way as the mock exam, so one digit-box component serves both.
+
+**Which questions.** The mock exam's rule, nothing new: the subject has a `cells` item in an active blueprint (`nct-a5`: biologiya, khimiya, fizika; 4 digits, 2 points), and the question is `numeric` or `short_text` whose verified key is a whole non-negative number of 1–`maxDigits` digits once spaces are removed. Other numeric questions (fractions, signs, 5+ digits) and every question of other subjects stay plain `numeric` with `{ value }`. The choice is made when the training is created and stored in the attempt; trainings created earlier are unchanged.
+
+**Question payload** (`POST /trainer/attempts`, `GET /tests/attempts/:attemptId` — trainer attempts use the `/tests/attempts` routes). Before:
+
+```json
+{ "id": "901", "questionType": "numeric", "points": "1.00", "content": {}, "answer": null, "revision": 0 }
+```
+
+After, for a cells question only (other questions have none of these keys):
+
+```json
+{ "id": "901", "questionType": "numeric", "points": "2.00", "content": {},
+  "kind": "cells", "answerFormat": "digits", "maxDigits": 4, "answer": null, "revision": 0 }
+```
+
+The mock exam (`GET /trainer/exams/:attemptId` and its result) now also sends `answerFormat` and `maxDigits` next to its existing `kind: "cells"`. Show digit boxes when `kind === "cells"` (or `answerFormat === "digits"`), `maxDigits` boxes, digits only.
+
+**Answer.** `PUT /tests/attempts/:attemptId/answers/:attemptQuestionId` with `{ "answer": { "digits": "1434" }, "revision": n }`: a string of 1–`maxDigits` digits `0-9`; leading zeros do not matter. Otherwise `400 VALIDATION_ERROR`.
+Compatibility: a client that still sends `{ "value": 1434 }` to a trainer cells question is accepted when the value is a whole number of 1–`maxDigits` digits and is stored as `{ "digits": "1434" }`; fractions or negatives give `400`. Trainings created before this change keep `{ value }` and their results are not touched.
+
+**Result** (`GET /tests/attempts/:attemptId/result`, `POST .../submit`): a cells question gets `awardedPoints` `"2.00"` or `"0.00"`, `correctAnswer` as stored in the key (`{ "value": 1434 }`, as in the mock exam), and the mock exam's `sheet`:
+
+```json
+{ "kind": "cells", "points": "2.00", "awardedPoints": "2.00", "correct": true, "answer": { "digits": "1434" },
+  "correctAnswer": { "value": 1434 },
+  "sheet": { "digits": "1434", "correctDigits": "1434", "acceptedDigits": ["1434"], "maxDigits": 4 } }
+```
+
+A cells question weighs 2 points, so training `score`/`maxScore` and readiness (points over max points) count it twice.
+
 ### NCT mock exam (2026-11-13)
 
 A full exam simulation by an answer-sheet blueprint. It is a separate mode: the trainer (`/trainer/catalog`, `/trainer/attempts`, `/trainer/overview`) is unchanged. Mock exams never count in the trainer overview, readiness or training history, and trainings never count in mock exam history.

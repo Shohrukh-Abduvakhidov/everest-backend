@@ -38,6 +38,8 @@ const attemptContextFrom = `FROM test_attempts AS attempt
 const questionColumns = `item.id, item.position, item.question_id, item.max_points, item.option_order,
    item.matching_order, question.question_type, question.content, question.interaction_settings,
    answer.answer_data, answer.revision, answer.awarded_points, answer.grading_status, answer.saved_at,
+   item.grading_snapshot ->> 'answerFormat' AS answer_format,
+   (item.grading_snapshot ->> 'maxDigits')::integer AS max_digits,
    (SELECT COALESCE(jsonb_agg(jsonb_build_object('key', option.option_key, 'content', option.content)), '[]')
     FROM question_options AS option WHERE option.question_id = question.id) AS options,
    (SELECT COALESCE(jsonb_agg(jsonb_build_object('side', entry.side, 'key', entry.item_key, 'content', entry.content)), '[]')

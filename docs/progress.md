@@ -6,6 +6,12 @@ Updated: 2026-11-13.
 
 NCT mock exam on `feat/nct-mock-exam` (awaiting review). The trainer, its access rule and staff access are merged (PRs #46–#48).
 
+## 2026-11-12 — Trainer cells questions (`feature/trainer-digits-input`)
+
+- **What:** trainer questions chosen by the mock exam cells rule get the digits payload, `{ digits }` answers, blueprint points and the mock exam result sheet. Shared helpers: `digitsSnapshot`, `digitsSheet` (attempt-grading), `cellsKeyFilter` (mock-exam-repository). No migration.
+- **Checked:** `test:sources`, `test:integrity`, `test:server`; disposable-database suite 433/433 pass (unit `trainer-digits`, integration `trainer-digits`).
+- **Not checked:** HTTP routes with cookies/CSRF; the frontend.
+
 ## 2026-11-11 — Production deployment files (`chore/deploy-to-main`)
 
 - **What:** Docker image, `deploy/docker-compose.prod.yml`, env/backup/S3 templates, nginx examples and `deploy/scripts/` (deploy with rollback, backup, restore check). Guide: `docs/deploy.md`. Decisions: `docs/decisions.md` (2026-11-11, deployment).
