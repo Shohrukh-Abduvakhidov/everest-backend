@@ -9,6 +9,7 @@ import { withTransaction } from '../repositories/transaction-repository.js'
 import AppError from '../utils/app-error.js'
 import { inspectMedia, MediaRejection, mimeTypes } from '../utils/media-inspection.js'
 import { parseCourseId, parseId, parseUserId, validateBody, validationError } from './course-service.js'
+import { updateLessonService } from './lesson-service.js'
 
 const mib = 1024 * 1024
 const maxFileBytes = 20 * 1024 * mib
@@ -60,8 +61,8 @@ function parseFileName(value) {
    return baseName
 }
 
-function parseUploadRequest(body) {
-   validateBody(body, ['courseId', 'kind', 'fileName', 'mimeType', 'sizeBytes'])
+function parseUploadRequest(body, config) {
+   validateBody(body, ['courseId', 'kind', 'fileName', 'mimeType', 'sizeBytes', 'lessonId'])
    let courseId
    try {
       courseId = parseCourseId(body.courseId)
@@ -82,8 +83,19 @@ function parseUploadRequest(body) {
       || body.sizeBytes > maxFileBytes) {
       throw validationError('sizeBytes', 'sizeBytes must be between 1 byte and 20 GiB')
    }
+   if (body.kind === 'video' && body.sizeBytes > config.videoMaxBytes) {
+      throw new AppError(413, 'VIDEO_TOO_LARGE', 'Video is larger than the allowed size', [
+         { field: 'sizeBytes', message: String(config.videoMaxBytes) },
+      ])
+   }
+   let lessonId = null
+   if (body.lessonId !== undefined && body.lessonId !== null) {
+      if (body.kind !== 'video') throw validationError('lessonId', 'Only a video upload can target a lesson')
+      lessonId = parseId(body.lessonId, 'VALIDATION_ERROR', 'Request validation failed')
+   }
    return {
       courseId,
+      lessonId,
       kind: body.kind,
       fileName,
       extension: extension === 'jpeg' ? 'jpg' : extension,
@@ -111,6 +123,7 @@ function safeUpload(row) {
       id: row.id,
       assetId: row.asset_id,
       courseId: row.course_id,
+      lessonId: row.lesson_id ?? null,
       kind: row.kind,
       fileName: row.file_name,
       mimeType: row.declared_mime_type,
@@ -123,7 +136,12 @@ function safeUpload(row) {
       expiresAt: iso(row.expires_at),
       completedAt: iso(row.completed_at),
       abortedAt: iso(row.aborted_at),
+      expiredAt: iso(row.expired_at),
    }
+}
+
+function isOpen(upload) {
+   return (upload.status === 'initiated' || upload.status === 'uploading') && !upload.is_expired
 }
 
 function safeAsset(row) {
@@ -177,13 +195,40 @@ function requireOpenUpload(upload) {
    if (upload.status === 'rejected') {
       throw conflict('UPLOAD_REJECTED', 'Upload was rejected', [{ code: upload.rejection_code }])
    }
-   if (upload.is_expired) throw conflict('UPLOAD_EXPIRED', 'Upload has expired')
+   if (upload.is_expired || upload.status === 'expired') throw conflict('UPLOAD_EXPIRED', 'Upload has expired')
+}
+
+// Lesson videos: per-user open uploads and the library quota. Run without a lock before the
+// storage call (fast refusal) and again under lockVideoQuota inside the transaction.
+async function requireVideoCapacity(deps, actorId, sizeBytes, client) {
+   const open = await deps.repository.countOpenVideoUploads(actorId, client)
+   if (open >= deps.config.maxActiveVideoUploads) {
+      throw conflict('VIDEO_UPLOAD_LIMIT_REACHED', 'Finish or abort an open video upload first', [
+         { field: 'activeUploads', message: String(deps.config.maxActiveVideoUploads) },
+      ])
+   }
+   const used = await deps.repository.sumVideoLibraryBytes(client)
+   if (used + sizeBytes > deps.config.videoTotalQuotaBytes) {
+      throw conflict('VIDEO_QUOTA_EXCEEDED', 'The video library has no room for this file', [
+         { field: 'usedBytes', message: String(used) },
+         { field: 'quotaBytes', message: String(deps.config.videoTotalQuotaBytes) },
+      ])
+   }
+}
+
+async function requireTargetLesson(deps, courseId, lessonId) {
+   if (!lessonId) return
+   const lesson = await deps.repository.findLesson(courseId, lessonId)
+   if (!lesson) throw new AppError(404, 'LESSON_NOT_FOUND', 'Lesson was not found')
+   if (!['video', 'mixed'].includes(lesson.lesson_type)) {
+      throw validationError('lessonId', 'Only video and mixed lessons can have a video')
+   }
 }
 
 async function initiateAssetUploadService(userId, body, overrides) {
    const deps = dependencies(overrides)
    const actorId = parseUserId(userId)
-   const request = parseUploadRequest(body)
+   const request = parseUploadRequest(body, deps.config)
    if (!await canUploadToCourse(deps, actorId, request.courseId)) {
       throw new AppError(403, 'ACTION_FORBIDDEN', 'You are not authorized to perform this action')
    }
@@ -192,6 +237,9 @@ async function initiateAssetUploadService(userId, body, overrides) {
    if (course.status === 'archived') {
       throw conflict('COURSE_ARCHIVED', 'Files cannot be uploaded to an archived course')
    }
+   const isVideo = request.kind === 'video'
+   await requireTargetLesson(deps, request.courseId, request.lessonId)
+   if (isVideo) await requireVideoCapacity(deps, actorId, request.sizeBytes)
    const { partSizeBytes, partCount } = choosePartSize(request.sizeBytes, deps.config.partSizeBytes)
    const storageKey = `courses/${request.courseId}/${request.kind}s/${randomUUID()}.${request.extension}`
    const expiresAt = new Date(deps.clock().getTime() + deps.config.uploadTtlHours * 3600 * 1000)
@@ -201,6 +249,10 @@ async function initiateAssetUploadService(userId, body, overrides) {
    })
    try {
       const uploadId = await deps.transaction(async (client) => {
+         if (isVideo) {
+            await deps.repository.lockVideoQuota(client)
+            await requireVideoCapacity(deps, actorId, request.sizeBytes, client)
+         }
          const asset = await deps.repository.insertPendingAsset({
             storageKey,
             mimeType: request.mimeType,
@@ -213,6 +265,7 @@ async function initiateAssetUploadService(userId, body, overrides) {
          const upload = await deps.repository.insertUpload({
             assetId: asset.id,
             courseId: request.courseId,
+            lessonId: request.lessonId,
             storageUploadId,
             declaredMimeType: request.mimeType,
             sizeBytes: request.sizeBytes,
@@ -229,6 +282,7 @@ async function initiateAssetUploadService(userId, body, overrides) {
             entityId: upload.id,
             metadata: {
                courseId: request.courseId,
+               lessonId: request.lessonId,
                assetId: asset.id,
                kind: request.kind,
                sizeBytes: request.sizeBytes,
@@ -250,14 +304,33 @@ async function getAssetUploadService(userId, uploadIdValue, overrides) {
    const uploadId = parseUploadId(uploadIdValue)
    const upload = await requireUploadAccess(deps, actorId, await deps.repository.findUpload(uploadId))
    let uploadedParts = []
-   if (upload.status === 'initiated' && !upload.is_expired) {
+   if (isOpen(upload)) {
       const parts = await deps.storage.listParts({
          key: upload.storage_key,
          uploadId: upload.storage_upload_id,
       })
-      uploadedParts = (parts || []).map((part) => ({ partNumber: part.partNumber, size: part.size }))
+      // A part counts only with its full expected size; a cut-off part is sent again.
+      uploadedParts = (parts || [])
+         .filter((part) => part.partNumber <= upload.part_count)
+         .map((part) => ({ partNumber: part.partNumber, size: part.size }))
    }
-   return { upload: safeUpload(upload), uploadedParts }
+   const done = new Set(uploadedParts
+      .filter((part) => part.size === expectedPartSize(upload, part.partNumber))
+      .map((part) => part.partNumber))
+   const missingParts = []
+   if (isOpen(upload)) {
+      for (let number = 1; number <= upload.part_count; number += 1) {
+         if (!done.has(number)) missingParts.push(number)
+      }
+   }
+   return {
+      upload: safeUpload(upload),
+      uploadedParts,
+      missingParts,
+      uploadedBytes: uploadedParts
+         .filter((part) => done.has(part.partNumber))
+         .reduce((sum, part) => sum + part.size, 0),
+   }
 }
 
 async function presignAssetUploadPartsService(userId, uploadIdValue, body, overrides) {
@@ -290,6 +363,7 @@ async function presignAssetUploadPartsService(userId, uploadIdValue, body, overr
          expiresAt,
       })
    }
+   await deps.repository.markUploadUploading(upload.id)
    return { parts }
 }
 
@@ -356,7 +430,9 @@ async function completeAssetUploadService(userId, uploadIdValue, overrides) {
    const outcome = await deps.transaction(async (client) => {
       const upload = await deps.repository.findUploadForUpdate(uploadId, client)
       if (!upload) throw uploadNotFound()
-      if (upload.status === 'completed') return { assetId: upload.asset_id }
+      if (upload.status === 'completed') {
+         return { assetId: upload.asset_id, courseId: upload.course_id, lessonId: upload.lesson_id }
+      }
       requireOpenUpload(upload)
       const object = await assembleStoredObject(deps, upload)
       let media
@@ -396,7 +472,12 @@ async function completeAssetUploadService(userId, uploadIdValue, overrides) {
          entityId: upload.id,
          metadata: { assetId: upload.asset_id, sizeBytes: object.size },
       }, client)
-      return { assetId: upload.asset_id }
+      return {
+         assetId: upload.asset_id,
+         courseId: upload.course_id,
+         lessonId: upload.lesson_id,
+         justCompleted: true,
+      }
    })
    if (outcome.rejected) {
       await deps.storage.deleteObject(outcome.storageKey).catch(() => {
@@ -409,7 +490,35 @@ async function completeAssetUploadService(userId, uploadIdValue, overrides) {
          { code: outcome.rejected.code },
       ])
    }
-   return { asset: safeAsset(await deps.repository.findAsset(outcome.assetId)) }
+   const asset = safeAsset(await deps.repository.findAsset(outcome.assetId))
+   if (!outcome.lessonId) return { asset }
+   return { asset, lesson: await attachToLesson(deps, actorId, outcome, overrides) }
+}
+
+// The lesson named at initiation gets the video through the ordinary lesson update, so its
+// rules apply (lesson type, chapters, offline licenses, removal of the replaced video). Only
+// the call that completed the upload attaches; a repeated completion reports the state, so it
+// cannot undo a later change of the lesson's video. A refused attach keeps the ready asset.
+async function attachToLesson(deps, actorId, outcome, overrides = {}) {
+   const lessonId = String(outcome.lessonId)
+   if (!outcome.justCompleted) {
+      const lesson = await deps.repository.findLesson(outcome.courseId, lessonId)
+      return {
+         lessonId,
+         attached: String(lesson?.video_asset_id ?? '') === String(outcome.assetId),
+         errorCode: null,
+      }
+   }
+   try {
+      await updateLessonService(actorId, outcome.courseId, lessonId, { videoAssetId: outcome.assetId }, {
+         storage: overrides.storage,
+         clock: overrides.clock,
+      })
+      return { lessonId, attached: true, errorCode: null }
+   } catch (error) {
+      if (!(error instanceof AppError)) throw error
+      return { lessonId, attached: false, errorCode: error.code }
+   }
 }
 
 async function abortAssetUploadService(userId, uploadIdValue, overrides) {
@@ -420,7 +529,7 @@ async function abortAssetUploadService(userId, uploadIdValue, overrides) {
    await deps.transaction(async (client) => {
       const upload = await deps.repository.findUploadForUpdate(uploadId, client)
       if (!upload) throw uploadNotFound()
-      if (upload.status === 'aborted' || upload.status === 'rejected') return
+      if (['aborted', 'rejected', 'expired'].includes(upload.status)) return
       if (upload.status === 'completed') {
          throw conflict('UPLOAD_ALREADY_COMPLETED', 'A completed upload cannot be aborted')
       }
@@ -442,7 +551,34 @@ async function abortAssetUploadService(userId, uploadIdValue, overrides) {
    return { upload: safeUpload(await deps.repository.findUpload(uploadId)) }
 }
 
+// Worker step: one upload past expires_at is aborted in storage and marked expired; its
+// pending asset is archived. Returns false when none is left. SKIP LOCKED lets several
+// worker processes run it. The bucket's 3-day abort rule is the backstop.
+async function expireNextAbandonedUploadService(overrides) {
+   const deps = dependencies(overrides)
+   return deps.transaction(async (client) => {
+      const upload = await deps.repository.claimExpiredUpload(client)
+      if (!upload) return false
+      await deps.storage.abortMultipartUpload({
+         key: upload.storage_key,
+         uploadId: upload.storage_upload_id,
+      })
+      await deps.repository.markUploadExpired(upload.id, client)
+      await deps.repository.markAssetUnusable(upload.asset_id, 'archived', null, client)
+      await deps.auth.appendAuditEvent({
+         actorUserId: null,
+         subjectUserId: null,
+         code: 'asset.upload.expired',
+         entityType: 'asset_upload',
+         entityId: upload.id,
+         metadata: { assetId: upload.asset_id },
+      }, client)
+      return true
+   })
+}
+
 export {
+   expireNextAbandonedUploadService,
    abortAssetUploadService,
    choosePartSize,
    completeAssetUploadService,

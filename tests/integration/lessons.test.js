@@ -325,12 +325,12 @@ test('lessons, playback, notes, progress and offline licenses integration', asyn
          const playback = await api('GET', `/courses/${courseId}/lessons/${videoLessonId}/playback`, student)
          assert.equal(playback.status, 200, JSON.stringify(playback.body))
          const expiresIn = new Date(playback.body.data.playback.expiresAt).getTime() - Date.now()
-         assert.ok(expiresIn > 29 * 60 * 1000 && expiresIn <= 30 * 60 * 1000)
+         assert.ok(expiresIn > 119 * 60 * 1000 && expiresIn <= 120 * 60 * 1000)
          assert.equal(playback.body.data.playback.mimeType, 'video/mp4')
          assert.equal(playback.body.data.chapters[1].startSeconds, 45)
          assert.equal(Object.hasOwn(playback.body.data.playback, 'storageKey'), false)
          const call = storage.calls.filter((entry) => entry.name === 'presignDownload').at(-1)
-         assert.deepEqual([call.expiresIn, call.disposition, call.contentType], [1800, 'inline', 'video/mp4'])
+         assert.deepEqual([call.expiresIn, call.disposition, call.contentType], [7200, 'inline', 'video/mp4'])
          assert.equal(playback.body.data.playback.url.includes(env.storage.endpoint || 'minio:9000'), false)
 
          const denied = await api('GET', `/courses/${courseId}/lessons/${videoLessonId}/playback`, locked)
@@ -551,7 +551,13 @@ test('lessons, playback, notes, progress and offline licenses integration', asyn
             [videoLessonId],
          )
          assert.equal(audit.rows[0].metadata.revokedLicenses, 1)
-         await api('PATCH', lessonPath(videoLessonId), manager, { videoAssetId: videoId })
+         // The replaced video is used by no lesson any more: archived and its object deleted.
+         const old = await client.query('SELECT status, storage_key FROM assets WHERE id = $1', [videoId])
+         assert.equal(old.rows[0].status, 'archived')
+         assert.equal(storage.objects.has(old.rows[0].storage_key), false)
+         const back = await api('PATCH', lessonPath(videoLessonId), manager, { videoAssetId: videoId })
+         assert.equal(back.status, 409)
+         assert.equal(back.body.error.code, 'VIDEO_NOT_PLAYABLE')
          await api('PUT', `${lessonPath(videoLessonId)}/chapters`, manager, {
             chapters: [{ startSeconds: 0, title: 'Start' }, { startSeconds: 45, title: 'Middle' }],
          })
@@ -590,7 +596,8 @@ test('lessons, playback, notes, progress and offline licenses integration', asyn
          )
          assert.ok(lessons.rows.every((lesson) => lesson.status === 'draft'))
          const video = lessons.rows.find((lesson) => lesson.title === 'Intro')
-         assert.equal(video.video_asset_id, videoId)
+         const original = await client.query('SELECT video_asset_id FROM lessons WHERE id = $1', [videoLessonId])
+         assert.equal(video.video_asset_id, original.rows[0].video_asset_id)
          const learnerRows = await client.query(
             `SELECT (SELECT count(*) FROM lesson_progress WHERE lesson_id = ANY($1::bigint[]))
                 + (SELECT count(*) FROM lesson_notes WHERE lesson_id = ANY($1::bigint[]))

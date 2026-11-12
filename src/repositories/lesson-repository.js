@@ -383,7 +383,30 @@ async function copyResources(lessonIdMap, client) {
    return result.rowCount
 }
 
+// A video still referenced by any lesson or lesson resource keeps its object.
+async function isAssetReferenced(assetId, client) {
+   const result = await client.query(
+      `SELECT EXISTS (SELECT 1 FROM lessons WHERE video_asset_id = $1)
+          OR EXISTS (SELECT 1 FROM lesson_resources WHERE asset_id = $1) AS referenced`,
+      [normalizeInternalId(assetId)],
+   )
+   return result.rows[0].referenced
+}
+
+// Archived video assets are never playable again; returns the key whose object to delete.
+async function archiveVideoAsset(assetId, client) {
+   const result = await client.query(
+      `UPDATE assets SET status = 'archived'
+       WHERE id = $1 AND kind = 'video' AND status = 'ready'
+       RETURNING storage_key`,
+      [normalizeInternalId(assetId)],
+   )
+   return result.rows[0]?.storage_key ?? null
+}
+
 export {
+   archiveVideoAsset,
+   isAssetReferenced,
    countLinkedLessons,
    lockCourseTest,
    applyLessonOrder,

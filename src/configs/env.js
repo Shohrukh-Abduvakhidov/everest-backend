@@ -146,8 +146,16 @@ const env = Object.freeze({
       min: 5 * 1024 * 1024,
       max: 5 * 1024 * 1024 * 1024,
     }),
-    presignTtlSeconds: readInteger('STORAGE_PRESIGN_TTL_SECONDS', 900, { min: 60, max: 3600 }),
-    uploadTtlHours: readInteger('STORAGE_UPLOAD_TTL_HOURS', 144, { max: 166 }),
+    // Part URLs live an hour, so a long upload on a slow line does not lose its links.
+    presignTtlSeconds: readInteger('STORAGE_PRESIGN_TTL_SECONDS', 3600, { min: 60, max: 3600 }),
+    // Below the 3-day AbortIncompleteMultipartUpload rule applied by storage:configure.
+    uploadTtlHours: readInteger('STORAGE_UPLOAD_TTL_HOURS', 48, { max: 70 }),
+    videoMaxBytes: readInteger('VIDEO_MAX_BYTES', 4 * 1024 * 1024 * 1024, { max: 20 * 1024 * 1024 * 1024 }),
+    // The whole video library (ready videos plus open video uploads); the disk is shared.
+    videoTotalQuotaBytes: readInteger('VIDEO_TOTAL_QUOTA_BYTES', 15 * 1024 * 1024 * 1024),
+    maxActiveVideoUploads: readInteger('VIDEO_MAX_ACTIVE_UPLOADS', 3, { max: 50 }),
+    playbackUrlTtlSeconds: readInteger('VIDEO_PLAYBACK_URL_TTL_SECONDS', 7200, { min: 60, max: 43200 }),
+    uploadSweepIntervalMs: readInteger('UPLOAD_SWEEP_INTERVAL_MS', 600000),
   }),
   telegram: Object.freeze({
     discoveryUrl: 'https://oauth.telegram.org/.well-known/openid-configuration',

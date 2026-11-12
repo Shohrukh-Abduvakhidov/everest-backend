@@ -6,6 +6,12 @@ Updated: 2026-11-13.
 
 NCT mock exam on `feat/nct-mock-exam` (awaiting review). The trainer, its access rule and staff access are merged (PRs #46–#48).
 
+## 2026-11-14 — Resumable lesson video uploads (`feature/video-upload`)
+
+- **What:** lesson videos through the existing `/assets/uploads` flow: optional `lessonId` with attach on completion, video size/quota/open-upload limits, `uploading`/`expired` states, `missingParts` for resuming, upload sweep in `worker:attempts`, 3-day bucket abort rule, deletion of replaced/removed lesson videos, 2 h playback URLs, nginx `everest-files.conf` for large parts and Range. Migration `20261114010000000_extend-asset-uploads-for-video`.
+- **Checked:** `test:sources`, `test:integrity`, `test:migrations` (39/93, down and reapply), `test:server`; disposable suite 446/446 pass (exit 0, ~77 s; new unit `video-upload`, integration `video-uploads`; memory storage double, no live S3).
+- **Not checked:** a real browser upload to SeaweedFS, nginx config on the server, `storage:configure` against the server bucket, `migrate:up` on `everest_db` (branch not merged).
+
 ## 2026-11-12 — Trainer cells questions (`feature/trainer-digits-input`)
 
 - **What:** trainer questions chosen by the mock exam cells rule get the digits payload, `{ digits }` answers, blueprint points and the mock exam result sheet. Shared helpers: `digitsSnapshot`, `digitsSheet` (attempt-grading), `cellsKeyFilter` (mock-exam-repository). No migration.
