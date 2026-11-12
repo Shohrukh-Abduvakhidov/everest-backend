@@ -1,13 +1,19 @@
 ---
 project: EVEREST Backend
-current_milestone: M11 follow-up (NCT mock exam)
+current_milestone: M11 follow-up (trainer cells questions)
 status: awaiting_review
-branch: feat/nct-mock-exam
-base_commit: cfaa312
-updated_at: 2026-11-13
+branch: feature/trainer-digits-input
+base_commit: 81d79f7
+updated_at: 2026-11-12
 ---
 
 # Current handoff
+
+## Trainer cells questions (PR `feature/trainer-digits-input`, awaiting review)
+
+- Trainer questions picked by the mock exam cells rule (active blueprint `cells` item for the subject + shared `cellsKeyFilter`) get `kind: 'cells'`, `answerFormat: 'digits'`, `maxDigits`, take `{ digits }`, weigh the blueprint points (2) and show `sheet` in the result. Old `{ value }` is accepted (whole numbers stored as digits); earlier attempts unchanged. No migration.
+- Verified: `test:sources`, `test:integrity`, `test:server`, disposable suite 433/433 pass (exit 0, ~82 s).
+- Next: review/merge; frontend uses one digit-box component for trainer and mock exam (docs/frontend-handoff.md → "Trainer cells questions").
 
 ## Production deployment, stage 2a (PR `chore/deploy-to-main`)
 

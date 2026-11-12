@@ -3,7 +3,7 @@ import * as mockExamRepository from '../repositories/mock-exam-repository.js'
 import * as attemptRepository from '../repositories/test-attempt-repository.js'
 import { withTransaction } from '../repositories/transaction-repository.js'
 import AppError from '../utils/app-error.js'
-import { canonicalDigits, scorePercent, sumPoints, toHundredths } from '../utils/attempt-grading.js'
+import { digitsSheet, digitsSnapshot, scorePercent, sumPoints, toHundredths } from '../utils/attempt-grading.js'
 import { normalizeInternalId } from '../utils/internal-id.js'
 import { authorizePermissionService } from './authorization-service.js'
 import { parseUserId, validateBody, validationError } from './course-service.js'
@@ -223,14 +223,7 @@ function parseCreateBody(body) {
 
 // The accepted digits of a cells question, as the grader compares them.
 function cellsExtension(row, item) {
-   const accepted = row.question_type === 'numeric'
-      ? [String(row.answer_data.value)]
-      : row.answer_data.acceptedAnswers.map((value) => value.replace(/\s/g, ''))
-   return {
-      answerFormat: 'digits',
-      maxDigits: item.maxDigits,
-      acceptedDigits: [...new Set(accepted.map(canonicalDigits))],
-   }
+   return digitsSnapshot(row.question_type, row.answer_data, item.maxDigits)
 }
 
 function byDifficulty(rows) {
@@ -482,6 +475,7 @@ async function getMockExamService(userId, attemptIdValue, overrides) {
                      interactionSettings: view.interactionSettings,
                      options: view.options,
                      matching: view.matching,
+                     ...cellsFields(view),
                      answer: view.answer,
                      revision: view.revision,
                      savedAt: view.savedAt,
@@ -578,13 +572,13 @@ function matchingSheet(view, key) {
    return { rows, correctPairs: rows.filter((row) => row.correct).length, totalPairs: rows.length }
 }
 
+// The input settings of a cells question, the same fields the trainer sends.
+function cellsFields(view) {
+   return view.answerFormat ? { answerFormat: view.answerFormat, maxDigits: view.maxDigits } : {}
+}
+
 function cellsSheet(view, snapshot) {
-   return {
-      digits: view.answer?.digits ?? null,
-      correctDigits: snapshot.acceptedDigits[0],
-      acceptedDigits: snapshot.acceptedDigits,
-      maxDigits: snapshot.maxDigits,
-   }
+   return digitsSheet(view.answer, snapshot)
 }
 
 function sheetOf(kind, view, snapshot) {
@@ -618,6 +612,7 @@ async function readMockResult(deps, attempt, now) {
                interactionSettings: view.interactionSettings,
                options: view.options,
                matching: view.matching,
+               ...cellsFields(view),
                answer: view.answer,
                correctAnswer: view.correctAnswer,
                explanation: view.explanation,

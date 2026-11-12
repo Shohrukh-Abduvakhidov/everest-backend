@@ -1,5 +1,6 @@
 import pool from '../configs/db.js'
 import { normalizeInternalId } from '../utils/internal-id.js'
+import { cellsKeyFilter, cellsKeyPattern } from './mock-exam-repository.js'
 
 // A question is trainable when it is published, has a verified key and sits in an NCT bank
 // (bank code starts with the configured prefix). $1 is always that prefix.
@@ -264,13 +265,47 @@ async function createTrainerTest(test, client) {
    return result.rows[0].id
 }
 
-async function addTrainerQuestions(testId, questionIds, client) {
+// points: optional array aligned with questionIds; a missing entry is 1 point.
+async function addTrainerQuestions(testId, questionIds, client, points = []) {
    await client.query(
       `INSERT INTO test_questions (test_id, question_id, position, points)
-       SELECT $1, added.question_id, added.position, 1
-       FROM unnest($2::bigint[]) WITH ORDINALITY AS added(question_id, position)`,
-      [normalizeInternalId(testId), questionIds.map(normalizeInternalId)],
+       SELECT $1, added.question_id, added.position, COALESCE(added.points, 1)
+       FROM unnest($2::bigint[], $3::numeric[]) WITH ORDINALITY AS added(question_id, points, position)`,
+      [
+         normalizeInternalId(testId),
+         questionIds.map(normalizeInternalId),
+         questionIds.map((id, index) => points[index] ?? null),
+      ],
    )
+}
+
+// The cells rule of the mock exam for one subject: the answer-sheet cells item of an active
+// blueprint (max digits and points). No such item means the subject has no cells questions.
+async function findCellsRule(subjectCode, client) {
+   const result = await client.query(
+      `SELECT item.max_digits, item.points::text AS points
+       FROM exam_blueprint_items AS item
+       JOIN exam_blueprint_sections AS section ON section.id = item.section_id
+       JOIN exam_blueprints AS blueprint ON blueprint.id = section.blueprint_id
+       WHERE blueprint.status = 'active' AND section.subject_code = $1 AND item.item_kind = 'cells'
+       ORDER BY blueprint.code, item.first_position
+       LIMIT 1`,
+      [subjectCode],
+   )
+   return result.rows[0] || null
+}
+
+// Of the picked questions, those whose verified key fits the cells filter of the mock exam.
+async function listCellsQuestions(questionIds, maxDigits, client) {
+   const result = await client.query(
+      `SELECT question.id, question.question_type, answer_key.answer_data
+       FROM questions AS question
+       JOIN question_answer_keys AS answer_key
+          ON answer_key.question_id = question.id AND answer_key.status = 'verified'
+       WHERE question.id = ANY($1::bigint[]) ${cellsKeyFilter(2)}`,
+      [questionIds.map(normalizeInternalId), cellsKeyPattern(maxDigits)],
+   )
+   return result.rows
 }
 
 // guard_test() re-checks that every question is published.
@@ -322,6 +357,8 @@ async function listTrainerStats(userId, db = pool) {
 
 export {
    addTrainerQuestions,
+   findCellsRule,
+   listCellsQuestions,
    countCandidates,
    createTrainerAssignment,
    createTrainerTest,

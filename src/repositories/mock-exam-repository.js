@@ -92,10 +92,20 @@ function kindFilter(spec, start) {
       }
    }
    if (spec.kind === 'cells') {
-      // A whole non-negative number of 1..maxDigits digits; short_text answers may contain
-      // spaces, which are removed first, and every accepted answer must qualify.
-      return {
-         sql: `AND (
+      return { sql: cellsKeyFilter(start), params: [cellsKeyPattern(spec.maxDigits)] }
+   }
+   throw new Error('Unknown mock exam item kind')
+}
+
+// Cells: a whole non-negative number of 1..maxDigits digits; short_text answers may contain
+// spaces, which are removed first, and every accepted answer must qualify. The trainer uses
+// the same filter, so both modes choose cells questions by one rule. $start binds the pattern.
+function cellsKeyPattern(maxDigits) {
+   return `^[0-9]{1,${Number(maxDigits)}}$`
+}
+
+function cellsKeyFilter(start) {
+   return `AND (
             (question.question_type = 'numeric'
                AND jsonb_typeof(answer_key.answer_data -> 'value') = 'number'
                AND (answer_key.answer_data ->> 'value') ~ $${start}::text)
@@ -107,11 +117,7 @@ function kindFilter(spec, start) {
                   WHERE jsonb_typeof(accepted.value) <> 'string'
                      OR regexp_replace(accepted.value #>> '{}', '\\s', '', 'g') !~ $${start}::text
                ))
-         )`,
-         params: [`^[0-9]{1,${Number(spec.maxDigits)}}$`],
-      }
-   }
-   throw new Error('Unknown mock exam item kind')
+         )`
 }
 
 function baseParams(bankCodePrefix, spec) {
@@ -311,6 +317,8 @@ async function listFinishedMockAttempts(userId, { limit, offset }, db = pool) {
 }
 
 export {
+   cellsKeyFilter,
+   cellsKeyPattern,
    addMockExamItems,
    addMockExamQuestions,
    countCandidates,

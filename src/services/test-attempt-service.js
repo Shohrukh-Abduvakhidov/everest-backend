@@ -5,7 +5,7 @@ import * as authRepository from '../repositories/auth-repository.js'
 import * as attemptRepository from '../repositories/test-attempt-repository.js'
 import { withTransaction } from '../repositories/transaction-repository.js'
 import AppError from '../utils/app-error.js'
-import { gradeAnswer, parseStudentAnswer, scorePercent, sumPoints } from '../utils/attempt-grading.js'
+import { digitsSheet, gradeAnswer, parseStudentAnswer, scorePercent, sumPoints } from '../utils/attempt-grading.js'
 import {
    answersRevealed,
    assignmentState,
@@ -118,7 +118,15 @@ function safeQuestionBase(row) {
             right: ordered(items('right'), row.matching_order.right),
          }
          : null,
+      ...digitsInput(row),
    }
+}
+
+// Answer-sheet cells (trainer and mock exam): the same fields in both modes. Only questions
+// whose grading snapshot says so get them, so lesson tests keep their shape.
+function digitsInput(row) {
+   if (row.answer_format !== 'digits') return {}
+   return { kind: 'cells', answerFormat: 'digits', maxDigits: Number(row.max_digits) }
 }
 
 function safeLearnerQuestion(row) {
@@ -140,6 +148,9 @@ function safeReviewQuestion(row) {
       gradingStatus: row.grading_status,
       correctAnswer: row.grading_snapshot.answerData,
       explanation: row.grading_snapshot.explanation,
+      ...(row.grading_snapshot.answerFormat === 'digits'
+         ? { sheet: digitsSheet(row.answer_data ?? null, row.grading_snapshot) }
+         : {}),
    }
 }
 
