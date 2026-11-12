@@ -1,15 +1,22 @@
 ---
 project: EVEREST Backend
-current_milestone: M11 follow-up (trainer cells questions)
+current_milestone: Resumable lesson video uploads
 status: awaiting_review
-branch: feature/trainer-digits-input
-base_commit: 81d79f7
-updated_at: 2026-11-12
+branch: feature/video-upload
+base_commit: 6522403
+updated_at: 2026-11-14
 ---
 
 # Current handoff
 
-## Trainer cells questions (PR `feature/trainer-digits-input`, awaiting review)
+## Resumable lesson video uploads (PR `feature/video-upload`, awaiting review)
+
+- Built on `asset_uploads`: optional `lessonId` (attach on completion), video limits (4 GiB file, 15 GiB library, 3 open uploads per user), states `uploading`/`expired`, `missingParts`/`uploadedBytes` for resuming, upload sweep inside `worker:attempts`, 3-day abort rule, old video object deleted on replace/remove, playback URLs 2 h. Migration `20261114010000000`.
+- Verified: sources, integrity, migrations cycle, server, disposable suite 446/446.
+- After merge (operator): `migrate:up` (the compose `migrate` service); rebuild backend and workers; `npm run storage:configure` in the backend container (lifecycle 3 days, CORS); copy `deploy/nginx/everest-files.conf` changes (client_max_body_size 128m, Range, timeouts 900 s, `proxy_max_temp_file_size 0`) → `nginx -t` → reload; add the new env keys from `deploy/env.example` if other values are wanted.
+- Not done: transcoding/HLS (recommendation in decisions), root `.env.example` (not readable in this session).
+
+## Trainer cells questions (PR #53, merged)
 
 - Trainer questions picked by the mock exam cells rule (active blueprint `cells` item for the subject + shared `cellsKeyFilter`) get `kind: 'cells'`, `answerFormat: 'digits'`, `maxDigits`, take `{ digits }`, weigh the blueprint points (2) and show `sheet` in the result. Old `{ value }` is accepted (whole numbers stored as digits); earlier attempts unchanged. No migration.
 - Verified: `test:sources`, `test:integrity`, `test:server`, disposable suite 433/433 pass (exit 0, ~82 s).

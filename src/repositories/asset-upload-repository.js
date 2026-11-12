@@ -4,10 +4,10 @@ import { normalizeInternalId } from '../utils/internal-id.js'
 const uploadColumns = `upload.id, upload.asset_id, upload.course_id, upload.storage_upload_id,
    upload.declared_mime_type, upload.size_bytes, upload.part_size_bytes, upload.part_count,
    upload.status, upload.rejection_code, upload.created_by, upload.created_at,
-   upload.expires_at, upload.completed_at, upload.aborted_at,
+   upload.expires_at, upload.completed_at, upload.aborted_at, upload.lesson_id, upload.expired_at,
    asset.storage_key, asset.kind, asset.file_name, asset.status AS asset_status,
    asset.processing_status, asset.processing_error,
-   (upload.status = 'initiated' AND upload.expires_at <= CURRENT_TIMESTAMP) AS is_expired`
+   (upload.status IN ('initiated', 'uploading') AND upload.expires_at <= CURRENT_TIMESTAMP) AS is_expired`
 
 const assetColumns = `id, kind, storage_key, mime_type, file_name, size_bytes, width_px, height_px,
    duration_seconds, status, processing_status, processing_error, uploaded_by, created_at,
@@ -61,8 +61,8 @@ async function insertUpload(upload, client) {
    const result = await client.query(
       `INSERT INTO asset_uploads
          (asset_id, course_id, storage_upload_id, declared_mime_type, size_bytes,
-          part_size_bytes, part_count, created_by, expires_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          part_size_bytes, part_count, created_by, expires_at, lesson_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING id`,
       [
          normalizeInternalId(upload.assetId),
@@ -74,6 +74,7 @@ async function insertUpload(upload, client) {
          upload.partCount,
          normalizeInternalId(upload.createdBy),
          upload.expiresAt,
+         upload.lessonId ? normalizeInternalId(upload.lessonId) : null,
       ],
    )
    return result.rows[0]
@@ -105,7 +106,7 @@ async function findUploadForUpdate(uploadId, client) {
 async function markUploadCompleted(uploadId, client) {
    await client.query(
       `UPDATE asset_uploads SET status = 'completed', completed_at = CURRENT_TIMESTAMP
-       WHERE id = $1 AND status = 'initiated'`,
+       WHERE id = $1 AND status IN ('initiated', 'uploading')`,
       [normalizeInternalId(uploadId)],
    )
 }
@@ -113,7 +114,7 @@ async function markUploadCompleted(uploadId, client) {
 async function markUploadAborted(uploadId, client) {
    await client.query(
       `UPDATE asset_uploads SET status = 'aborted', aborted_at = CURRENT_TIMESTAMP
-       WHERE id = $1 AND status = 'initiated'`,
+       WHERE id = $1 AND status IN ('initiated', 'uploading')`,
       [normalizeInternalId(uploadId)],
    )
 }
@@ -121,7 +122,7 @@ async function markUploadAborted(uploadId, client) {
 async function markUploadRejected(uploadId, rejectionCode, client) {
    await client.query(
       `UPDATE asset_uploads SET status = 'rejected', rejection_code = $2
-       WHERE id = $1 AND status = 'initiated'`,
+       WHERE id = $1 AND status IN ('initiated', 'uploading')`,
       [normalizeInternalId(uploadId), rejectionCode],
    )
 }
@@ -161,7 +162,81 @@ async function findAsset(assetId, db = pool) {
    return result.rows[0] || null
 }
 
+async function findLesson(courseId, lessonId, db = pool) {
+   const result = await db.query(
+      `SELECT id, course_id, lesson_type, status, video_asset_id FROM lessons WHERE id = $1 AND course_id = $2`,
+      [normalizeInternalId(lessonId), normalizeInternalId(courseId)],
+   )
+   return result.rows[0] || null
+}
+
+// Serializes video quota and per-user checks across processes for one transaction.
+async function lockVideoQuota(client) {
+   await client.query(`SELECT pg_advisory_xact_lock(hashtextextended('asset-uploads:video-quota', 0))`)
+}
+
+async function countOpenVideoUploads(userId, db = pool) {
+   const result = await db.query(
+      `SELECT count(*)::integer AS total
+       FROM asset_uploads AS upload JOIN assets AS asset ON asset.id = upload.asset_id
+       WHERE upload.created_by = $1 AND asset.kind = 'video'
+          AND upload.status IN ('initiated', 'uploading') AND upload.expires_at > CURRENT_TIMESTAMP`,
+      [normalizeInternalId(userId)],
+   )
+   return result.rows[0].total
+}
+
+// The video library: ready videos plus the declared size of open video uploads.
+async function sumVideoLibraryBytes(db = pool) {
+   const result = await db.query(
+      `SELECT (
+          COALESCE((SELECT sum(size_bytes) FROM assets WHERE kind = 'video' AND status = 'ready'), 0)
+          + COALESCE((SELECT sum(upload.size_bytes)
+               FROM asset_uploads AS upload JOIN assets AS asset ON asset.id = upload.asset_id
+               WHERE asset.kind = 'video' AND upload.status IN ('initiated', 'uploading')
+                  AND upload.expires_at > CURRENT_TIMESTAMP), 0)
+       )::text AS total`,
+   )
+   return Number(result.rows[0].total)
+}
+
+async function markUploadUploading(uploadId, db = pool) {
+   await db.query(
+      `UPDATE asset_uploads SET status = 'uploading' WHERE id = $1 AND status = 'initiated'`,
+      [normalizeInternalId(uploadId)],
+   )
+}
+
+// One abandoned upload, locked so parallel sweepers take different rows.
+async function claimExpiredUpload(client) {
+   const result = await client.query(
+      `SELECT ${uploadColumns}
+       FROM asset_uploads AS upload
+       JOIN assets AS asset ON asset.id = upload.asset_id
+       WHERE upload.status IN ('initiated', 'uploading') AND upload.expires_at <= CURRENT_TIMESTAMP
+       ORDER BY upload.expires_at
+       LIMIT 1
+       FOR UPDATE OF upload, asset SKIP LOCKED`,
+   )
+   return result.rows[0] || null
+}
+
+async function markUploadExpired(uploadId, client) {
+   await client.query(
+      `UPDATE asset_uploads SET status = 'expired', expired_at = CURRENT_TIMESTAMP
+       WHERE id = $1 AND status IN ('initiated', 'uploading')`,
+      [normalizeInternalId(uploadId)],
+   )
+}
+
 export {
+   claimExpiredUpload,
+   countOpenVideoUploads,
+   findLesson,
+   lockVideoQuota,
+   markUploadExpired,
+   markUploadUploading,
+   sumVideoLibraryBytes,
    findAsset,
    findCourse,
    findUpload,

@@ -1,3 +1,4 @@
+import env from '../configs/env.js'
 import { getStorageProvider } from '../providers/storage/index.js'
 import * as authRepository from '../repositories/auth-repository.js'
 import * as lessonRepository from '../repositories/lesson-repository.js'
@@ -24,7 +25,8 @@ const maximumBlocks = 200
 const maximumContentBytes = 256 * 1024
 const maximumChapters = 100
 const maximumResources = 50
-const playbackUrlTtlSeconds = 30 * 60
+// Long enough for a 2-hour lesson with pauses; Range requests (seeking) reuse the same URL.
+const playbackUrlTtlSeconds = env.storage.playbackUrlTtlSeconds
 const materialUrlTtlSeconds = 5 * 60
 
 // Allowed content block shapes. Blocks are plain text structures; no HTML, scripts or
@@ -486,12 +488,13 @@ async function createLessonService(userId, courseIdValue, moduleIdValue, body, o
 }
 
 async function updateLessonService(userId, courseIdValue, lessonIdValue, body, overrides) {
-   const { repository, offline, auth, transaction } = dependencies(overrides)
+   const { repository, offline, auth, transaction, storage } = dependencies(overrides)
    const actorId = parseUserId(userId)
    const courseId = parseCourseId(courseIdValue)
    const lessonId = parseLessonId(lessonIdValue)
    const values = parseLessonBody(body, true)
-   return transaction(async (client) => {
+   let removedVideoKey = null
+   const detail = await transaction(async (client) => {
       await requireManageableCourse(repository, actorId, courseId, client)
       const current = await requireEditableLesson(repository, courseId, lessonId, client)
       const lessonType = values.lessonType || current.lesson_type
@@ -541,6 +544,12 @@ async function updateLessonService(userId, courseIdValue, lessonIdValue, body, o
       const revokedLicenses = videoChanged && current.video_asset_id
          ? await offline.revokeLessonAssetLicenses(lessonId, current.video_asset_id, actorId, client)
          : 0
+      // A replaced or removed video that no lesson uses any more is archived here and its
+      // object deleted after the commit, so the shared disk does not keep orphaned files.
+      if (videoChanged && current.video_asset_id
+         && !await repository.isAssetReferenced(current.video_asset_id, client)) {
+         removedVideoKey = await repository.archiveVideoAsset(current.video_asset_id, client)
+      }
       await audit(auth, actorId, 'lesson.updated', lessonId, {
          courseId,
          fields: Object.keys(body),
@@ -548,6 +557,13 @@ async function updateLessonService(userId, courseIdValue, lessonIdValue, body, o
       }, client)
       return loadLessonDetail(repository, lesson, client)
    })
+   if (removedVideoKey) {
+      // The asset is already archived; a failed delete leaves only an unreachable object.
+      await storage().deleteObject(removedVideoKey).catch(() => {
+         console.error('Removed lesson video object could not be deleted', { lessonId })
+      })
+   }
+   return detail
 }
 
 async function changeLessonStatus(userId, courseIdValue, lessonIdValue, from, to, code, overrides) {

@@ -9,8 +9,8 @@ import {
 import env from '../src/configs/env.js'
 
 // Provider-neutral bucket setup for MinIO (local), Garage or SeaweedFS (production).
-// Creates the bucket, applies a 7-day abort-incomplete-multipart rule and a CORS rule
-// that lets the browser read the ETag of each uploaded part. Servers that do not
+// Creates the bucket, applies a 3-day abort-incomplete-multipart rule and a CORS rule
+// that lets the browser read the ETag of each uploaded part and seek in videos (Range). Servers that do not
 // implement an API (MinIO CE has no bucket CORS API) get a warning, and the server-side
 // equivalent must be configured instead (see docker-compose.yml).
 
@@ -50,27 +50,28 @@ try {
    console.log(`bucket ${Bucket}: created`)
 }
 
-await attempt('lifecycle (abort incomplete multipart after 7 days)',
+await attempt('lifecycle (abort incomplete multipart after 3 days)',
    new PutBucketLifecycleConfigurationCommand({
       Bucket,
       LifecycleConfiguration: {
          Rules: [{
-            ID: 'abort-incomplete-multipart-7d',
+            ID: 'abort-incomplete-multipart-3d',
             Status: 'Enabled',
             Filter: { Prefix: '' },
-            AbortIncompleteMultipartUpload: { DaysAfterInitiation: 7 },
+            AbortIncompleteMultipartUpload: { DaysAfterInitiation: 3 },
          }],
       },
    }))
 
-await attempt('cors (PUT/GET/HEAD, expose ETag)', new PutBucketCorsCommand({
+await attempt('cors (PUT/GET/HEAD, Range, expose ETag/Content-Range/Accept-Ranges)', new PutBucketCorsCommand({
    Bucket,
    CORSConfiguration: {
       CORSRules: [{
          AllowedOrigins: origins,
          AllowedMethods: ['GET', 'HEAD', 'PUT'],
+         // '*' covers Range, If-Range and Content-Type of part uploads.
          AllowedHeaders: ['*'],
-         ExposeHeaders: ['ETag', 'Content-Length', 'Content-Range', 'Accept-Ranges'],
+         ExposeHeaders: ['ETag', 'Content-Length', 'Content-Range', 'Accept-Ranges', 'Content-Type'],
          MaxAgeSeconds: 3600,
       }],
    },

@@ -435,7 +435,7 @@ test('asset multipart uploads integration', async (t) => {
          const failed = await api(port, 'POST', `${uploads}/${uploadId}/complete`, admin)
          assert.equal(failed.response.status, 500)
          const row = await client.query('SELECT status FROM asset_uploads WHERE id = $1', [uploadId])
-         assert.equal(row.rows[0].status, 'initiated')
+         assert.equal(row.rows[0].status, 'uploading')
          const retried = await api(port, 'POST', `${uploads}/${uploadId}/complete`, admin)
          assert.equal(retried.response.status, 200, JSON.stringify(retried.body))
          assert.equal(retried.body.data.asset.status, 'ready')

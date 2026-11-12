@@ -169,11 +169,101 @@ Validation errors are `400` with `code: "VALIDATION_ERROR"` and one entry in `de
 
 | Method | Path | Access | Query | Body | Success `data` | Errors |
 |---|---|---|---|---|---|---|
-| POST | `/assets/uploads` | session + CSRF | — | { courseId: Id, kind: video/material, fileName: string, mimeType: string, sizeBytes: integer } | 201 Upload | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: ACTION_FORBIDDEN, CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 404: COURSE_NOT_FOUND; 409: COURSE_ARCHIVED; 429: AUTH_RATE_LIMITED (Retry-After header); 503: STORAGE_NOT_CONFIGURED |
-| GET | `/assets/uploads/{uploadId}` | session | — | — | 200 { upload?: Upload, uploadedParts?: { partNumber?: integer, size?: integer }[] } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 404: UPLOAD_NOT_FOUND |
+| POST | `/assets/uploads` | session + CSRF | — | { courseId: Id, lessonId?: Id, kind: video/material, fileName: string, mimeType: string, sizeBytes: integer } | 201 Upload | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: ACTION_FORBIDDEN, CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 404: COURSE_NOT_FOUND, LESSON_NOT_FOUND; 409: COURSE_ARCHIVED, VIDEO_UPLOAD_LIMIT_REACHED, VIDEO_QUOTA_EXCEEDED; 413: VIDEO_TOO_LARGE; 429: AUTH_RATE_LIMITED (Retry-After header); 503: STORAGE_NOT_CONFIGURED |
+| GET | `/assets/uploads/{uploadId}` | session | — | — | 200 { upload?: Upload, uploadedParts?: { partNumber?: integer, size?: integer }[], missingParts?: integer[], uploadedBytes?: integer } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 404: UPLOAD_NOT_FOUND |
 | POST | `/assets/uploads/{uploadId}/parts` | session + CSRF | — | { partNumbers: integer[] } | 200 { parts?: { partNumber?: integer, sizeBytes?: integer, url?: string, expiresAt?: string }[] } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 404: UPLOAD_NOT_FOUND; 409: UPLOAD_ABORTED, UPLOAD_EXPIRED |
-| POST | `/assets/uploads/{uploadId}/complete` | session + CSRF | — | — | 200 { asset?: Asset } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 404: UPLOAD_NOT_FOUND; 409: UPLOAD_INCOMPLETE, UPLOAD_ABORTED, UPLOAD_REJECTED, UPLOAD_EXPIRED, UPLOAD_PARTS_MISSING; 422: UNSUPPORTED_MEDIA, VIDEO_NOT_SEEKABLE; 429: AUTH_RATE_LIMITED (Retry-After header) |
+| POST | `/assets/uploads/{uploadId}/complete` | session + CSRF | — | — | 200 { asset?: Asset, lesson?: { lessonId, attached, errorCode } } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 404: UPLOAD_NOT_FOUND; 409: UPLOAD_INCOMPLETE, UPLOAD_ABORTED, UPLOAD_REJECTED, UPLOAD_EXPIRED, UPLOAD_PARTS_MISSING; 422: UNSUPPORTED_MEDIA, VIDEO_NOT_SEEKABLE; 429: AUTH_RATE_LIMITED (Retry-After header) |
 | POST | `/assets/uploads/{uploadId}/abort` | session + CSRF | — | — | 200 { upload?: Upload } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 404: UPLOAD_NOT_FOUND; 409: UPLOAD_ALREADY_COMPLETED; 429: AUTH_RATE_LIMITED (Retry-After header) |
+
+### Video upload (lesson videos, resumable, 2026-11-14)
+
+Large lesson videos use the `/assets/uploads` flow above with `kind: "video"`: S3 multipart, the browser `PUT`s each part straight to storage by a presigned URL (not through the API), the server keeps the state. There is no second upload API.
+
+**Who.** Owner and admin (`assets.upload`), and a teacher of this course with `canManageLessons`. Students and read-only teachers get `403 ACTION_FORBIDDEN`.
+
+**Formats.** `.mp4` + `video/mp4` (H.264 or HEVC video, AAC audio, `moov` before `mdat` — "fast start") and `.webm` + `video/webm` (VP8/VP9/AV1, Opus/Vorbis, Cues before clusters). Extension and `mimeType` must match; the stored bytes are checked again on completion (`ftyp` box for mp4, EBML header for webm, codecs, duration). No transcoding: export with "fast start" / "web optimized".
+
+**1. Create.** `POST /assets/uploads`
+
+```json
+{ "courseId": "12", "lessonId": "345", "kind": "video", "fileName": "Lesson 1.mp4", "mimeType": "video/mp4", "sizeBytes": 1073741824 }
+```
+
+`201`:
+
+```json
+{ "data": { "id": "77", "assetId": "901", "courseId": "12", "lessonId": "345", "kind": "video", "fileName": "Lesson 1.mp4",
+  "mimeType": "video/mp4", "sizeBytes": 1073741824, "partSizeBytes": 33554432, "partCount": 32, "status": "initiated",
+  "rejectionCode": null, "createdAt": "…", "expiresAt": "2026-11-16T10:00:00.000Z", "completedAt": null, "abortedAt": null, "expiredAt": null } }
+```
+
+`lessonId` is optional (a `video` or `mixed` lesson of this course); with it, completion puts the video on the lesson. The server picks `partSizeBytes` (32 MiB, raised so there are at most 10,000 parts) and the object key. Part `n` is bytes `[(n-1)·partSizeBytes, min(n·partSizeBytes, sizeBytes))`.
+
+**2. Presign a batch.** `POST /assets/uploads/77/parts` `{ "partNumbers": [1, 2, 3, 4] }` (1–100 numbers) →
+
+```json
+{ "data": { "parts": [ { "partNumber": 1, "sizeBytes": 33554432, "url": "https://files…/everest-media/courses/12/videos/…?partNumber=1&uploadId=…&X-Amz-…", "expiresAt": "…" } ] } }
+```
+
+URLs live 1 hour. Presign a few at a time (for example the next 4–8 parts) and ask again when they run out or a `PUT` returns 403 (expired signature). After the first presign the status is `uploading`.
+
+**3. Upload.** `PUT url` with exactly `sizeBytes` bytes of that part (`file.slice(start, end)`), no extra headers needed. Use `XMLHttpRequest.upload.onprogress` for progress; 2–4 parts in parallel. You do not need the `ETag`.
+
+**4. Resume after a drop / reload.** `GET /assets/uploads/77` →
+
+```json
+{ "data": { "upload": { "id": "77", "status": "uploading", "partCount": 32, … },
+  "uploadedParts": [ { "partNumber": 1, "size": 33554432 }, { "partNumber": 2, "size": 1048576 } ],
+  "missingParts": [2, 3, 4, …, 32], "uploadedBytes": 33554432 } }
+```
+
+The part list comes from storage (ListParts). Upload only `missingParts` (a cut-off part is listed with a smaller size and is missing again). `uploadedBytes / sizeBytes` is the resumed progress. **Keep on the client** (for example in IndexedDB/localStorage, keyed by file name + size + `lastModified`): `uploadId`, `partSizeBytes`, `partCount`, `expiresAt`. After a reload the user re-selects the same file; check name/size/lastModified, then resume. If the state is `expired`, `aborted` or `rejected`, start a new upload.
+
+**5. Complete.** `POST /assets/uploads/77/complete` (no body) →
+
+```json
+{ "data": { "asset": { "id": "901", "kind": "video", "mimeType": "video/mp4", "sizeBytes": 1073741824, "durationSeconds": 3600,
+    "widthPx": 1920, "heightPx": 1080, "status": "ready", "processingStatus": "not_required", … },
+  "lesson": { "lessonId": "345", "attached": true, "errorCode": null } } }
+```
+
+The server takes the part list and ETags from storage, assembles the object, checks its size and content, marks the asset `ready` and, with `lessonId`, sets it as the lesson video (the usual lesson rules apply). Calling again is safe and returns the same asset (`attached` then tells whether the lesson still has this video). `lesson.attached: false` with an `errorCode` (for example `CHAPTERS_EXCEED_VIDEO_DURATION`) means the video is ready but was not attached; attach it with `PATCH …/lessons/:lessonId { videoAssetId }` after fixing the cause. Without `lessonId` there is no `lesson` key.
+
+**6. Cancel.** `POST /assets/uploads/77/abort` → `{ upload }` with `status: "aborted"`; stored parts are deleted. Safe to repeat.
+
+**Playback.** Unchanged routes: `GET /courses/:courseId/lessons/:lessonId/playback` (learner) and `GET /admin/courses/:courseId/lessons/:lessonId/playback` → `{ playback: { url, expiresAt, mimeType, durationSeconds }, chapters }`. Put `url` in `<video src>`; seeking uses HTTP Range on the same URL. The URL lives 2 hours; on a 403 from storage, fetch a new one and continue from `currentTime`.
+
+**Removing a video.** Replacing the lesson video or setting `videoAssetId: null` archives the old video and deletes its file when no other lesson uses it; it cannot be attached again.
+
+**States.**
+
+| `status` | Meaning | Client action |
+|---|---|---|
+| `initiated` | Created, nothing presigned yet | presign and upload |
+| `uploading` | Parts are being sent | resume with `missingParts` |
+| `completed` | Asset ready | done |
+| `aborted` | Cancelled | new upload |
+| `rejected` | Content failed the check (`rejectionCode`) | fix the file, new upload |
+| `expired` | Not completed before `expiresAt` (48 h); the worker deletes its parts | new upload |
+
+Completion runs in one transaction (no visible `completing` state); a parallel second call waits and gets the same result.
+
+**Errors.**
+
+| Status | Code | When |
+|---|---|---|
+| 400 | `VALIDATION_ERROR` | Wrong extension/type pair, `.mov`, `lessonId` of a non-video lesson or with `kind: material`, bad part numbers |
+| 403 | `ACTION_FORBIDDEN` | Not an editor of this course |
+| 404 | `COURSE_NOT_FOUND`, `LESSON_NOT_FOUND`, `UPLOAD_NOT_FOUND` | Unknown course, lesson of another course, someone else's upload |
+| 409 | `VIDEO_UPLOAD_LIMIT_REACHED` | Already 3 open video uploads of this user; finish or abort one |
+| 409 | `VIDEO_QUOTA_EXCEEDED` | Library full; `details`: `usedBytes`, `quotaBytes` |
+| 409 | `UPLOAD_INCOMPLETE` | Complete called with parts missing (`details[0].missingParts`) |
+| 409 | `UPLOAD_EXPIRED`, `UPLOAD_ABORTED`, `UPLOAD_REJECTED`, `UPLOAD_ALREADY_COMPLETED`, `UPLOAD_PARTS_MISSING` | See states |
+| 413 | `VIDEO_TOO_LARGE` | `sizeBytes` above `VIDEO_MAX_BYTES` (`details[0].message` = limit) |
+| 422 | `UNSUPPORTED_MEDIA`, `VIDEO_NOT_SEEKABLE` | Content check failed; the stored object is deleted |
+| 503 | `STORAGE_NOT_CONFIGURED` | No S3 settings on the server |
+
+**Server settings** (backend env): `STORAGE_PART_SIZE_BYTES` (32 MiB), `STORAGE_PRESIGN_TTL_SECONDS` (3600), `STORAGE_UPLOAD_TTL_HOURS` (48, below the bucket's 3-day abort rule), `VIDEO_MAX_BYTES` (4 GiB), `VIDEO_TOTAL_QUOTA_BYTES` (15 GiB: ready videos plus open uploads), `VIDEO_MAX_ACTIVE_UPLOADS` (3), `VIDEO_PLAYBACK_URL_TTL_SECONDS` (7200), `UPLOAD_SWEEP_INTERVAL_MS` (10 min, in `worker:attempts`). Storage is any S3 service set by `S3_*`.
 
 ### Admin: accounts
 

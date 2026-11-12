@@ -569,18 +569,20 @@ const schemas = {
       id: id(),
       assetId: id(),
       courseId: id(),
+      lessonId: nullable(id()),
       kind: enumOf(['video', 'material']),
       fileName: str(),
       mimeType: str(),
       sizeBytes: int(),
       partSizeBytes: int(),
       partCount: int(),
-      status: enumOf(['initiated', 'completed', 'aborted', 'rejected', 'expired']),
+      status: enumOf(['initiated', 'uploading', 'completed', 'aborted', 'rejected', 'expired']),
       rejectionCode: nullable(str()),
       createdAt: dt(),
       expiresAt: dt(),
       completedAt: nullable(dt()),
       abortedAt: nullable(dt()),
+      expiredAt: nullable(dt()),
    }),
    Asset: obj({
       id: id(),
@@ -1195,14 +1197,14 @@ const routes = [
    // Assets
    ['post', '/assets/uploads', {
       tag: 'Assets', created: true, rate: 'administrative mutation limit', summary: 'Start a resumable multipart upload',
-      description: 'Allowed for `assets.upload` holders and assigned teachers with `canManageLessons`.',
-      body: body({ courseId: id(), kind: enumOf(['video', 'material']), fileName: str(), mimeType: str(), sizeBytes: int({ minimum: 1, maximum: 21474836480 }) }, ['courseId', 'kind', 'fileName', 'mimeType', 'sizeBytes']),
+      description: 'Allowed for `assets.upload` holders and assigned teachers with `canManageLessons`. Video: at most VIDEO_MAX_BYTES (4 GiB), VIDEO_MAX_ACTIVE_UPLOADS open uploads per user (3) and VIDEO_TOTAL_QUOTA_BYTES for the library (15 GiB); optional `lessonId` (video/mixed lesson of the course) receives the video on completion.',
+      body: body({ courseId: id(), lessonId: nullable(id()), kind: enumOf(['video', 'material']), fileName: str(), mimeType: str(), sizeBytes: int({ minimum: 1, maximum: 21474836480 }) }, ['courseId', 'kind', 'fileName', 'mimeType', 'sizeBytes']),
       response: ref('Upload'),
-      errors: { 403: ['ACTION_FORBIDDEN'], 404: ['COURSE_NOT_FOUND'], 409: ['COURSE_ARCHIVED'], 503: ['STORAGE_NOT_CONFIGURED'] },
+      errors: { 403: ['ACTION_FORBIDDEN'], 404: ['COURSE_NOT_FOUND', 'LESSON_NOT_FOUND'], 409: ['COURSE_ARCHIVED', 'VIDEO_UPLOAD_LIMIT_REACHED', 'VIDEO_QUOTA_EXCEEDED'], 413: ['VIDEO_TOO_LARGE'], 503: ['STORAGE_NOT_CONFIGURED'] },
    }],
    ['get', '/assets/uploads/:uploadId', {
       tag: 'Assets', summary: 'Upload state and parts already stored',
-      response: obj({ upload: ref('Upload'), uploadedParts: arr(obj({ partNumber: int(), size: int() })) }),
+      response: obj({ upload: ref('Upload'), uploadedParts: arr(obj({ partNumber: int(), size: int() })), missingParts: arr(int()), uploadedBytes: int() }),
       errors: { 404: ['UPLOAD_NOT_FOUND'] },
    }],
    ['post', '/assets/uploads/:uploadId/parts', {
@@ -1213,7 +1215,7 @@ const routes = [
    }],
    ['post', '/assets/uploads/:uploadId/complete', {
       tag: 'Assets', rate: 'administrative mutation limit', summary: 'Assemble and verify the upload (idempotent)',
-      response: obj({ asset: ref('Asset') }),
+      response: obj({ asset: ref('Asset'), lesson: obj({ lessonId: id(), attached: bool(), errorCode: nullable(str()) }) }),
       errors: { 404: ['UPLOAD_NOT_FOUND'], 409: ['UPLOAD_INCOMPLETE', 'UPLOAD_ABORTED', 'UPLOAD_REJECTED', 'UPLOAD_EXPIRED', 'UPLOAD_PARTS_MISSING'], 422: ['UNSUPPORTED_MEDIA', 'VIDEO_NOT_SEEKABLE'] },
    }],
    ['post', '/assets/uploads/:uploadId/abort', {
