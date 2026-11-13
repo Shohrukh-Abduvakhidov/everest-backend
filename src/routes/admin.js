@@ -39,6 +39,7 @@ import {
    createLessonController,
    deleteLessonController,
    getLessonController,
+   getLessonProgressSummaryController,
    listModuleLessonsController,
    previewLessonPlaybackController,
    previewLessonResourceController,
@@ -437,6 +438,11 @@ adminRouter.get(
    '/courses/:courseId/lessons/:lessonId/playback',
    readLessonsAuthorizationMiddleware,
    previewLessonPlaybackController,
+)
+adminRouter.get(
+   '/courses/:courseId/lessons/:lessonId/progress',
+   readLessonsAuthorizationMiddleware,
+   getLessonProgressSummaryController,
 )
 adminRouter.get(
    '/courses/:courseId/lessons/:lessonId/resources/:resourceId/download',

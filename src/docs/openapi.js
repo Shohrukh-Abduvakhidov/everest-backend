@@ -369,6 +369,31 @@ const schemas = {
       completedAt: nullable(dt()),
       revision: int(),
       updatedAt: dt(),
+      watchedRanges: arr(arr(int(), { minItems: 2, maxItems: 2 }), { description: 'Merged [start, end) seconds actually played' }),
+   }),
+   Encryption: obj({
+      algorithm: enumOf(['AES-GCM']),
+      keyLength: int({ examples: [256] }),
+      keyVersion: int(),
+      key: str({ description: 'Raw 32-byte key, base64url; derived on the server, never stored' }),
+   }),
+   OfflineDevice: obj({
+      deviceId: str({ format: 'uuid' }),
+      label: nullable(str()),
+      registeredAt: dt(),
+      lastSeenAt: dt(),
+      activeLicenses: int(),
+   }),
+   LessonProgressSummaryRow: obj({
+      userId: id(),
+      name: nullable(str()),
+      hasAccess: bool(),
+      status: str({ examples: ['not_started', 'in_progress', 'completed'] }),
+      watchedSeconds: int({ description: 'Unique watched seconds' }),
+      watchedPercent: nullable(int()),
+      playbackSeconds: int(),
+      completedAt: nullable(dt()),
+      lastActivityAt: nullable(dt()),
    }),
    AttemptState: obj({
       status: enumOf(['not_started', 'in_progress', 'submitted']),
@@ -562,6 +587,7 @@ const schemas = {
       lastCheckedAt: nullable(dt()),
       leaseExpiresAt: dt(),
       deviceLabel: nullable(str()),
+      deviceId: nullable(str({ format: 'uuid', description: 'Set for device-bound licenses' })),
       revokeReason: nullable(enumOf(['user_deleted', 'admin_revoked', 'access_lost'])),
       sessionId: id(),
    }),
@@ -1112,8 +1138,8 @@ const routes = [
       response: obj({ lesson: ref('LearnerLesson') }), errors: { 404: ['LESSON_NOT_FOUND'] },
    }],
    ['get', '/courses/:courseId/lessons/:lessonId/playback', {
-      tag: 'Learner lessons', rate: 'per-user media limit', summary: 'Signed 30-minute video URL (supports Range)',
-      response: obj({ playback: ref('SignedUrl'), chapters: arr(ref('Chapter')) }),
+      tag: 'Learner lessons', rate: 'per-user media limit', summary: 'Signed video URL, identical within a signing window (supports Range)',
+      response: obj({ playback: ref('SignedUrl'), chapters: arr(ref('Chapter')), watermark: obj({ label: str({ examples: ['Ali +992 *** 45'] }) }) }),
       errors: { 403: ['MODULE_ACCESS_DENIED'], 404: ['LESSON_NOT_FOUND'], 409: ['VIDEO_NOT_PLAYABLE'] },
    }],
    ['get', '/courses/:courseId/lessons/:lessonId/resources/:resourceId/download', {
@@ -1122,10 +1148,11 @@ const routes = [
       errors: { 403: ['MODULE_ACCESS_DENIED'], 404: ['LESSON_NOT_FOUND', 'RESOURCE_NOT_FOUND'] },
    }],
    ['post', '/courses/:courseId/lessons/:lessonId/offline-license', {
-      tag: 'Offline licenses', rate: 'per-user media limit', summary: 'Create or renew the offline license for this session',
-      body: body({ deviceLabel: str({ maxLength: 100 }) }), bodyRequired: false,
-      response: obj({ license: ref('OfflineLicense'), download: ref('SignedUrl') }),
-      errors: { 403: ['MODULE_ACCESS_DENIED', 'OFFLINE_ACCESS_DENIED'], 409: ['OFFLINE_DEVICE_LIMIT'] },
+      tag: 'Offline licenses', rate: 'per-user media limit', summary: 'Create or renew the offline license (device-bound with deviceId)',
+      description: 'With a registered `deviceId` the license is bound to that device and the response carries `encryption` (AES-GCM 256 key). Without it the older session-bound license is issued.',
+      body: body({ deviceLabel: str({ maxLength: 100 }), deviceId: str({ format: 'uuid' }) }), bodyRequired: false,
+      response: obj({ license: ref('OfflineLicense'), download: ref('SignedUrl'), encryption: ref('Encryption') }),
+      errors: { 403: ['MODULE_ACCESS_DENIED', 'OFFLINE_ACCESS_DENIED'], 409: ['OFFLINE_DEVICE_LIMIT', 'OFFLINE_DEVICE_NOT_REGISTERED'], 503: ['OFFLINE_KEYS_UNAVAILABLE'] },
    }],
    ['get', '/courses/:courseId/lessons/:lessonId/notes', { tag: 'Learner lessons', summary: 'Own notes', response: obj({ notes: arr(ref('Note')) }) }],
    ['post', '/courses/:courseId/lessons/:lessonId/notes', {
@@ -1144,20 +1171,41 @@ const routes = [
    ['get', '/courses/:courseId/lessons/:lessonId/progress', { tag: 'Learner lessons', summary: 'Own progress', response: obj({ progress: ref('Progress') }) }],
    ['put', '/courses/:courseId/lessons/:lessonId/progress', {
       tag: 'Learner lessons', summary: 'Save progress (optimistic revision)',
-      description: 'Video lessons: `{ revision, playbackSeconds, watchedSeconds }`. Other lessons: `{ revision, completed: true }`. A lesson with a test is completed only by its test result: `completed: true` and the 90% rule are refused with 409 LESSON_COMPLETES_BY_TEST, watch progress still saves.',
-      body: body({ revision: int({ minimum: 0 }), playbackSeconds: int({ minimum: 0 }), watchedSeconds: int({ minimum: 0 }), completed: bool() }, ['revision']),
-      response: obj({ progress: ref('Progress') }), errors: { 409: ['PROGRESS_REVISION_CONFLICT', 'LESSON_COMPLETES_BY_TEST'] },
+      description: 'Video lessons: `{ revision, playbackSeconds, watchedRanges }` at most every PROGRESS_MIN_INTERVAL_SECONDS (10). Completion needs 90% unique watched time. `watchedSeconds` is accepted from older clients and ignored. Other lessons: `{ revision, completed: true }`. A lesson with a test is completed only by its test result: `completed: true` and the 90% rule are refused with 409 LESSON_COMPLETES_BY_TEST, watch progress still saves.',
+      body: body({ revision: int({ minimum: 0 }), playbackSeconds: int({ minimum: 0 }), watchedRanges: arr(arr(int({ minimum: 0 }), { minItems: 2, maxItems: 2 }), { maxItems: 50 }), watchedSeconds: int({ minimum: 0 }), completed: bool() }, ['revision']),
+      response: obj({ progress: ref('Progress') }), errors: { 409: ['PROGRESS_REVISION_CONFLICT', 'LESSON_COMPLETES_BY_TEST'], 429: ['PROGRESS_TOO_FREQUENT'] },
    }],
 
    // Offline licenses
-   ['get', '/offline-licenses', { tag: 'Offline licenses', summary: 'Active licenses of this session', response: obj({ licenses: arr(ref('OfflineLicense')) }) }],
+   ['get', '/offline-devices', {
+      tag: 'Offline licenses', summary: 'Registered offline devices',
+      response: obj({ devices: arr(ref('OfflineDevice')), maximumDevices: int() }),
+   }],
+   ['post', '/offline-devices', {
+      tag: 'Offline licenses', created: true, summary: 'Register this app installation (idempotent; 200 when already registered)',
+      body: body({ deviceId: str({ format: 'uuid' }), deviceLabel: str({ maxLength: 100 }) }, ['deviceId']),
+      response: obj({ device: ref('OfflineDevice'), created: bool(), maximumDevices: int() }),
+      errors: { 409: ['OFFLINE_DEVICE_LIMIT'] },
+   }],
+   ['delete', '/offline-devices/:deviceId', {
+      tag: 'Offline licenses', summary: 'Remove a device and revoke its licenses',
+      response: obj({ deviceId: str(), status: str({ examples: ['removed'] }), revokedLicenses: int() }),
+      errors: { 404: ['OFFLINE_DEVICE_NOT_FOUND'] },
+   }],
+   ['get', '/offline-licenses', {
+      tag: 'Offline licenses', summary: 'Active licenses of this device (?deviceId=) or of this session',
+      query: [{ name: 'deviceId', schema: str({ format: 'uuid' }) }],
+      response: obj({ licenses: arr(ref('OfflineLicense')) }),
+   }],
    ['get', '/offline-licenses/:licenseId/download', {
-      tag: 'Offline licenses', rate: 'per-user media limit', summary: 'New 15-minute download URL after an access check',
-      response: obj({ license: ref('OfflineLicense'), download: ref('SignedUrl') }),
+      tag: 'Offline licenses', rate: 'per-user media limit', summary: 'New 15-minute download URL (and key for device licenses) after an access check',
+      query: [{ name: 'deviceId', schema: str({ format: 'uuid' }) }],
+      response: obj({ license: ref('OfflineLicense'), download: ref('SignedUrl'), encryption: ref('Encryption') }),
       errors: { 403: ['OFFLINE_ACCESS_DENIED'], 404: ['OFFLINE_LICENSE_NOT_FOUND'] },
    }],
    ['delete', '/offline-licenses/:licenseId', {
       tag: 'Offline licenses', summary: 'Revoke own license (idempotent)',
+      query: [{ name: 'deviceId', schema: str({ format: 'uuid' }) }],
       response: obj({ license: ref('OfflineLicense') }), errors: { 404: ['OFFLINE_LICENSE_NOT_FOUND'] },
    }],
 
@@ -1380,7 +1428,7 @@ const routes = [
    ['patch', '/admin/courses/:courseId/lessons/:lessonId', {
       tag: 'Admin: lessons', ...admin('lessons.manage'), summary: 'Edit a lesson in any status',
       body: body(lessonFields), response: ref('LessonDetail'),
-      errors: { 404: ['LESSON_NOT_FOUND'], 409: ['LESSON_VIDEO_REQUIRED', 'LESSON_TEST_REQUIRED', 'TEST_NOT_PUBLISHED', 'TEST_ARCHIVED', 'CHAPTERS_EXCEED_VIDEO_DURATION'] },
+      errors: { 404: ['LESSON_NOT_FOUND'], 409: ['LESSON_VIDEO_REQUIRED', 'LESSON_TEST_REQUIRED', 'TEST_NOT_PUBLISHED', 'TEST_ARCHIVED', 'LESSON_HAS_CHAPTERS'] },
    }],
    ...[['publish', 'draft → published'], ['archive', 'published → archived'], ['restore', 'archived → draft']].map(([action, summary]) => ['post', `/admin/courses/:courseId/lessons/:lessonId/${action}`, {
       tag: 'Admin: lessons', ...admin('lessons.manage'), summary, response: ref('LessonDetail'),
@@ -1392,7 +1440,8 @@ const routes = [
    }],
    ['put', '/admin/courses/:courseId/lessons/:lessonId/chapters', {
       tag: 'Admin: lessons', ...admin('lessons.manage'), summary: 'Replace video chapters',
-      body: body({ chapters: arr(body({ startSeconds: int({ minimum: 0 }), title: str({ maxLength: 200 }), translations: ref('TitleTranslations') }, ['startSeconds', 'title']), { maxItems: 100 }) }, ['chapters']),
+      body: body({ chapters: arr(body({ startSeconds: int({ minimum: 0 }), title: str({ maxLength: 120 }), translations: ref('TitleTranslations') }, ['startSeconds', 'title']), { maxItems: 100 }) }, ['chapters']),
+      description: 'Whole list; start 0..duration (exclusive), strictly increasing, title 1-120 characters, at most 100. Replacing the lesson video clears the chapters.',
       response: obj({ chapters: arr(ref('Chapter')) }), errors: { 409: ['LESSON_HAS_NO_VIDEO'] },
    }],
    ['put', '/admin/courses/:courseId/lessons/:lessonId/resources', {
@@ -1403,6 +1452,11 @@ const routes = [
    ['get', '/admin/courses/:courseId/lessons/:lessonId/playback', {
       tag: 'Admin: lessons', ...adminRead('lessons.read'), summary: 'Staff playback preview',
       response: obj({ playback: ref('SignedUrl'), chapters: arr(ref('Chapter')) }), errors: { 409: ['VIDEO_NOT_PLAYABLE'] },
+   }],
+   ['get', '/admin/courses/:courseId/lessons/:lessonId/progress', {
+      tag: 'Admin: lessons', ...adminRead('lessons.read'), summary: 'Who watched how much (names only)',
+      response: obj({ lessonId: id(), durationSeconds: nullable(int()), totals: obj({ learners: int(), started: int(), completed: int() }), learners: arr(ref('LessonProgressSummaryRow')) }),
+      errors: { 404: ['COURSE_NOT_FOUND', 'LESSON_NOT_FOUND'] },
    }],
    ['get', '/admin/courses/:courseId/lessons/:lessonId/resources/:resourceId/download', {
       tag: 'Admin: lessons', ...adminRead('lessons.read'), summary: 'Staff material URL', response: obj({ download: ref('SignedUrl') }),

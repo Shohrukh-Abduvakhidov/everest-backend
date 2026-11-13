@@ -21,6 +21,10 @@ const config = {
    authAdminRateLimit: 1000,
    playbackRateLimit: 1000,
 }
+const offlineConfig = { licenseDays: 14, maxDevices: 2, keySecret: 'offline-integration-secret-longer-than-32-chars' }
+const deviceA = '6f1c2a3b-4d5e-4f60-8a71-92b3c4d5e6f7'
+const deviceB = '7a2b3c4d-5e6f-4a71-8b82-a3c4d5e6f708'
+const deviceC = '8b3c4d5e-6f70-4b82-9c93-b4d5e6f70819'
 const storageConfig = { ...env.storage, partSizeBytes: 5 * 1024 * 1024, presignTtlSeconds: 900, uploadTtlHours: 24 }
 
 async function createUser(client, role, name) {
@@ -61,6 +65,8 @@ async function cleanup(client) {
    const courseIds = courses.rows.map((row) => row.id)
    const lessonFilter = 'lesson_id IN (SELECT id FROM lessons WHERE course_id = ANY($1::bigint[]))'
    await client.query(`DELETE FROM offline_downloads WHERE ${lessonFilter}`, [courseIds])
+   await client.query('DELETE FROM offline_devices WHERE user_id = ANY($1::bigint[])', [userIds])
+   await client.query('DELETE FROM user_phones WHERE user_id = ANY($1::bigint[])', [userIds])
    await client.query(`DELETE FROM lesson_progress WHERE ${lessonFilter}`, [courseIds])
    await client.query(`DELETE FROM lesson_notes WHERE ${lessonFilter}`, [courseIds])
    await client.query(`DELETE FROM lesson_video_chapters WHERE ${lessonFilter}`, [courseIds])
@@ -90,7 +96,7 @@ test('lessons, playback, notes, progress and offline licenses integration', asyn
       authProtection: { config },
       telegramAuth: { config },
       assets: { storage, config: storageConfig },
-      lessons: { storage },
+      lessons: { storage, offlineConfig },
    }
    const server = await listen(createApp(dependencies))
    const port = server.address().port
@@ -184,6 +190,12 @@ test('lessons, playback, notes, progress and offline licenses integration', asyn
       const outsider = await issue(outsiderId)
       const peer = await issue(peerId)
       const watcher = await issue(watcherId)
+      const studentPhone = `+99290${String(Date.now()).slice(-7)}`
+      await client.query(
+         `INSERT INTO user_phones (user_id, phone_e164, is_primary, verified_at, verification_method)
+          VALUES ($1, $2, TRUE, CURRENT_TIMESTAMP, 'sms')`,
+         [studentId, studentPhone],
+      )
       const videoId = await upload(admin, courseId, 'video', 'intro.mp4', 'video/mp4', isoMedia({ seconds: 90 }))
       const pdfId = await upload(admin, courseId, 'material', 'notes.pdf', 'application/pdf', pdf)
       const foreignVideoId = await upload(admin, otherCourseId, 'video', 'other.mp4', 'video/mp4', isoMedia())
@@ -249,6 +261,26 @@ test('lessons, playback, notes, progress and offline licenses integration', asyn
             chapters: [{ startSeconds: 0, title: 'A' }, { startSeconds: 90, title: 'End' }],
          })
          assert.equal(beyond.status, 400)
+         const longTitle = await api('PUT', `${lessonPath(videoLessonId)}/chapters`, manager, {
+            chapters: [{ startSeconds: 0, title: 'x'.repeat(121) }],
+         })
+         assert.equal(longTitle.status, 400)
+         const tooMany = await api('PUT', `${lessonPath(videoLessonId)}/chapters`, manager, {
+            chapters: Array.from({ length: 101 }, (_, index) => ({ startSeconds: index * 0, title: 'x' })),
+         })
+         assert.equal(tooMany.status, 400)
+         const duplicate = await api('PUT', `${lessonPath(videoLessonId)}/chapters`, manager, {
+            chapters: [{ startSeconds: 10, title: 'A' }, { startSeconds: 10, title: 'B' }],
+         })
+         assert.equal(duplicate.status, 400)
+         const byViewer = await api('PUT', `${lessonPath(videoLessonId)}/chapters`, viewer, {
+            chapters: [{ startSeconds: 0, title: 'A' }],
+         })
+         assert.equal(byViewer.status, 404)
+         const byStudent = await api('PUT', `${lessonPath(videoLessonId)}/chapters`, student, {
+            chapters: [{ startSeconds: 0, title: 'A' }],
+         })
+         assert.equal(byStudent.status, 403)
          const chapters = await api('PUT', `${lessonPath(videoLessonId)}/chapters`, manager, {
             chapters: [
                { startSeconds: 0, title: 'Start' },
@@ -324,13 +356,22 @@ test('lessons, playback, notes, progress and offline licenses integration', asyn
       await t.test('signed playback and material URLs re-check access each time', async () => {
          const playback = await api('GET', `/courses/${courseId}/lessons/${videoLessonId}/playback`, student)
          assert.equal(playback.status, 200, JSON.stringify(playback.body))
+         const window = env.storage.playbackUrlWindowSeconds
+         const ttl = env.storage.playbackUrlTtlSeconds
          const expiresIn = new Date(playback.body.data.playback.expiresAt).getTime() - Date.now()
-         assert.ok(expiresIn > 119 * 60 * 1000 && expiresIn <= 120 * 60 * 1000)
+         assert.ok(expiresIn > (ttl - 60) * 1000 && expiresIn <= (window + ttl) * 1000)
+         const again = await api('GET', `/courses/${courseId}/lessons/${videoLessonId}/playback`, student)
+         assert.equal(again.body.data.playback.url, playback.body.data.playback.url)
+         assert.equal(again.body.data.playback.expiresAt, playback.body.data.playback.expiresAt)
+         assert.equal(playback.body.data.watermark.label, `Student +992 *** ${studentPhone.slice(-2)}`)
+         assert.deepEqual(Object.keys(playback.body.data.watermark), ['label'])
          assert.equal(playback.body.data.playback.mimeType, 'video/mp4')
          assert.equal(playback.body.data.chapters[1].startSeconds, 45)
          assert.equal(Object.hasOwn(playback.body.data.playback, 'storageKey'), false)
          const call = storage.calls.filter((entry) => entry.name === 'presignDownload').at(-1)
-         assert.deepEqual([call.expiresIn, call.disposition, call.contentType], [7200, 'inline', 'video/mp4'])
+         assert.deepEqual([call.expiresIn, call.disposition, call.contentType], [window + ttl, 'inline', 'video/mp4'])
+         assert.equal(call.cacheControl, `private, max-age=${window + ttl}`)
+         assert.equal(call.signingDate.getTime() % (window * 1000), 0)
          assert.equal(playback.body.data.playback.url.includes(env.storage.endpoint || 'minio:9000'), false)
 
          const denied = await api('GET', `/courses/${courseId}/lessons/${videoLessonId}/playback`, locked)
@@ -378,29 +419,67 @@ test('lessons, playback, notes, progress and offline licenses integration', asyn
          assert.equal(own.body.data.notes.length, 1)
       })
 
-      await t.test('progress uses revisions, clamps to duration and completes at 90%', async () => {
+      await t.test('progress uses revisions, unique watched ranges, a report interval and 90%', async () => {
          const base = `/courses/${courseId}/lessons/${videoLessonId}/progress`
+         // The interval is enforced against the database clock; tests move the last report back.
+         const rewind = () => client.query(
+            "UPDATE lesson_progress SET last_reported_at = last_reported_at - INTERVAL '1 minute' WHERE user_id = $1 AND lesson_id = $2",
+            [studentId, videoLessonId],
+         )
          const initial = await api('GET', base, student)
          assert.equal(initial.body.data.progress.revision, 0)
-         const first = await api('PUT', base, student, { revision: 0, playbackSeconds: 500, watchedSeconds: 20 })
+         assert.deepEqual(initial.body.data.progress.watchedRanges, [])
+         const first = await api('PUT', base, student, { revision: 0, playbackSeconds: 500, watchedRanges: [[0, 20]] })
          assert.equal(first.status, 200, JSON.stringify(first.body))
          assert.equal(first.body.data.progress.playbackSeconds, 90)
          assert.equal(first.body.data.progress.status, 'in_progress')
-         const stale = await api('PUT', base, student, { revision: 0, playbackSeconds: 10, watchedSeconds: 10 })
+         const stale = await api('PUT', base, student, { revision: 0, playbackSeconds: 10, watchedRanges: [] })
          assert.equal(stale.status, 409)
          assert.equal(stale.body.error.code, 'PROGRESS_REVISION_CONFLICT')
          assert.equal(stale.body.error.details[0].revision, 1)
+         const spam = await api('PUT', base, student, { revision: 1, playbackSeconds: 25, watchedRanges: [[20, 25]] })
+         assert.equal(spam.status, 429)
+         assert.equal(spam.body.error.code, 'PROGRESS_TOO_FREQUENT')
+         assert.ok(spam.body.error.details[0].retryAfterSeconds >= 1)
+         for (const bad of [[[10, 5]], [[-1, 5]], [[0.5, 3]], 'x', Array.from({ length: 51 }, () => [0, 1])]) {
+            const invalid = await api('PUT', base, student, { revision: 1, playbackSeconds: 25, watchedRanges: bad })
+            assert.equal(invalid.status, 400, JSON.stringify(bad))
+         }
+         await rewind()
          const [a, b] = await Promise.all([
-            api('PUT', base, student, { revision: 1, playbackSeconds: 40, watchedSeconds: 40 }),
-            api('PUT', base, student, { revision: 1, playbackSeconds: 41, watchedSeconds: 41 }),
+            api('PUT', base, student, { revision: 1, playbackSeconds: 40, watchedRanges: [[20, 40]] }),
+            api('PUT', base, student, { revision: 1, playbackSeconds: 41, watchedRanges: [[20, 41]] }),
          ])
          assert.deepEqual([a.status, b.status].sort(), [200, 409])
-         const lower = await api('PUT', base, student, { revision: 2, playbackSeconds: 5, watchedSeconds: 5 })
-         assert.ok(lower.body.data.progress.watchedSeconds >= 40)
-         const done = await api('PUT', base, student, { revision: 3, playbackSeconds: 85, watchedSeconds: 81 })
+         await rewind()
+         // Seeking to the end: the legacy watchedSeconds no longer counts, only played seconds.
+         const seek = await api('PUT', base, student, { revision: 2, playbackSeconds: 89, watchedSeconds: 89, watchedRanges: [[88, 90]] })
+         assert.equal(seek.status, 200, JSON.stringify(seek.body))
+         assert.equal(seek.body.data.progress.status, 'in_progress')
+         assert.ok(seek.body.data.progress.watchedSeconds <= 43)
+         await rewind()
+         // Overlapping replays count once: [0, 41) + [30, 60) + [88, 90) = 62 seconds < 81.
+         const replay = await api('PUT', base, student, { revision: 3, playbackSeconds: 60, watchedRanges: [[30, 60]] })
+         assert.equal(replay.body.data.progress.status, 'in_progress')
+         assert.deepEqual(replay.body.data.progress.watchedRanges.at(0)[0], 0)
+         await rewind()
+         const done = await api('PUT', base, student, { revision: 4, playbackSeconds: 85, watchedRanges: [[60, 85]] })
+         assert.equal(done.status, 200, JSON.stringify(done.body))
          assert.equal(done.body.data.progress.status, 'completed')
          assert.ok(done.body.data.progress.completedAt)
-         const mixed = await api('PUT', base, student, { revision: 4, completed: true })
+         const courses = await api('GET', '/courses', student)
+         const course = courses.body.data.courses.find((row) => row.id === courseId)
+         assert.ok(course.progress.completedLessons >= 1, JSON.stringify(course.progress))
+         const summary = await api('GET', `/admin/courses/${courseId}/lessons/${videoLessonId}/progress`, viewer)
+         assert.equal(summary.status, 200, JSON.stringify(summary.body))
+         const own = summary.body.data.learners.find((row) => row.userId === studentId)
+         assert.equal(own.status, 'completed')
+         assert.equal(own.name, 'Student M07B')
+         assert.ok(own.watchedPercent >= 90)
+         assert.equal(/phone|\+992/.test(JSON.stringify(summary.body)), false)
+         assert.ok(summary.body.data.totals.completed >= 1)
+         assert.equal((await api('GET', `/admin/courses/${courseId}/lessons/${videoLessonId}/progress`, student)).status, 403)
+         const mixed = await api('PUT', base, student, { revision: 5, completed: true })
          assert.equal(mixed.status, 400)
          const text = await api('PUT', `/courses/${courseId}/lessons/${textLessonId}/progress`, student, {
             revision: 0, completed: true,
@@ -483,6 +562,104 @@ test('lessons, playback, notes, progress and offline licenses integration', asyn
          ])
       })
 
+      await t.test('device-bound offline licenses: registration limit, key, renewal, expiry, revocation', async () => {
+         const base = `/courses/${courseId}/lessons/${videoLessonId}/offline-license`
+         const ownerOfDevicesId = await createUser(client, 'student', 'Device')
+         await grant(adminId, ownerOfDevicesId, courseId, [moduleIds[0]])
+         const phone = await issue(ownerOfDevicesId)
+         const laptop = await issue(ownerOfDevicesId)
+         const otherId = await createUser(client, 'student', 'Other')
+         await grant(adminId, otherId, courseId, [moduleIds[0]])
+         const other = await issue(otherId)
+
+         const unregistered = await api('POST', base, phone, { deviceId: deviceA })
+         assert.equal(unregistered.status, 409)
+         assert.equal(unregistered.body.error.code, 'OFFLINE_DEVICE_NOT_REGISTERED')
+         assert.equal((await api('POST', '/offline-devices', phone, { deviceId: 'not-a-uuid' })).status, 400)
+         const registered = await api('POST', '/offline-devices', phone, { deviceId: deviceA, deviceLabel: 'Phone' })
+         assert.equal(registered.status, 201, JSON.stringify(registered.body))
+         assert.equal(registered.body.data.maximumDevices, 2)
+         const again = await api('POST', '/offline-devices', laptop, { deviceId: deviceA.toUpperCase() })
+         assert.equal(again.status, 200)
+         assert.equal(again.body.data.created, false)
+         assert.equal((await api('POST', '/offline-devices', laptop, { deviceId: deviceB, deviceLabel: 'Laptop' })).status, 201)
+         const third = await api('POST', '/offline-devices', laptop, { deviceId: deviceC })
+         assert.equal(third.status, 409)
+         assert.equal(third.body.error.code, 'OFFLINE_DEVICE_LIMIT')
+         // Another user may register the same app-generated id; devices are per user.
+         assert.equal((await api('POST', '/offline-devices', other, { deviceId: deviceA })).status, 201)
+
+         const issued = await api('POST', base, phone, { deviceId: deviceA })
+         assert.equal(issued.status, 200, JSON.stringify(issued.body))
+         const { license, encryption } = issued.body.data
+         assert.equal(license.deviceId, deviceA)
+         assert.equal(license.deviceLabel, 'Phone')
+         assert.deepEqual([encryption.algorithm, encryption.keyLength], ['AES-GCM', 256])
+         assert.equal(Buffer.from(encryption.key, 'base64url').length, 32)
+         const lease = new Date(license.leaseExpiresAt).getTime() - Date.now()
+         assert.ok(lease > 13.9 * day && lease <= 14 * day + 1000, 'lease follows OFFLINE_LICENSE_DAYS')
+         const stored = await client.query('SELECT * FROM offline_downloads WHERE id = $1', [license.id])
+         assert.equal(JSON.stringify(stored.rows[0]).includes(encryption.key), false)
+
+         // Renewal from another session of the same device keeps the license and its key.
+         const renewed = await api('POST', base, laptop, { deviceId: deviceA })
+         assert.equal(renewed.body.data.license.id, license.id)
+         assert.equal(renewed.body.data.encryption.key, encryption.key)
+         assert.ok(renewed.body.data.license.renewedAt)
+         const onLaptop = await api('POST', base, laptop, { deviceId: deviceB })
+         assert.notEqual(onLaptop.body.data.license.id, license.id)
+         assert.notEqual(onLaptop.body.data.encryption.key, encryption.key)
+         const otherKey = await api('POST', base, other, { deviceId: deviceA })
+         assert.equal(otherKey.status, 200, JSON.stringify(otherKey.body))
+         assert.notEqual(otherKey.body.data.encryption.key, encryption.key)
+
+         const download = await api('GET', `/offline-licenses/${license.id}/download?deviceId=${deviceA}`, laptop)
+         assert.equal(download.status, 200, JSON.stringify(download.body))
+         assert.equal(download.body.data.encryption.key, encryption.key)
+         assert.equal((await api('GET', `/offline-licenses/${license.id}/download`, phone)).status, 404)
+         assert.equal((await api('GET', `/offline-licenses/${license.id}/download?deviceId=${deviceB}`, phone)).status, 404)
+         assert.equal((await api('GET', `/offline-licenses/${license.id}/download?deviceId=${deviceA}`, other)).status, 404)
+         const listed = await api('GET', `/offline-licenses?deviceId=${deviceA}`, laptop)
+         assert.deepEqual(listed.body.data.licenses.map((row) => row.id), [license.id])
+         const devices = await api('GET', '/offline-devices', phone)
+         assert.deepEqual(devices.body.data.devices.map((row) => [row.deviceId, row.activeLicenses]), [[deviceA, 1], [deviceB, 1]])
+
+         // Removing a device revokes its licenses and frees the slot.
+         const removed = await api('DELETE', `/offline-devices/${deviceB}`, phone)
+         assert.equal(removed.body.data.revokedLicenses, 1)
+         assert.equal((await api('POST', '/offline-devices', laptop, { deviceId: deviceC })).status, 201)
+         const gone = await api('GET', `/offline-licenses/${onLaptop.body.data.license.id}/download?deviceId=${deviceB}`, laptop)
+         assert.equal(gone.status, 403)
+
+         // Expiry: the lease ran out without an online renewal.
+         await client.query(
+            "UPDATE offline_downloads SET granted_at = granted_at - INTERVAL '20 days', lease_expires_at = CURRENT_TIMESTAMP - INTERVAL '1 second' WHERE id = $1",
+            [license.id],
+         )
+         const expired = await api('GET', `/offline-licenses/${license.id}/download?deviceId=${deviceA}`, phone)
+         assert.equal(expired.status, 403)
+         assert.equal(expired.body.error.details[0].reason, 'license_expired')
+         const back = await api('POST', base, phone, { deviceId: deviceA })
+         assert.equal(back.body.data.license.status, 'active')
+         assert.equal(back.body.data.encryption.key, encryption.key)
+
+         // The end of course access revokes every license of that course at once.
+         const revoke = await api('POST', `/admin/courses/${courseId}/enrollments/${ownerOfDevicesId}/revoke`, admin)
+         assert.equal(revoke.status, 200, JSON.stringify(revoke.body))
+         const rows = await client.query(
+            'SELECT revoke_reason FROM offline_downloads WHERE user_id = $1 AND revoked_at IS NULL',
+            [ownerOfDevicesId],
+         )
+         assert.equal(rows.rows.length, 0)
+         const reasons = await client.query(
+            "SELECT count(*)::int AS count FROM offline_downloads WHERE id = $1 AND revoke_reason = 'access_lost'",
+            [license.id],
+         )
+         assert.equal(reasons.rows[0].count, 1)
+         const lost = await api('GET', `/offline-licenses/${license.id}/download?deviceId=${deviceA}`, phone)
+         assert.equal(lost.status, 403)
+      })
+
       await t.test('published lessons are edited directly and stay publishable', async () => {
          const learnerPath = `/courses/${courseId}/lessons/${videoLessonId}`
          const renamed = await api('PATCH', lessonPath(videoLessonId), manager, {
@@ -514,13 +691,6 @@ test('lessons, playback, notes, progress and offline licenses integration', asyn
          const foreign = await api('PATCH', lessonPath(videoLessonId), manager, { videoAssetId: foreignVideoId })
          assert.equal(foreign.status, 400)
 
-         const shortVideoId = await upload(admin, courseId, 'video', 'short.mp4', 'video/mp4', isoMedia({ seconds: 50 }))
-         const tooShort = await api('PATCH', lessonPath(videoLessonId), manager, { videoAssetId: shortVideoId, title: 'Not applied' })
-         assert.equal(tooShort.status, 409)
-         assert.equal(tooShort.body.error.code, 'CHAPTERS_EXCEED_VIDEO_DURATION')
-         const unchanged = await api('GET', lessonPath(videoLessonId), admin)
-         assert.equal(unchanged.body.data.videoAssetId, videoId)
-         assert.equal(unchanged.body.data.title, 'Intro (updated)')
 
          const license = await api('POST', `${learnerPath}/offline-license`, watcher)
          assert.equal(license.status, 200, JSON.stringify(license.body))
@@ -533,6 +703,9 @@ test('lessons, playback, notes, progress and offline licenses integration', asyn
          const replaced = await api('PATCH', lessonPath(videoLessonId), manager, { videoAssetId: longVideoId, title: 'Intro' })
          assert.equal(replaced.status, 200, JSON.stringify(replaced.body))
          assert.equal(replaced.body.data.video.durationSeconds, 120)
+         // Chapters belonged to the old recording: they are cleared with the replacement.
+         assert.deepEqual(replaced.body.data.chapters, [])
+         assert.equal((await api('GET', learnerPath, watcher)).body.data.lesson.chapters.length, 0)
          const revoked = await client.query('SELECT revoke_reason FROM offline_downloads WHERE id = $1', [licenseId])
          assert.equal(revoked.rows[0].revoke_reason, 'access_lost')
          const stale = await api('GET', `/offline-licenses/${licenseId}/download`, watcher)
@@ -550,7 +723,9 @@ test('lessons, playback, notes, progress and offline licenses integration', asyn
             "SELECT metadata FROM audit_events WHERE event_code = 'lesson.updated' AND entity_id = $1 ORDER BY id DESC LIMIT 1",
             [videoLessonId],
          )
-         assert.equal(audit.rows[0].metadata.revokedLicenses, 1)
+         // The watcher's license and the device license of another learner from the device test.
+         assert.equal(audit.rows[0].metadata.revokedLicenses, 2)
+         assert.equal(audit.rows[0].metadata.chaptersCleared, 3)
          // The replaced video is used by no lesson any more: archived and its object deleted.
          const old = await client.query('SELECT status, storage_key FROM assets WHERE id = $1', [videoId])
          assert.equal(old.rows[0].status, 'archived')
@@ -584,6 +759,11 @@ test('lessons, playback, notes, progress and offline licenses integration', asyn
       })
 
       await t.test('course copy brings lessons, chapters and materials but no learner data', async () => {
+         // The video replacement cleared the chapters; enter them again for the new video.
+         const rechaptered = await api('PUT', `${lessonPath(videoLessonId)}/chapters`, manager, {
+            chapters: [{ startSeconds: 0, title: 'Start' }, { startSeconds: 100, title: 'End' }],
+         })
+         assert.equal(rechaptered.status, 200, JSON.stringify(rechaptered.body))
          const copied = await api('POST', `/admin/courses/${courseId}/copy`, admin, {})
          assert.equal(copied.status, 201, JSON.stringify(copied.body))
          const { copied: counts, course } = copied.body.data

@@ -1,3 +1,4 @@
+import env from '../configs/env.js'
 import { getStorageProvider } from '../providers/storage/index.js'
 import * as authRepository from '../repositories/auth-repository.js'
 import * as learnerLessonRepository from '../repositories/learner-lesson-repository.js'
@@ -16,6 +17,8 @@ import {
    videoPlayable,
 } from './lesson-service.js'
 import { effectiveMaxAttempts } from '../utils/attempt-policy.js'
+import { mergeRanges, normalizeRanges, totalSeconds } from '../utils/watched-ranges.js'
+import { watermarkLabel } from '../utils/watermark.js'
 import { attemptStateSummary, finalizeExpiredAttemptsForUserService } from './test-attempt-service.js'
 
 const maximumNoteLength = 10000
@@ -31,6 +34,7 @@ function dependencies(overrides = {}) {
       transaction: overrides.transaction || withTransaction,
       storage: () => overrides.storage || getStorageProvider(),
       clock: overrides.clock || (() => new Date()),
+      progressMinIntervalSeconds: overrides.progressMinIntervalSeconds ?? env.progressMinIntervalSeconds,
       requireAccess: overrides.requireAccess || requireModuleAccessService,
       attemptOverrides: overrides.attemptOverrides,
    }
@@ -119,6 +123,7 @@ function safeProgress(row) {
          watchedSeconds: 0,
          completedAt: null,
          revision: 0,
+         watchedRanges: [],
       }
    }
    return {
@@ -128,6 +133,7 @@ function safeProgress(row) {
       completedAt: iso(row.completed_at),
       revision: Number(row.revision),
       updatedAt: iso(row.updated_at),
+      watchedRanges: Array.isArray(row.watched_ranges) ? row.watched_ranges : [],
    }
 }
 
@@ -231,10 +237,14 @@ async function getLessonPlaybackService(userId, courseIdValue, lessonIdValue, ov
    const lesson = await requireLearnerLesson(deps, actorId, courseId, lessonId)
    await requireLessonAccess(deps, actorId, lesson, 'playback')
    const asset = await requirePlayableVideo(deps, lesson)
-   const chapters = await deps.lessons.listChapters([lesson.id])
+   const [chapters, identity] = await Promise.all([
+      deps.lessons.listChapters([lesson.id]),
+      deps.learner.findWatermarkIdentity(actorId),
+   ])
    return {
       playback: await issueVideoUrl(deps.storage(), asset, deps.clock),
       chapters: chapters.map(safeChapter),
+      watermark: { label: watermarkLabel(identity, actorId) },
    }
 }
 
@@ -363,12 +373,22 @@ function clamp(value, duration) {
    return duration === null ? value : Math.min(value, duration)
 }
 
-// Video lessons report positions; completion is derived (90% watched of a known
-// duration). Lessons without a video are completed explicitly with completed: true.
+function tooFrequent(deps, current) {
+   const since = current?.seconds_since_report
+   if (since === null || since === undefined || since >= deps.progressMinIntervalSeconds) return null
+   return new AppError(429, 'PROGRESS_TOO_FREQUENT', 'Progress is saved at most every few seconds', [
+      { retryAfterSeconds: Math.max(1, Math.ceil(deps.progressMinIntervalSeconds - since)) },
+   ])
+}
+
+// Video lessons report the position and the intervals played since the last report;
+// completion is derived from the unique watched time (90% of a known duration), so a seek
+// to the end does not complete a lesson. A report at most every progressMinIntervalSeconds.
+// Lessons without a video are completed explicitly with completed: true.
 async function saveLessonProgressService(userId, courseIdValue, lessonIdValue, body, overrides) {
    const deps = dependencies(overrides)
    const actorId = parseUserId(userId)
-   validateBody(body, ['revision', 'playbackSeconds', 'watchedSeconds', 'completed'])
+   validateBody(body, ['revision', 'playbackSeconds', 'watchedSeconds', 'watchedRanges', 'completed'])
    if (!Number.isSafeInteger(body.revision) || body.revision < 0) throw validationError('revision')
    const lesson = await accessibleLesson(deps, actorId, courseIdValue, lessonIdValue)
    const current = await deps.learner.findProgress(actorId, lesson.id)
@@ -383,22 +403,32 @@ async function saveLessonProgressService(userId, courseIdValue, lessonIdValue, b
    let playbackSeconds = current ? current.playback_seconds : 0
    let watchedSeconds = current ? current.watched_seconds : 0
    let completed = current?.status === 'completed'
+   let watchedRanges = Array.isArray(current?.watched_ranges) ? current.watched_ranges : []
+   let reported = false
+   let frequent = null
    if (hasVideo) {
       if (body.completed !== undefined) {
          throw validationError('completed', 'Video lesson completion is derived from watched time')
       }
       const duration = await videoDuration(deps, lesson)
       playbackSeconds = clamp(parseNonNegativeSeconds(body.playbackSeconds, 'playbackSeconds'), duration)
-      watchedSeconds = Math.max(
-         watchedSeconds,
-         clamp(parseNonNegativeSeconds(body.watchedSeconds, 'watchedSeconds'), duration),
-      )
-      if (!completesByTest && duration && watchedSeconds >= Math.ceil(duration * completionRatio)) {
+      // watchedSeconds is still accepted from older clients but no longer counts.
+      if (body.watchedSeconds !== undefined) parseNonNegativeSeconds(body.watchedSeconds, 'watchedSeconds')
+      const reportedRanges = body.watchedRanges === undefined
+         ? []
+         : normalizeRanges(body.watchedRanges, duration)
+      if (!reportedRanges) throw validationError('watchedRanges')
+      frequent = tooFrequent(deps, current)
+      reported = true
+      watchedRanges = mergeRanges(watchedRanges, reportedRanges)
+      const unique = totalSeconds(watchedRanges)
+      watchedSeconds = Math.max(watchedSeconds, unique)
+      if (!completesByTest && duration && unique >= Math.ceil(duration * completionRatio)) {
          completed = true
       }
    } else {
       if (body.playbackSeconds !== undefined || body.watchedSeconds !== undefined
-         || body.completed !== true) {
+         || body.watchedRanges !== undefined || body.completed !== true) {
          throw validationError('completed', 'Lessons without a video accept only completed: true')
       }
       completed = true
@@ -410,6 +440,7 @@ async function saveLessonProgressService(userId, courseIdValue, lessonIdValue, b
       [{ revision: currentRevision }],
    )
    if (body.revision !== currentRevision) throw conflictError
+   if (frequent) throw frequent
    const written = await deps.learner.writeProgress({
       userId: actorId,
       lessonId: lesson.id,
@@ -418,6 +449,8 @@ async function saveLessonProgressService(userId, courseIdValue, lessonIdValue, b
       watchedSeconds,
       completed,
       revision: body.revision,
+      watchedRanges,
+      reported,
    })
    if (!written) throw conflictError
    return { progress: safeProgress(written) }

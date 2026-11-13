@@ -17,6 +17,7 @@ import './unit/m11-gaps.test.js';
 import './unit/mock-exam-grading.test.js';
 import './unit/trainer-digits.test.js';
 import './unit/video-upload.test.js';
+import './unit/video-player.test.js';
 import './unit/trust-proxy.test.js';
 import './integration/password-auth.test.js';
 import './integration/auth-protection.test.js';

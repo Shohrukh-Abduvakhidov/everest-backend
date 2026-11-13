@@ -127,6 +127,14 @@ const env = Object.freeze({
   questionImportWorkerIntervalMs: readInteger('QUESTION_IMPORT_WORKER_INTERVAL_MS', 5000),
   attemptSweepIntervalMs: readInteger('ATTEMPT_SWEEP_INTERVAL_MS', 30000),
   trainer: readTrainerConfig(),
+  progressMinIntervalSeconds: readInteger('PROGRESS_MIN_INTERVAL_SECONDS', 10, { max: 60 }),
+  offline: Object.freeze({
+    licenseDays: readInteger('OFFLINE_LICENSE_DAYS', 14, { max: 60 }),
+    maxDevices: readInteger('OFFLINE_MAX_DEVICES', 2, { max: 10 }),
+    // Content keys are derived from this secret and never stored; changing it makes every
+    // downloaded copy undecryptable.
+    keySecret: readString('OFFLINE_KEY_SECRET'),
+  }),
   otpHmacSecret: readString('OTP_HMAC_SECRET'),
   recoveryChallengeTtlSeconds: readInteger('RECOVERY_CHALLENGE_TTL_SECONDS', 600),
   recoveryResetTtlSeconds: readInteger('RECOVERY_RESET_TTL_SECONDS', 600),
@@ -154,7 +162,10 @@ const env = Object.freeze({
     // The whole video library (ready videos plus open video uploads); the disk is shared.
     videoTotalQuotaBytes: readInteger('VIDEO_TOTAL_QUOTA_BYTES', 15 * 1024 * 1024 * 1024),
     maxActiveVideoUploads: readInteger('VIDEO_MAX_ACTIVE_UPLOADS', 3, { max: 50 }),
+    // Playback URLs are signed at the start of a fixed window, so every request inside the
+    // window gets the same URL (browser cache); a URL lives window + this TTL.
     playbackUrlTtlSeconds: readInteger('VIDEO_PLAYBACK_URL_TTL_SECONDS', 7200, { min: 60, max: 43200 }),
+    playbackUrlWindowSeconds: readInteger('VIDEO_PLAYBACK_URL_WINDOW_SECONDS', 21600, { min: 60, max: 86400 }),
     uploadSweepIntervalMs: readInteger('UPLOAD_SWEEP_INTERVAL_MS', 600000),
   }),
   telegram: Object.freeze({

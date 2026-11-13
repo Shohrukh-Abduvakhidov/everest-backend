@@ -2,8 +2,11 @@ import {
    deleteOfflineLicenseService,
    getOfflineLicenseDownloadService,
    issueOfflineLicenseService,
+   listOfflineDevicesService,
    listSessionOfflineLicensesService,
    listUserOfflineLicensesService,
+   registerOfflineDeviceService,
+   removeOfflineDeviceService,
    revokeOfflineLicenseService,
 } from '../services/offline-license-service.js'
 
@@ -32,6 +35,7 @@ async function listSessionOfflineLicensesController(req, res, next) {
       const data = await listSessionOfflineLicensesService(
          req.auth.userId,
          req.auth.sessionId,
+         req.query,
          overrides(req),
       )
       res.json({ data })
@@ -46,6 +50,7 @@ async function getOfflineLicenseDownloadController(req, res, next) {
          req.auth.userId,
          req.auth.sessionId,
          req.params.licenseId,
+         req.query,
          overrides(req),
       )
       res.json({ data })
@@ -60,6 +65,7 @@ async function deleteOfflineLicenseController(req, res, next) {
          req.auth.userId,
          req.auth.sessionId,
          req.params.licenseId,
+         req.query,
          overrides(req),
       )
       res.json({ data })
@@ -94,11 +100,41 @@ async function revokeOfflineLicenseController(req, res, next) {
    }
 }
 
+async function registerOfflineDeviceController(req, res, next) {
+   try {
+      const data = await registerOfflineDeviceService(req.auth.userId, req.body, overrides(req))
+      res.status(data.created ? 201 : 200).json({ data })
+   } catch (error) {
+      next(error)
+   }
+}
+
+async function listOfflineDevicesController(req, res, next) {
+   try {
+      const data = await listOfflineDevicesService(req.auth.userId, overrides(req))
+      res.json({ data })
+   } catch (error) {
+      next(error)
+   }
+}
+
+async function removeOfflineDeviceController(req, res, next) {
+   try {
+      const data = await removeOfflineDeviceService(req.auth.userId, req.params.deviceId, overrides(req))
+      res.json({ data })
+   } catch (error) {
+      next(error)
+   }
+}
+
 export {
    deleteOfflineLicenseController,
    getOfflineLicenseDownloadController,
    issueOfflineLicenseController,
+   listOfflineDevicesController,
    listSessionOfflineLicensesController,
    listUserOfflineLicensesController,
+   registerOfflineDeviceController,
+   removeOfflineDeviceController,
    revokeOfflineLicenseController,
 }

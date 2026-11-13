@@ -2,6 +2,7 @@ import {
    archiveLessonService,
    createLessonService,
    deleteLessonService,
+   getLessonProgressSummaryService,
    getLessonService,
    listModuleLessonsService,
    previewLessonPlaybackService,
@@ -191,6 +192,20 @@ async function previewLessonPlaybackController(req, res, next) {
    }
 }
 
+async function getLessonProgressSummaryController(req, res, next) {
+   try {
+      const data = await getLessonProgressSummaryService(
+         req.auth.userId,
+         req.params.courseId,
+         req.params.lessonId,
+         overrides(req),
+      )
+      res.json({ data })
+   } catch (error) {
+      next(error)
+   }
+}
+
 async function previewLessonResourceController(req, res, next) {
    try {
       const data = await previewLessonResourceService(
@@ -211,6 +226,7 @@ export {
    createLessonController,
    deleteLessonController,
    getLessonController,
+   getLessonProgressSummaryController,
    listModuleLessonsController,
    previewLessonPlaybackController,
    previewLessonResourceController,

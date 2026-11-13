@@ -133,7 +133,7 @@ test('lesson completion guard and staff passed', async (t) => {
 
       // Watching saves, even past 90 percent, but never completes the lesson.
       const watched = await saveLessonProgressService(learner, courseId, mixedVideo, {
-         revision: 0, playbackSeconds: 99, watchedSeconds: 99,
+         revision: 0, playbackSeconds: 99, watchedRanges: [[0, 99]],
       })
       assert.equal(watched.progress.status, 'in_progress')
       assert.equal(watched.progress.watchedSeconds, 99)
@@ -152,8 +152,8 @@ test('lesson completion guard and staff passed', async (t) => {
       const after = await progress(learner, mixedVideo)
       assert.equal(after.status, 'completed')
       const current = await saveLessonProgressService(learner, courseId, mixedVideo, {
-         revision: 2, playbackSeconds: 10, watchedSeconds: 10,
-      })
+         revision: 2, playbackSeconds: 10, watchedRanges: [[0, 10]],
+      }, { progressMinIntervalSeconds: 0 })
       assert.equal(current.progress.status, 'completed')
       assert.equal(new Date(current.progress.completedAt).getTime(), after.completed_at.getTime())
    })
