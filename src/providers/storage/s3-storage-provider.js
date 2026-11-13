@@ -144,8 +144,18 @@ function createS3StorageProvider(config) {
       },
 
       // GET presigned URLs honour Range requests, which playback and resumable
-      // offline downloads rely on.
-      async presignDownload({ key, expiresIn, fileName, contentType, disposition = 'inline' }) {
+      // offline downloads rely on. Range is not a signed header (only host is), so every
+      // byte range is served by the same URL. A fixed signingDate yields the same URL for
+      // the same inputs, which lets the browser cache reuse the response.
+      async presignDownload({
+         key,
+         expiresIn,
+         fileName,
+         contentType,
+         disposition = 'inline',
+         signingDate,
+         cacheControl,
+      }) {
          const type = disposition === 'attachment' ? 'attachment' : 'inline'
          return getSignedUrl(signer, new GetObjectCommand({
             Bucket,
@@ -154,7 +164,8 @@ function createS3StorageProvider(config) {
             ResponseContentDisposition: fileName
                ? `${type}; filename*=UTF-8''${encodeURIComponent(fileName)}`
                : type,
-         }), { expiresIn })
+            ...(cacheControl ? { ResponseCacheControl: cacheControl } : {}),
+         }), { expiresIn, ...(signingDate ? { signingDate } : {}) })
       },
    }
 }

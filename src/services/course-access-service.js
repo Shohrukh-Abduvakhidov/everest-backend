@@ -1,5 +1,6 @@
 import * as authRepository from '../repositories/auth-repository.js'
 import * as courseAccessRepository from '../repositories/course-access-repository.js'
+import * as offlineLicenseRepository from '../repositories/offline-license-repository.js'
 import { withTransaction } from '../repositories/transaction-repository.js'
 import AppError from '../utils/app-error.js'
 import {
@@ -18,6 +19,7 @@ function dependencies(overrides = {}) {
    return {
       repository: overrides.repository || courseAccessRepository,
       auth: overrides.auth || authRepository,
+      offline: overrides.offline || offlineLicenseRepository,
       transaction: overrides.transaction || withTransaction,
       clock: overrides.clock || (() => new Date()),
    }
@@ -231,7 +233,7 @@ async function extendCourseEnrollmentService(userId, courseIdValue, targetValue,
 // Revoking an enrollment also revokes its module grants in the same transaction so a later
 // re-grant of the course can never silently restore module access.
 async function revokeCourseEnrollmentService(userId, courseIdValue, targetValue, overrides) {
-   const { repository, auth, transaction } = dependencies(overrides)
+   const { repository, auth, offline, transaction } = dependencies(overrides)
    const actorId = parseUserId(userId)
    const courseId = parseCourseId(courseIdValue)
    const targetId = parseUserId(targetValue)
@@ -249,13 +251,19 @@ async function revokeCourseEnrollmentService(userId, courseIdValue, targetValue,
          actorId,
          client,
       )
+      // Offline copies stop with the access; the app deletes them on its next check.
+      const revokedOfflineLicenses = await offline.revokeAccessLicenses({
+         userId: targetId,
+         courseId,
+         revokedBy: actorId,
+      }, client)
       await auth.appendAuditEvent({
          actorUserId: actorId,
          subjectUserId: targetId,
          code: 'course.enrollment.revoked',
          entityType: 'course_enrollment',
          entityId: current.id,
-         metadata: { courseId, revokedModuleGrants },
+         metadata: { courseId, revokedModuleGrants, revokedOfflineLicenses },
       }, client)
       return safeEnrollment(await repository.findEnrollmentForUpdate(courseId, targetId, client))
    })
@@ -370,7 +378,7 @@ async function revokeModuleAccessService(
    moduleValue,
    overrides,
 ) {
-   const { repository, auth, transaction } = dependencies(overrides)
+   const { repository, auth, offline, transaction } = dependencies(overrides)
    const actorId = parseUserId(userId)
    const courseId = parseCourseId(courseIdValue)
    const targetId = parseUserId(targetValue)
@@ -384,6 +392,7 @@ async function revokeModuleAccessService(
          throw conflict('MODULE_ACCESS_ALREADY_REVOKED', 'Module access grant is already revoked')
       }
       await repository.revokeModuleGrant(current.id, actorId, client)
+      await offline.revokeAccessLicenses({ userId: targetId, courseId, moduleId, revokedBy: actorId }, client)
       await auth.appendAuditEvent({
          actorUserId: actorId,
          subjectUserId: targetId,

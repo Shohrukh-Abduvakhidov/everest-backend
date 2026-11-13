@@ -18,7 +18,8 @@ const learnerVisibilitySql = `
 
 const noteColumns = 'id, lesson_id, body, playback_seconds, created_at, updated_at'
 const progressColumns = `lesson_id, status, playback_seconds, watched_seconds, completed_at,
-   updated_at, revision`
+   updated_at, revision, watched_ranges, last_reported_at,
+   EXTRACT(EPOCH FROM CURRENT_TIMESTAMP - last_reported_at)::float8 AS seconds_since_report`
 
 async function listLearnerModuleLessons(userId, courseId, moduleId, db = pool) {
    const result = await db.query(
@@ -180,12 +181,16 @@ async function writeProgress(progress, db = pool) {
       progress.watchedSeconds,
       progress.completed,
       progress.revision,
+      JSON.stringify(progress.watchedRanges || []),
+      Boolean(progress.reported),
    ]
    if (progress.revision === 0) {
       const inserted = await db.query(
          `INSERT INTO lesson_progress
-            (user_id, lesson_id, status, playback_seconds, watched_seconds, completed_at, revision)
-          VALUES ($1, $2, $3, $4, $5, CASE WHEN $6 THEN CURRENT_TIMESTAMP END, $7 + 1)
+            (user_id, lesson_id, status, playback_seconds, watched_seconds, completed_at, revision,
+             watched_ranges, last_reported_at)
+          VALUES ($1, $2, $3, $4, $5, CASE WHEN $6 THEN CURRENT_TIMESTAMP END, $7 + 1,
+             $8::jsonb, CASE WHEN $9 THEN CURRENT_TIMESTAMP END)
           ON CONFLICT (user_id, lesson_id) DO NOTHING
           RETURNING ${progressColumns}`,
          values,
@@ -199,6 +204,8 @@ async function writeProgress(progress, db = pool) {
          watched_seconds = GREATEST(watched_seconds, $5),
          completed_at = COALESCE(completed_at, CASE WHEN $6 THEN CURRENT_TIMESTAMP END),
          revision = revision + 1,
+         watched_ranges = $8::jsonb,
+         last_reported_at = CASE WHEN $9 THEN CURRENT_TIMESTAMP ELSE last_reported_at END,
          updated_at = CURRENT_TIMESTAMP
        WHERE user_id = $1 AND lesson_id = $2 AND revision = $7
        RETURNING ${progressColumns}`,
@@ -261,6 +268,49 @@ async function listFavorites(userId, db = pool) {
    return result.rows
 }
 
+// Only what the playback watermark shows: first name and the primary phone (masked later).
+async function findWatermarkIdentity(userId, db = pool) {
+   const result = await db.query(
+      `SELECT profile.first_name, phone.phone_e164
+       FROM users AS account
+       LEFT JOIN user_profiles AS profile ON profile.user_id = account.id
+       LEFT JOIN LATERAL (
+          SELECT owned_phone.phone_e164 FROM user_phones AS owned_phone
+          WHERE owned_phone.user_id = account.id
+          ORDER BY owned_phone.is_primary DESC, owned_phone.created_at, owned_phone.id
+          LIMIT 1
+       ) AS phone ON TRUE
+       WHERE account.id = $1`,
+      [normalizeInternalId(userId)],
+   )
+   return result.rows[0] || null
+}
+
+// Staff summary of one lesson: every learner with a current enrollment in the course, with
+// their progress if any. Only the name is selected; no phone, username or contact data.
+async function listLessonProgressSummary(courseId, lessonId, db = pool) {
+   const result = await db.query(
+      `SELECT enrollment.user_id, profile.first_name, profile.last_name,
+         can_access_module(enrollment.user_id, lesson.module_id) AS has_access,
+         COALESCE(progress.status, 'not_started') AS status,
+         COALESCE(progress.playback_seconds, 0) AS playback_seconds,
+         COALESCE(progress.watched_seconds, 0) AS watched_seconds,
+         COALESCE(progress.watched_ranges, '[]'::jsonb) AS watched_ranges,
+         progress.completed_at, progress.updated_at
+       FROM lessons AS lesson
+       JOIN course_enrollments AS enrollment
+         ON enrollment.course_id = lesson.course_id AND enrollment.revoked_at IS NULL
+       LEFT JOIN user_profiles AS profile ON profile.user_id = enrollment.user_id
+       LEFT JOIN lesson_progress AS progress
+         ON progress.user_id = enrollment.user_id AND progress.lesson_id = lesson.id
+       WHERE lesson.course_id = $1 AND lesson.id = $2
+       ORDER BY profile.first_name, profile.last_name, enrollment.user_id
+       LIMIT 2000`,
+      [normalizeInternalId(courseId), normalizeInternalId(lessonId)],
+   )
+   return result.rows
+}
+
 export {
    addFavorite,
    completeTestLessons,
@@ -270,9 +320,11 @@ export {
    findLearnerLesson,
    findLearnerLessonTest,
    findProgress,
+   findWatermarkIdentity,
    hasLearnerCourse,
    listFavorites,
    listLearnerModuleLessons,
+   listLessonProgressSummary,
    listNotes,
    lockUser,
    removeFavorite,

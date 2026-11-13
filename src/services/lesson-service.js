@@ -1,6 +1,7 @@
 import env from '../configs/env.js'
 import { getStorageProvider } from '../providers/storage/index.js'
 import * as authRepository from '../repositories/auth-repository.js'
+import * as learnerLessonRepository from '../repositories/learner-lesson-repository.js'
 import * as lessonRepository from '../repositories/lesson-repository.js'
 import * as offlineLicenseRepository from '../repositories/offline-license-repository.js'
 import { withTransaction } from '../repositories/transaction-repository.js'
@@ -24,9 +25,12 @@ const maximumLessonsPerOrder = 1000
 const maximumBlocks = 200
 const maximumContentBytes = 256 * 1024
 const maximumChapters = 100
+const maximumChapterTitleLength = 120
 const maximumResources = 50
-// Long enough for a 2-hour lesson with pauses; Range requests (seeking) reuse the same URL.
+// Range requests (seeking) reuse the same URL. The URL is signed at the start of a fixed
+// window and lives window + TTL, so it stays valid for at least TTL after it is issued.
 const playbackUrlTtlSeconds = env.storage.playbackUrlTtlSeconds
+const playbackUrlWindowSeconds = env.storage.playbackUrlWindowSeconds
 const materialUrlTtlSeconds = 5 * 60
 
 // Allowed content block shapes. Blocks are plain text structures; no HTML, scripts or
@@ -44,6 +48,7 @@ const blockFields = Object.freeze({
 function dependencies(overrides = {}) {
    return {
       repository: overrides.repository || lessonRepository,
+      learner: overrides.learner || learnerLessonRepository,
       offline: overrides.offline || offlineLicenseRepository,
       auth: overrides.auth || authRepository,
       transaction: overrides.transaction || withTransaction,
@@ -229,7 +234,7 @@ function parseChapters(body) {
       previous = startSeconds
       return {
          startSeconds,
-         title: parseText(chapter.title, 'chapters', maximumTitleLength),
+         title: parseText(chapter.title, 'chapters', maximumChapterTitleLength),
          translations: chapter.translations === undefined
             ? {}
             : parseTitleTranslations(chapter.translations, 'chapters'),
@@ -333,16 +338,34 @@ async function loadLessonDetail(repository, lesson, db) {
    }
 }
 
+// Every request inside one window signs with the same date and parameters, so the URL is
+// identical and the browser reuses its cached bytes. The cache lifetime equals the URL
+// lifetime and is fixed, because a varying max-age would change the signed URL.
+function playbackSigning(now, windowSeconds = playbackUrlWindowSeconds, ttlSeconds = playbackUrlTtlSeconds) {
+   const windowMs = windowSeconds * 1000
+   const signingDate = new Date(Math.floor(now.getTime() / windowMs) * windowMs)
+   const expiresIn = windowSeconds + ttlSeconds
+   return {
+      signingDate,
+      expiresIn,
+      expiresAt: new Date(signingDate.getTime() + expiresIn * 1000),
+      cacheControl: `private, max-age=${expiresIn}`,
+   }
+}
+
 async function issueVideoUrl(storage, asset, clock) {
+   const signing = playbackSigning(clock())
    const url = await storage.presignDownload({
       key: asset.storage_key,
-      expiresIn: playbackUrlTtlSeconds,
+      expiresIn: signing.expiresIn,
       contentType: asset.mime_type,
       disposition: 'inline',
+      signingDate: signing.signingDate,
+      cacheControl: signing.cacheControl,
    })
    return {
       url,
-      expiresAt: new Date(clock().getTime() + playbackUrlTtlSeconds * 1000).toISOString(),
+      expiresAt: signing.expiresAt.toISOString(),
       mimeType: asset.mime_type,
       durationSeconds: asset.duration_seconds,
    }
@@ -452,6 +475,47 @@ async function getLessonService(userId, courseIdValue, lessonIdValue, overrides)
    }
 }
 
+// Staff view of one lesson: who watched how much. Names only; no contact data. Anyone who
+// may read the course's lessons may read it (teachers of the course, administrators).
+async function getLessonProgressSummaryService(userId, courseIdValue, lessonIdValue, overrides) {
+   const { repository, learner } = dependencies(overrides)
+   const actorId = parseUserId(userId)
+   const courseId = parseCourseId(courseIdValue)
+   const lessonId = parseLessonId(lessonIdValue)
+   await requireReadableCourse(repository, actorId, courseId)
+   const lesson = await repository.findLesson(courseId, lessonId)
+   if (!lesson) throw lessonNotFound()
+   const video = lesson.video_asset_id ? await repository.findAsset(lesson.video_asset_id) : null
+   const duration = video?.duration_seconds || null
+   const rows = await learner.listLessonProgressSummary(courseId, lessonId)
+   const learners = rows.map((row) => {
+      const unique = Array.isArray(row.watched_ranges)
+         ? row.watched_ranges.reduce((sum, [start, end]) => sum + end - start, 0)
+         : 0
+      return {
+         userId: row.user_id,
+         name: [row.first_name, row.last_name].filter(Boolean).join(' ') || null,
+         hasAccess: row.has_access === true,
+         status: row.status,
+         watchedSeconds: unique,
+         watchedPercent: duration ? Math.min(100, Math.floor((unique * 100) / duration)) : null,
+         playbackSeconds: row.playback_seconds,
+         completedAt: iso(row.completed_at),
+         lastActivityAt: iso(row.updated_at),
+      }
+   })
+   return {
+      lessonId,
+      durationSeconds: duration,
+      totals: {
+         learners: learners.length,
+         started: learners.filter((row) => row.status !== 'not_started').length,
+         completed: learners.filter((row) => row.status === 'completed').length,
+      },
+      learners,
+   }
+}
+
 async function createLessonService(userId, courseIdValue, moduleIdValue, body, overrides) {
    const { repository, auth, transaction } = dependencies(overrides)
    const actorId = parseUserId(userId)
@@ -526,18 +590,13 @@ async function updateLessonService(userId, courseIdValue, lessonIdValue, body, o
          if (!videoAssetId && chapters.length) {
             throw conflict('LESSON_HAS_CHAPTERS', 'Remove the chapters before removing the video')
          }
-         if (videoAssetId) {
-            const asset = await validateVideoAsset(repository, courseId, lessonId, videoAssetId, client)
-            if (asset.duration_seconds !== null
-               && chapters.some((chapter) => chapter.start_seconds >= asset.duration_seconds)) {
-               throw conflict(
-                  'CHAPTERS_EXCEED_VIDEO_DURATION',
-                  'Existing chapters start after the end of the new video; adjust the chapters first',
-               )
-            }
-         }
+         if (videoAssetId) await validateVideoAsset(repository, courseId, lessonId, videoAssetId, client)
       }
       const lesson = await repository.updateLesson(lessonId, values, client)
+      // Chapters are timestamps of one recording: a replaced video starts with no chapters
+      // (the editor re-enters them). Removing a video with chapters is refused above.
+      const chaptersCleared = videoChanged && videoAssetId ? chapters.length : 0
+      if (chaptersCleared) await repository.replaceChapters(lessonId, [], client)
       // Offline copies of the replaced video are revoked in the same transaction; the
       // next license check reports video_unavailable so the PWA deletes the file.
       // Learner progress is kept.
@@ -553,7 +612,9 @@ async function updateLessonService(userId, courseIdValue, lessonIdValue, body, o
       await audit(auth, actorId, 'lesson.updated', lessonId, {
          courseId,
          fields: Object.keys(body),
-         ...(videoChanged ? { previousVideoAssetId: current.video_asset_id, revokedLicenses } : {}),
+         ...(videoChanged
+            ? { previousVideoAssetId: current.video_asset_id, revokedLicenses, chaptersCleared }
+            : {}),
       }, client)
       return loadLessonDetail(repository, lesson, client)
    })
@@ -792,6 +853,7 @@ export {
    archiveLessonService,
    createLessonService,
    deleteLessonService,
+   getLessonProgressSummaryService,
    getLessonService,
    issueMaterialUrl,
    issueVideoUrl,
@@ -799,6 +861,7 @@ export {
    listModuleLessonsService,
    parseLessonId,
    parseNonNegativeSeconds,
+   playbackSigning,
    previewLessonPlaybackService,
    previewLessonResourceService,
    publishLessonService,

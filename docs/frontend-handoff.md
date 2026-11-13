@@ -134,23 +134,26 @@ Validation errors are `400` with `code: "VALIDATION_ERROR"` and one entry in `de
 |---|---|---|---|---|---|---|
 | GET | `/courses/{courseId}/modules/{moduleId}/lessons` | session | — | — | 200 { lessons?: LearnerLesson[] } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 404: COURSE_NOT_FOUND, COURSE_MODULE_NOT_FOUND |
 | GET | `/courses/{courseId}/lessons/{lessonId}` | session | — | — | 200 { lesson?: LearnerLesson } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 404: LESSON_NOT_FOUND |
-| GET | `/courses/{courseId}/lessons/{lessonId}/playback` | session | — | — | 200 { playback?: SignedUrl, chapters?: Chapter[] } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: MODULE_ACCESS_DENIED; 404: LESSON_NOT_FOUND; 409: VIDEO_NOT_PLAYABLE; 429: AUTH_RATE_LIMITED (Retry-After header) |
+| GET | `/courses/{courseId}/lessons/{lessonId}/playback` | session | — | — | 200 { playback?: SignedUrl (same URL inside a 6 h window), chapters?: Chapter[], watermark?: { label: string } } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: MODULE_ACCESS_DENIED; 404: LESSON_NOT_FOUND; 409: VIDEO_NOT_PLAYABLE; 429: AUTH_RATE_LIMITED (Retry-After header) |
 | GET | `/courses/{courseId}/lessons/{lessonId}/resources/{resourceId}/download` | session | — | — | 200 { download?: SignedUrl } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: MODULE_ACCESS_DENIED; 404: LESSON_NOT_FOUND, RESOURCE_NOT_FOUND; 429: AUTH_RATE_LIMITED (Retry-After header) |
 | GET | `/courses/{courseId}/lessons/{lessonId}/notes` | session | — | — | 200 { notes?: Note[] } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED |
 | POST | `/courses/{courseId}/lessons/{lessonId}/notes` | session + CSRF | — | { body: string, playbackSeconds?: integer? } | 201 { note?: Note } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 409: NOTE_LIMIT_REACHED |
 | PATCH | `/courses/{courseId}/lessons/{lessonId}/notes/{noteId}` | session + CSRF | — | { body?: string, playbackSeconds?: integer? } | 200 { note?: Note } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 404: NOTE_NOT_FOUND |
 | DELETE | `/courses/{courseId}/lessons/{lessonId}/notes/{noteId}` | session + CSRF | — | — | 200 { id: Id, status: "deleted" } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 404: NOTE_NOT_FOUND |
 | GET | `/courses/{courseId}/lessons/{lessonId}/progress` | session | — | — | 200 { progress?: Progress } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED |
-| PUT | `/courses/{courseId}/lessons/{lessonId}/progress` | session + CSRF | — | { revision: integer, playbackSeconds?: integer, watchedSeconds?: integer, completed?: boolean } | 200 { progress?: Progress } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 409: PROGRESS_REVISION_CONFLICT |
+| PUT | `/courses/{courseId}/lessons/{lessonId}/progress` | session + CSRF | — | { revision: integer, playbackSeconds?: integer, watchedRanges?: [start, end][], completed?: boolean } | 200 { progress?: Progress } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 409: PROGRESS_REVISION_CONFLICT, LESSON_COMPLETES_BY_TEST; 429: PROGRESS_TOO_FREQUENT |
 
 ### Offline licenses
 
 | Method | Path | Access | Query | Body | Success `data` | Errors |
 |---|---|---|---|---|---|---|
-| POST | `/courses/{courseId}/lessons/{lessonId}/offline-license` | session + CSRF | — | { deviceLabel?: string } | 200 { license?: OfflineLicense, download?: SignedUrl } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: MODULE_ACCESS_DENIED, OFFLINE_ACCESS_DENIED, CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 409: OFFLINE_DEVICE_LIMIT; 429: AUTH_RATE_LIMITED (Retry-After header) |
-| GET | `/offline-licenses` | session | — | — | 200 { licenses?: OfflineLicense[] } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED |
-| GET | `/offline-licenses/{licenseId}/download` | session | — | — | 200 { license?: OfflineLicense, download?: SignedUrl } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: OFFLINE_ACCESS_DENIED; 404: OFFLINE_LICENSE_NOT_FOUND; 429: AUTH_RATE_LIMITED (Retry-After header) |
-| DELETE | `/offline-licenses/{licenseId}` | session + CSRF | — | — | 200 { license?: OfflineLicense } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 404: OFFLINE_LICENSE_NOT_FOUND |
+| POST | `/courses/{courseId}/lessons/{lessonId}/offline-license` | session + CSRF | — | { deviceId?: uuid, deviceLabel?: string } | 200 { license?: OfflineLicense, download?: SignedUrl, encryption?: Encryption } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: MODULE_ACCESS_DENIED, OFFLINE_ACCESS_DENIED, CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 409: OFFLINE_DEVICE_LIMIT, OFFLINE_DEVICE_NOT_REGISTERED; 429: AUTH_RATE_LIMITED (Retry-After header); 503: OFFLINE_KEYS_UNAVAILABLE |
+| GET | `/offline-devices` | session | — | — | 200 { devices: OfflineDevice[], maximumDevices: integer } | 401: AUTHENTICATION_REQUIRED |
+| POST | `/offline-devices` | session + CSRF | — | { deviceId: uuid, deviceLabel?: string } | 201/200 { device: OfflineDevice, created: boolean, maximumDevices: integer } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 409: OFFLINE_DEVICE_LIMIT |
+| DELETE | `/offline-devices/{deviceId}` | session + CSRF | — | — | 200 { deviceId, status: "removed", revokedLicenses: integer } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 404: OFFLINE_DEVICE_NOT_FOUND |
+| GET | `/offline-licenses` | session | deviceId (uuid) | — | 200 { licenses?: OfflineLicense[] } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED |
+| GET | `/offline-licenses/{licenseId}/download` | session | deviceId (uuid) | — | 200 { license?: OfflineLicense, download?: SignedUrl, encryption?: Encryption } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: OFFLINE_ACCESS_DENIED; 404: OFFLINE_LICENSE_NOT_FOUND; 429: AUTH_RATE_LIMITED (Retry-After header) |
+| DELETE | `/offline-licenses/{licenseId}` | session + CSRF | deviceId (uuid) | — | 200 { license?: OfflineLicense } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 404: OFFLINE_LICENSE_NOT_FOUND |
 
 ### Groups
 
@@ -265,6 +268,97 @@ Completion runs in one transaction (no visible `completing` state); a parallel s
 
 **Server settings** (backend env): `STORAGE_PART_SIZE_BYTES` (32 MiB), `STORAGE_PRESIGN_TTL_SECONDS` (3600), `STORAGE_UPLOAD_TTL_HOURS` (48, below the bucket's 3-day abort rule), `VIDEO_MAX_BYTES` (4 GiB), `VIDEO_TOTAL_QUOTA_BYTES` (15 GiB: ready videos plus open uploads), `VIDEO_MAX_ACTIVE_UPLOADS` (3), `VIDEO_PLAYBACK_URL_TTL_SECONDS` (7200), `UPLOAD_SWEEP_INTERVAL_MS` (10 min, in `worker:attempts`). Storage is any S3 service set by `S3_*`.
 
+### Video player (chapters, progress, cached playback, offline, watermark — 2026-11-15)
+
+Everything below extends the existing lesson routes; there is no second player API. All paths are under `/api/v1`, every mutation needs the session and CSRF as usual.
+
+#### Chapters (timeline)
+
+- Learners get `chapters: [{ id, startSeconds, title, translations, position }]` in `GET /courses/{courseId}/lessons/{lessonId}` (with module access) and in the playback response. Sorted by `startSeconds`; draw them as markers on the seek bar and as a list.
+- Editors: `PUT /admin/courses/{courseId}/lessons/{lessonId}/chapters` with the whole list `{ chapters: [{ startSeconds, title, translations? }] }` (`lessons.manage` and a course they may manage; a teacher without `canManageLessons` gets `404 COURSE_NOT_FOUND`, a student `403`). An empty list removes all chapters.
+- Rules (`400 VALIDATION_ERROR`, field `chapters`): integer `startSeconds` from 0 and below the video duration, strictly increasing, no duplicate times, `title` 1–120 characters, at most 100 chapters. No video on the lesson: `409 LESSON_HAS_NO_VIDEO`. The duration is read from the file when the upload completes (`video.durationSeconds`).
+- Replacing the lesson video clears the chapters (they were times of the old recording); the editor must enter them again. The PATCH response shows `chapters: []`. Removing the video while chapters exist: `409 LESSON_HAS_CHAPTERS` (clear chapters first).
+
+#### Playback with a stable URL and watermark
+
+`GET /courses/{courseId}/lessons/{lessonId}/playback`:
+
+```json
+{
+  "data": {
+    "playback": {
+      "url": "https://files.example/everest/courses/12/videos/…mp4?X-Amz-Date=20261115T060000Z&response-cache-control=private%2C%20max-age%3D28800&…",
+      "expiresAt": "2026-11-15T14:00:00.000Z",
+      "mimeType": "video/mp4",
+      "durationSeconds": 1834
+    },
+    "chapters": [{ "id": "5", "startSeconds": 0, "title": "Intro", "translations": {}, "position": 1 }],
+    "watermark": { "label": "Ali +992 *** 45" }
+  }
+}
+```
+
+- The URL is signed at the start of a 6-hour window and lives 8 hours (window + 2 h). Inside one window every call returns the **same URL**, so the browser HTTP cache reuses downloaded ranges; S3 answers with `Cache-Control: private, max-age=28800`. Do not add query parameters to the URL (they break the signature and the cache key).
+- Set it as `<video src>` directly. Seeking sends `Range` requests to the same URL (only `host` is signed), and the server answers `206`. Refetch the playback endpoint when `expiresAt` is near or when the video errors with 403; keep `currentTime` and swap `src`.
+- Errors: `403 MODULE_ACCESS_DENIED`, `404 LESSON_NOT_FOUND`, `409 VIDEO_NOT_PLAYABLE`, `429` (per-user media limit).
+- Watermark: draw `watermark.label` semi-transparent over the video and move it every 20–40 s to a random position (also in fullscreen: put it in the same container that goes fullscreen, not over the page). The label contains only the first name and a masked phone; when neither is known it is `ID <userId>`.
+
+#### Watch progress
+
+- `GET /courses/{courseId}/lessons/{lessonId}/progress` → `{ progress: { status, playbackSeconds, watchedSeconds, watchedRanges, completedAt, revision, updatedAt } }`. Resume from `playbackSeconds`.
+- `PUT …/progress` body for video lessons:
+
+```json
+{ "revision": 3, "playbackSeconds": 412, "watchedRanges": [[380, 412]] }
+```
+
+- `watchedRanges`: `[start, end)` whole seconds actually played since the last successful report (from the `timeupdate` stream, not from the seek target), up to 50 pairs. The server merges them with what it has, so overlaps count once. Send `[]` when only the position changed.
+- At most one report per 10 s per lesson (`PROGRESS_MIN_INTERVAL_SECONDS`). Report every 15 s while playing, plus on pause/ended/`visibilitychange`, but never twice within 10 s; on `429 PROGRESS_TOO_FREQUENT` keep the pending ranges and retry after `details[0].retryAfterSeconds`.
+- On `409 PROGRESS_REVISION_CONFLICT` take `details[0].revision`, keep the pending ranges and send again with that revision.
+- The lesson becomes `completed` when unique watched time reaches 90% of the duration; a seek to the end does not count. The completion feeds course progress (`progress.completedLessons` in `GET /courses`). A lesson with a test still completes only through its test (`409 LESSON_COMPLETES_BY_TEST` for `completed: true`; watching saves). `watchedSeconds` in the body is accepted from old clients and ignored.
+- Offline viewing: collect ranges locally and send them in one report when online again.
+
+Staff summary: `GET /admin/courses/{courseId}/lessons/{lessonId}/progress` (`lessons.read`):
+
+```json
+{
+  "data": {
+    "lessonId": "41", "durationSeconds": 1834,
+    "totals": { "learners": 25, "started": 18, "completed": 11 },
+    "learners": [{ "userId": "77", "name": "Ali Karimov", "hasAccess": true, "status": "completed", "watchedSeconds": 1700, "watchedPercent": 92, "playbackSeconds": 1830, "completedAt": "…", "lastActivityAt": "…" }]
+  }
+}
+```
+
+Every learner with a current enrollment in the course is listed; no phone or other contact data.
+
+#### Offline viewing inside the app only
+
+The video is stored only encrypted in the browser's Origin Private File System (OPFS); there is no file for Files/Gallery and no `Content-Disposition: attachment` save in the UI.
+
+1. **Device id.** On first use generate `crypto.randomUUID()`, keep it in IndexedDB next to the files, and register it: `POST /offline-devices { deviceId, deviceLabel? }` → `201` (new) or `200` (known). Limit 2 devices per user (`OFFLINE_MAX_DEVICES`): `409 OFFLINE_DEVICE_LIMIT` → show `GET /offline-devices` and let the user remove one with `DELETE /offline-devices/{deviceId}` (that revokes its licenses). Clearing site data loses the id and the files; the old device then has to be removed in the list.
+2. **License.** `POST /courses/{courseId}/lessons/{lessonId}/offline-license { deviceId }` → `{ license, download, encryption }`:
+
+```json
+{
+  "license": { "id": "301", "courseId": "12", "lessonId": "41", "status": "active", "leaseExpiresAt": "2026-11-29T10:00:00.000Z", "deviceId": "6f1c2a3b-…", "deviceLabel": "Phone", "revokeReason": null, "grantedAt": "…", "renewedAt": null, "lastCheckedAt": "…" },
+  "download": { "url": "https://files…", "expiresAt": "…+15 min", "mimeType": "video/mp4", "sizeBytes": 734003200 },
+  "encryption": { "algorithm": "AES-GCM", "keyLength": 256, "keyVersion": 1, "key": "base64url 32 bytes" }
+}
+```
+
+   The lease is 14 days (`OFFLINE_LICENSE_DAYS`) and never beyond the enrollment/module grant expiry. Calling the same route again online renews it; the license id and the key stay the same, so the stored file is not re-encrypted. The key is derived on the server and never stored there; do not store it in plain `localStorage`. Import it with `crypto.subtle.importKey('raw', bytes, 'AES-GCM', false, ['encrypt', 'decrypt'])` and keep only the non-extractable `CryptoKey` in IndexedDB.
+3. **Download and encrypt in chunks.** Download with `Range` requests of a fixed plain-text chunk size (recommended 1 MiB) from `download.url` (15 min; get a fresh one from `GET /offline-licenses/{id}/download?deviceId=`). For chunk `i`: IV = 4 random bytes fixed per file + 8-byte big-endian `i`; `additionalData` = `${license.id}:${i}`; write `ciphertext||tag` (chunk size + 16 bytes) at offset `i * (chunkSize + 16)` in one OPFS file (`createSyncAccessHandle` in a worker). Keep a manifest `{ licenseId, assetSizeBytes, chunkSize, ivPrefix, mimeType, chunks done }` in IndexedDB to resume.
+4. **Playback through a Service Worker with Range.** Play `<video src="/offline/{licenseId}">`. The Service Worker answers that URL: parse `Range: bytes=a-b`, compute chunks `floor(a / chunkSize)…floor(b / chunkSize)`, read and decrypt them, slice to `[a, b]`, and respond `206` with `Content-Range: bytes a-b/size`, `Accept-Ranges: bytes`, `Content-Length` and the stored `mimeType`. Without `Range` answer `200` with the first chunks streamed. Never expose a decrypted blob URL or a download link.
+5. **Checks.** Before offline playback check `leaseExpiresAt` locally; when online call `GET /offline-licenses/{id}/download?deviceId=` (or renew with POST) at least once a day. `403 OFFLINE_ACCESS_DENIED` with `details[0].reason` in `module_access`, `offline_not_allowed`, `video_unavailable`, `lesson_unavailable`, `license_revoked`, `license_expired` → delete the file, the manifest and the key. An expired lease also means delete (or renew if online and still allowed).
+6. **Lists.** `GET /offline-licenses?deviceId=` lists this device's active licenses (any session); `DELETE /offline-licenses/{id}?deviceId=` removes one (idempotent).
+
+Error codes: `400 VALIDATION_ERROR` (`deviceId` must be a UUID), `404 OFFLINE_LICENSE_NOT_FOUND` (license of another device/user or `deviceId` missing), `404 OFFLINE_DEVICE_NOT_FOUND`, `409 OFFLINE_DEVICE_LIMIT`, `409 OFFLINE_DEVICE_NOT_REGISTERED`, `403 OFFLINE_ACCESS_DENIED` (+reason), `403 MODULE_ACCESS_DENIED`, `503 OFFLINE_KEYS_UNAVAILABLE` (server has no `OFFLINE_KEY_SECRET`), `429` media rate limit.
+
+Limits of the protection: the key reaches the browser, so a determined user with devtools can decrypt the file; the scheme keeps the file out of the gallery and makes casual copying useless outside the app. Screen recording is only discouraged by the watermark.
+
+Session-bound licenses (POST without `deviceId`) still work as before (no key, `download` with attachment) for older builds; new code should always send `deviceId`.
+
 ### Admin: accounts
 
 | Method | Path | Access | Query | Body | Success `data` | Errors |
@@ -335,6 +429,7 @@ Completion runs in one transaction (no visible `completing` state); a parallel s
 | PUT | `/admin/courses/{courseId}/lessons/{lessonId}/chapters` | `lessons.manage` + CSRF | — | { chapters: { startSeconds: integer, title: string, translations?: TitleTranslations }[] } | 200 { chapters?: Chapter[] } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: ACTION_FORBIDDEN, CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 409: LESSON_HAS_NO_VIDEO; 429: AUTH_RATE_LIMITED (Retry-After header) |
 | PUT | `/admin/courses/{courseId}/lessons/{lessonId}/resources` | `lessons.manage` + CSRF | — | { resources: { assetId: Id, title?: string }[] } | 200 { resources?: LessonResource[] } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: ACTION_FORBIDDEN, CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 429: AUTH_RATE_LIMITED (Retry-After header) |
 | GET | `/admin/courses/{courseId}/lessons/{lessonId}/playback` | `lessons.read` | — | — | 200 { playback?: SignedUrl, chapters?: Chapter[] } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: ACTION_FORBIDDEN; 409: VIDEO_NOT_PLAYABLE |
+| GET | `/admin/courses/{courseId}/lessons/{lessonId}/progress` | `lessons.read` | — | — | 200 { lessonId, durationSeconds, totals: { learners, started, completed }, learners: LessonProgressSummaryRow[] } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: ACTION_FORBIDDEN; 404: COURSE_NOT_FOUND, LESSON_NOT_FOUND |
 | GET | `/admin/courses/{courseId}/lessons/{lessonId}/resources/{resourceId}/download` | `lessons.read` | — | — | 200 { download?: SignedUrl } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: ACTION_FORBIDDEN |
 | GET | `/admin/users/{userId}/offline-licenses` | `lessons.offline.manage` | — | — | 200 { licenses?: OfflineLicense[] } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: ACTION_FORBIDDEN |
 | POST | `/admin/offline-licenses/{licenseId}/revoke` | `lessons.offline.manage` + CSRF | — | — | 200 { license?: OfflineLicense } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: ACTION_FORBIDDEN, CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 404: OFFLINE_LICENSE_NOT_FOUND; 429: AUTH_RATE_LIMITED (Retry-After header) |

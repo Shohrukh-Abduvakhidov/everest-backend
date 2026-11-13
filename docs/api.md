@@ -321,15 +321,16 @@ Mutations use the CSRF check and the administrative mutation rate limit, and are
 - `PATCH /lessons/:lessonId` → partial update in any status (draft, published, archived). Learners see changes to a published lesson immediately.
    - `testId` (nullable) links a test of the same course to a `test` or `mixed` lesson. Another course or lesson type: `400 VALIDATION_ERROR` on `testId`. An archived test: `409 TEST_ARCHIVED`. A draft test may be linked to a draft lesson. Use `GET /admin/tests?courseId=` (`tests.read`) as the picker.
    - Published lessons must stay publishable: a `test` lesson must keep a test (`409 LESSON_TEST_REQUIRED`), a newly linked test must be published (`409 TEST_NOT_PUBLISHED`), and a lesson cannot lose the video of a `video`/`mixed` lesson (`409 LESSON_VIDEO_REQUIRED`).
-   - A new video must be ready, seek-ready and from the same course. If existing chapters would start at or after the new video's end, the request fails with `409 CHAPTERS_EXCEED_VIDEO_DURATION` and nothing changes.
+   - A new video must be ready, seek-ready and from the same course. Replacing the video clears the lesson's chapters in the same transaction (they were timestamps of the old recording; audit metadata `chaptersCleared`). Removing the video while chapters exist returns `409 LESSON_HAS_CHAPTERS` (2026-11-15; `CHAPTERS_EXCEED_VIDEO_DURATION` is gone).
    - Replacing the video revokes active offline licenses for the old video in the same transaction. Their next check returns `403 OFFLINE_ACCESS_DENIED` with reason `video_unavailable`. Progress is kept.
 - `POST /lessons/:lessonId/publish`, `/archive`, `/restore` → `draft → published → archived → draft`. Other transitions return `409 INVALID_LESSON_TRANSITION`. Publication can also return `409 LESSON_VIDEO_REQUIRED`, `LESSON_TEST_REQUIRED` (a `test` lesson without a test), `TEST_NOT_PUBLISHED` (a linked test that is not published) or `VIDEO_NOT_PLAYABLE`.
 - `DELETE /lessons/:lessonId` → empty drafts only (`409 LESSON_NOT_DELETABLE`).
 - `PUT /lessons/:lessonId/chapters` → atomically replaces `{ chapters: [{ startSeconds, title, translations? }] }` in any status.
-   - `startSeconds` must be strictly increasing and below the video duration. There are at most 100 chapters, and a video is required (`409 LESSON_HAS_NO_VIDEO`).
+   - `startSeconds` must be strictly increasing (no duplicates) and below the video duration when it is known (the duration is read from the MP4/WebM header when the upload completes). `title` is 1–120 characters (new writes; older rows up to 200 stay). There are at most 100 chapters, and a video is required (`409 LESSON_HAS_NO_VIDEO`). Rights: `lessons.manage` and a course the actor may manage.
 - `PUT /lessons/:lessonId/resources` → atomically replaces `{ resources: [{ assetId, title? }] }` in any status, at most 50. Each item must be a ready material asset of the course.
 - `GET /lessons/:lessonId/playback` → staff preview `{ playback, chapters }`, for any status.
 - `GET /lessons/:lessonId/resources/:resourceId/download` → staff material URL.
+- `GET /lessons/:lessonId/progress` (`lessons.read`, a course the actor may read) → `{ lessonId, durationSeconds, totals: { learners, started, completed }, learners: [{ userId, name, hasAccess, status, watchedSeconds, watchedPercent, playbackSeconds, completedAt, lastActivityAt }] }`. Every learner with a current enrollment in the course; `watchedSeconds` is unique watched time; names only, no contact data (2026-11-15).
 - `GET /api/v1/admin/users/:userId/offline-licenses` and `POST /api/v1/admin/offline-licenses/:licenseId/revoke` (`lessons.offline.manage`, owner/admin) list a user's licenses and revoke one (idempotent, `admin_revoked`).
 
 Field rules:
@@ -357,32 +358,43 @@ Routes:
 - `GET /:courseId/lessons/:lessonId`:
    - Without access: summary only.
    - With access: also `content`, `allowOffline`, `video: { durationSeconds, playable }`, `chapters`, `resources: [{ id, title, position, fileName, mimeType, sizeBytes }]` and `progress`.
-- `GET /:courseId/lessons/:lessonId/playback` (per-user rate limit) → `{ playback: { url, expiresAt, mimeType, durationSeconds }, chapters }`.
-   - The URL is signed for 30 minutes with inline disposition and supports Range requests. Call the endpoint again before `expiresAt` to refresh.
+- `GET /:courseId/lessons/:lessonId/playback` (per-user rate limit) → `{ playback: { url, expiresAt, mimeType, durationSeconds }, chapters, watermark: { label } }`.
+   - The URL is signed at the start of a fixed window (`VIDEO_PLAYBACK_URL_WINDOW_SECONDS`, 6 h) and lives window + `VIDEO_PLAYBACK_URL_TTL_SECONDS` (2 h), so every call inside one window returns the same URL and the browser reuses its cache. The object is served with `Cache-Control: private, max-age=<window + TTL>`, inline disposition, and Range requests (only `host` is signed). Call the endpoint again before `expiresAt` to refresh (2026-11-15).
+   - `watermark.label` = first name + masked primary phone, e.g. `Ali +992 *** 45`; `ID <userId>` when neither is known.
    - Errors: `403 MODULE_ACCESS_DENIED` (audited), `409 VIDEO_NOT_PLAYABLE`, `429`.
 - `GET /:courseId/lessons/:lessonId/resources/:resourceId/download` (rate limited) → `{ download: { url, expiresAt, fileName, mimeType } }`, valid 5 minutes, attachment disposition.
 - `GET|POST /:courseId/lessons/:lessonId/notes` and `PATCH|DELETE /:courseId/lessons/:lessonId/notes/:noteId` work on the caller's own notes only, with body `{ body, playbackSeconds? }`.
    - Another user's note returns `404 NOTE_NOT_FOUND`. A full lesson returns `409 NOTE_LIMIT_REACHED` (500).
 - `GET|PUT /:courseId/lessons/:lessonId/progress`:
-   - Video lessons take `{ revision, playbackSeconds, watchedSeconds }`. Values are clamped to the duration, watched time never decreases, and the lesson completes at 90%.
+   - Video lessons take `{ revision, playbackSeconds, watchedRanges? }` (2026-11-15). `watchedRanges` = up to 50 `[start, end)` second pairs played since the last report; the server merges them into the stored set, so `watchedSeconds` is unique watched time. The lesson completes at 90% of the known duration in unique time; a seek to the end adds only the seconds played. `watchedSeconds` in the body is accepted from older clients and ignored. At most one report per `PROGRESS_MIN_INTERVAL_SECONDS` (10) per learner and lesson, otherwise `429 PROGRESS_TOO_FREQUENT` with `details[0].retryAfterSeconds` (checked after the revision).
+   - Completion feeds the existing course progress (`progress.completedLessons` in `GET /courses`).
    - Other lessons take `{ revision, completed: true }`.
    - A lesson that has a test is completed only by its test result (2026-11-08). For it, `completed: true` and any write to a lesson without a video return `409 LESSON_COMPLETES_BY_TEST`. On a video lesson with a test, watch progress still saves but never completes it.
    - A stale revision returns `409 PROGRESS_REVISION_CONFLICT` with `details[0].revision`.
-   - Progress = `{ status, playbackSeconds, watchedSeconds, completedAt, revision, updatedAt }`.
+   - Progress = `{ status, playbackSeconds, watchedSeconds, watchedRanges, completedAt, revision, updatedAt }`.
 - `GET /favorites`, `PUT /:courseId/favorite` and `DELETE /:courseId/favorite` manage course bookmarks (idempotent). Favorites never grant access.
-- `POST /:courseId/lessons/:lessonId/offline-license` (CSRF, rate limited), body `{ deviceLabel? }`, creates or renews the license for the current session. Returns `{ license, download: { url, expiresAt, mimeType, sizeBytes } }`; the download URL is valid 15 minutes with attachment disposition.
-   - The lease is at most 3 days and never beyond the enrollment or module grant expiry. A learner can use at most 2 devices (`409 OFFLINE_DEVICE_LIMIT`).
+- `POST /:courseId/lessons/:lessonId/offline-license` (CSRF, rate limited), body `{ deviceId?, deviceLabel? }`, creates or renews the license. Returns `{ license, download: { url, expiresAt, mimeType, sizeBytes }, encryption? }`; the download URL is valid 15 minutes.
+   - With `deviceId` (2026-11-15) the license is bound to a registered device (`409 OFFLINE_DEVICE_NOT_REGISTERED` otherwise), works from any session of the user that presents the id, and the response carries `encryption: { algorithm: 'AES-GCM', keyLength: 256, keyVersion: 1, key }` (base64url). The key = HMAC-SHA256(`OFFLINE_KEY_SECRET`, user | device | asset | license); it is never stored and stays the same for renewals of the same license. Without `OFFLINE_KEY_SECRET` (≥ 32 chars) the request returns `503 OFFLINE_KEYS_UNAVAILABLE`.
+   - Without `deviceId` the older session-bound license is issued, without a key.
+   - The lease is `OFFLINE_LICENSE_DAYS` (14) and never beyond the enrollment or module grant expiry; calling the route again online renews it. Devices per user: `OFFLINE_MAX_DEVICES` (2), shared by registered devices and sessions holding session-bound licenses (`409 OFFLINE_DEVICE_LIMIT`).
+   - Revoking an enrollment or a module grant revokes the user's licenses of that course/module in the same transaction (`access_lost`).
    - When access is gone, the API returns `403 OFFLINE_ACCESS_DENIED` with `details[0].reason` set to `module_access`, `offline_not_allowed`, `video_unavailable`, `lesson_unavailable`, `license_revoked` or `license_expired`. The PWA must then delete its files.
 
-Offline licenses of the current session are under `/api/v1/offline-licenses`:
+Offline devices (2026-11-15) are under `/api/v1/offline-devices`:
 
-- `GET /` → the session's active licenses.
-- `GET /:licenseId/download` (rate limited) → a new 15-minute URL after re-checking access. On failure the license is revoked with `access_lost` and the API returns `403 OFFLINE_ACCESS_DENIED`.
+- `POST /` (CSRF) body `{ deviceId: <UUID generated by the app>, deviceLabel? }` → `201` new, `200` already registered: `{ device, created, maximumDevices }`. Beyond the limit: `409 OFFLINE_DEVICE_LIMIT`.
+- `GET /` → `{ devices: [{ deviceId, label, registeredAt, lastSeenAt, activeLicenses }], maximumDevices }`.
+- `DELETE /:deviceId` (CSRF) → `{ deviceId, status: 'removed', revokedLicenses }`; frees the slot and revokes its licenses (`user_deleted`). Unknown: `404 OFFLINE_DEVICE_NOT_FOUND`.
+
+Offline licenses are under `/api/v1/offline-licenses`. Add `?deviceId=` for device-bound licenses; without it the routes work on the current session's session-bound licenses:
+
+- `GET /` → active licenses.
+- `GET /:licenseId/download` (rate limited) → a new 15-minute URL after re-checking access, plus `encryption` for device licenses. On failure the license is revoked with `access_lost` and the API returns `403 OFFLINE_ACCESS_DENIED`.
 - `DELETE /:licenseId` → idempotent self-revocation (`user_deleted`).
 
-A license held by another session returns `404 OFFLINE_LICENSE_NOT_FOUND`.
+A license of another session/device returns `404 OFFLINE_LICENSE_NOT_FOUND`.
 
-License = `{ id, courseId, lessonId, status: active|expired|revoked, grantedAt, renewedAt, lastCheckedAt, leaseExpiresAt, deviceLabel, revokeReason }`.
+License = `{ id, courseId, lessonId, status: active|expired|revoked, grantedAt, renewedAt, lastCheckedAt, leaseExpiresAt, deviceLabel, deviceId, revokeReason }`.
 
 ## Asset upload APIs (M07-A)
 

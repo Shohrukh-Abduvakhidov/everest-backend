@@ -1,13 +1,20 @@
 ---
 project: EVEREST Backend
-current_milestone: Resumable lesson video uploads
+current_milestone: Video player backend
 status: awaiting_review
-branch: feature/video-upload
-base_commit: 6522403
-updated_at: 2026-11-14
+branch: feature/video-player-backend
+base_commit: 7b2929d
+updated_at: 2026-11-15
 ---
 
 # Current handoff
+
+## Video player backend (PR `feature/video-player-backend`, awaiting review)
+
+- Extends existing chapters, progress, playback and offline licenses; migration `20261115010000000_add-video-player-state` (watched ranges, report time, `offline_devices`, `offline_downloads.device_id`). Contract: docs/frontend-handoff.md "Video player"; decisions 2026-11-15.
+- Verified: `npm test` exit 0 (454/454), `test:migrations` 40/94.
+- After merge (operator): `migrate:up`; set `OFFLINE_KEY_SECRET` (≥ 32 random chars, never rotate casually) — without it device licenses return 503; optional new env keys from `deploy/env.example`; check on the server that a playback URL returns `Cache-Control: private, max-age=28800` and `206` for Range through nginx/SeaweedFS.
+- Not done: frontend player/OPFS/Service Worker; summary pagination; server-side anti-cheat beyond unique intervals; mark-instead-of-clear for chapters.
 
 ## Resumable lesson video uploads (PR `feature/video-upload`, awaiting review)
 

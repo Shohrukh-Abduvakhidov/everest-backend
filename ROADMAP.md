@@ -224,6 +224,13 @@ This roadmap orders implementation; it does not replace the [current architectur
    - Verify Range seeking of a real faststart mp4 through a signed URL against real storage.
 - **Exclusions:** Multi-quality video, HLS, `asset_variants`, workers and lesson favorites.
 
+## M07-D — Video player backend (2026-11-15)
+
+- **Status:** Implemented on `feature/video-player-backend`, awaiting review. Not merged, not deployed.
+- **Deliverables:** chapters rules (1–120 titles, cleared on video replacement), unique-interval progress with a 10 s report interval and 90% completion, staff progress summary, playback URLs stable within a 6 h window with `Cache-Control`, watermark label, device registration and device-bound offline licenses (14 days, 2 devices, HMAC-derived AES-GCM key, never stored), license revocation with enrollment/module revocation. Migration `20261115010000000_add-video-player-state`.
+- **Verification:** see `docs/progress.md` (2026-11-15).
+- **Pending:** `Cache-Control` override and Range through SeaweedFS + nginx on the server; `OFFLINE_KEY_SECRET` on the server; frontend player, OPFS and Service Worker.
+
 ## M-DOCS — OpenAPI specification and Swagger UI
 
 - **Status:** Done (merged in PR #22). Added by the user on 2026-10-30, outside the original plan.

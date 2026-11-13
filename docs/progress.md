@@ -1,10 +1,17 @@
 # EVEREST backend progress
 
-Updated: 2026-11-13.
+Updated: 2026-11-15.
 
 ## Current increment
 
-NCT mock exam on `feat/nct-mock-exam` (awaiting review). The trainer, its access rule and staff access are merged (PRs #46–#48).
+Video player backend on `feature/video-player-backend` (awaiting review).
+
+## 2026-11-15 — Video player backend (`feature/video-player-backend`)
+
+- **What:** chapters (title 1–120, cleared when the video is replaced), progress by merged watched intervals (`watchedRanges`, 90% unique time, one report per 10 s, `429 PROGRESS_TOO_FREQUENT`), staff summary `GET /admin/courses/:courseId/lessons/:lessonId/progress`, playback URLs identical within a 6 h window with `ResponseCacheControl`, `watermark.label`, `/offline-devices` registration, device-bound offline licenses with HMAC-derived AES-GCM keys (never stored), 14-day lease, licenses revoked with enrollment/module revocation. Migration `20261115010000000_add-video-player-state`. New env: `VIDEO_PLAYBACK_URL_WINDOW_SECONDS`, `PROGRESS_MIN_INTERVAL_SECONDS`, `OFFLINE_LICENSE_DAYS`, `OFFLINE_MAX_DEVICES`, `OFFLINE_KEY_SECRET` (in `deploy/env.example`).
+- **Checked:** `npm test` exit 0 — sources, integrity, disposable suite 454/454 (new unit `video-player`: ranges, watermark, signing window, real S3 presigner URL equality/`SignedHeaders=host`/cache header, key derivation, lease, throttled progress; integration `lessons` extended: chapters validation and rights, progress intervals/429/90%/course progress/staff summary, stable playback URL and watermark, device licenses: limit, key determinism and difference, renewal, expiry, device removal, revocation on enrollment revoke), server. `test:migrations` 40/94, down 39/93, reapply.
+- **Not checked:** `Cache-Control` override and Range on SeaweedFS behind nginx (signature checked only offline); a real browser player, OPFS or Service Worker; `migrate:up` on `everest_db` (branch not merged).
+- **Incident:** a direct `node --test tests/integration/lessons.test.js` run hit `everest_db` and was stopped; its fixtures (11 users, 3 courses created at 10:42) were removed in one transaction; nothing else touched.
 
 ## 2026-11-14 — Resumable lesson video uploads (`feature/video-upload`)
 
