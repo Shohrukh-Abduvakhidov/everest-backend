@@ -5,17 +5,22 @@ import env from '../src/configs/env.js';
 const { Client } = pg;
 const client = new Client(env.database);
 
+// Catalog after migration 20261116010000000 (41 migrations). Update together with every migration.
 const expected = {
-  tables: 89,
-  columns: 726,
-  foreignKeys: 173,
-  indexes: 328,
+  tables: 94,
+  columns: 774,
+  foreignKeys: 180,
+  indexes: 350,
   functions: 7,
   triggers: 11,
   roles: 4,
-  migrations: 33,
-  identityColumns: 69,
+  migrations: 41,
+  identityColumns: 73,
 };
+
+// UUID columns that are opaque values, not entity identifiers: the SMS idempotency key and the
+// device id an offline installation generates for itself (offline_devices, 2026-11-15).
+const allowedUuidColumns = ['offline_devices.device_key', 'sms_deliveries.idempotency_key'];
 
 try {
   await client.connect();
@@ -148,13 +153,12 @@ try {
     && uuidKeys.rowCount === 0
     && invalidEntityIds.rowCount === 0
     && invalidForeignKeys.rowCount === 0
-    && remainingUuidColumns.rowCount === 1
-    && remainingUuidColumns.rows[0].table_name === 'sms_deliveries'
-    && remainingUuidColumns.rows[0].column_name === 'idempotency_key'
-    && authorizationSeeds.rows[0].permissions === 36
-    && authorizationSeeds.rows[0].role_permissions === 86
-    && authorizationSeeds.rows[0].teacher_grants === 14
-    && authorizationSeeds.rows[0].student_grants === 0
+    && remainingUuidColumns.rows.map((row) => `${row.table_name}.${row.column_name}`).join(',')
+      === allowedUuidColumns.join(',')
+    && authorizationSeeds.rows[0].permissions === 38
+    && authorizationSeeds.rows[0].role_permissions === 92
+    && authorizationSeeds.rows[0].teacher_grants === 15
+    && authorizationSeeds.rows[0].student_grants === 1
     && permissionConstraintCode === '23514'
     && generatedIdentity.type === 'bigint'
     && /^[1-9][0-9]*$/.test(generatedIdentity.id);

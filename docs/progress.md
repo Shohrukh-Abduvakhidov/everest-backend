@@ -4,7 +4,14 @@ Updated: 2026-11-14.
 
 ## Current increment
 
-M12 PR 1 on `feat/m12-student-home-attempts` (awaiting review). Backend PRs up to #57 are merged; PRs up to #56 and frontend PRs up to #41 are deployed on the temporary VPS (this branch is not deployed).
+M12 PR 2 on `feat/m12-student-analytics` (awaiting review). M12 PR 1 is merged (PR #58) and not deployed yet. Backend PRs up to #56 and frontend PRs up to #41 are deployed on the temporary VPS.
+
+## 2026-11-14 — M12 PR 2: student analytics (`feat/m12-student-analytics`)
+
+- **What:** `GET /me/analytics`: `totals` (all-time watch seconds from merged `watched_ranges`, completed lessons, finished attempts), `firstAttempt` (all-time first attempts of course tests: count, average percent, pass rate over tests with a `passPercent`), `topics` (strong and weak topics over finished attempts of every kind in the last 90 days, decision D4). Formulas in `src/utils/learning-metrics.js`, sums in `src/repositories/student-analytics-repository.js`. No migration. Separate commit: `scripts/verify-database.js` expectations brought to the current catalog (41 migrations, 94 tables, 774 columns, 350 indexes, 38 permissions, 92 role grants, two opaque UUID columns).
+- **Checked:** disposable-database suite (real-storage test skipped): exit 0, 475 tests, 475 passed, 0 failed. New `tests/unit/learning-metrics.test.js` (8 tests: 5-question minimum, exactly 60 not weak, 59.99 weak, exactly 85 strong, 84.99 neither, zero possible points skipped, ordering and ties by numeric id, limit 5, first-attempt figures with and without thresholds and a timed-out attempt) and `tests/integration/student-analytics.test.js` (3 subtests: real topics and points with unanswered questions, window boundary exactly 90 days included and 1 s older excluded, empty and blocked accounts). `test:sources`, `test:integrity`, `test:server`, `test:migrations`: exit 0. `verify-database.js` on a freshly migrated disposable database: `valid: true`.
+- **Not checked:** HTTP routes with cookies (services called directly); the route on the server (not deployed).
+- **Next:** M12 PR 3 (staff summaries, decisions D1, D2, D5).
 
 ## 2026-11-14 — M12 PR 1: student home, attempt history, activity events (`feat/m12-student-home-attempts`)
 
