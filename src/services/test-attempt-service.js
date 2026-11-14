@@ -2,6 +2,7 @@ import { randomInt } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 
 import * as authRepository from '../repositories/auth-repository.js'
+import * as learningActivityRepository from '../repositories/learning-activity-repository.js'
 import * as attemptRepository from '../repositories/test-attempt-repository.js'
 import { withTransaction } from '../repositories/transaction-repository.js'
 import AppError from '../utils/app-error.js'
@@ -42,6 +43,7 @@ function dependencies(overrides = {}) {
       clock: overrides.clock || (() => new Date()),
       shuffle: overrides.shuffle || shuffled,
       completeLessons: overrides.completeLessons || completeTestLessonsService,
+      activity: overrides.activity || learningActivityRepository,
       // storage / clock / questionImages for the image URLs of question content.
       images: overrides,
    }
@@ -247,6 +249,15 @@ async function finalizeAttempt(deps, client, attempt, { status, submittedAt, act
    await deps.completeLessons({
       attempt: { ...attempt, status, score, max_score: maxScore },
       completedAt: now,
+   }, client)
+   // Idempotent per attempt; the sweep, the lazy expiry and the student's submit all end here.
+   await deps.activity.recordActivityEvent({
+      userId: attempt.user_id,
+      attemptId: attempt.id,
+      code: 'attempt_finished',
+      sourceEventKey: `attempt_finished:${attempt.id}`,
+      occurredAt: submittedAt,
+      metadata: { testId: attempt.test_id, status },
    }, client)
    await deps.auth.appendAuditEvent({
       actorUserId: actorId,
@@ -669,6 +680,7 @@ export {
    listAttemptQuestionViewsService,
    listMyAssignmentsService,
    safeAttempt,
+   safeLearnerAssignment,
    safeQuestionBase,
    saveAnswerService,
    startAttemptInTransactionService,

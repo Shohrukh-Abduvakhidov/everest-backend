@@ -2,6 +2,7 @@ import env from '../configs/env.js'
 import { getStorageProvider } from '../providers/storage/index.js'
 import * as authRepository from '../repositories/auth-repository.js'
 import * as learnerLessonRepository from '../repositories/learner-lesson-repository.js'
+import * as learningActivityRepository from '../repositories/learning-activity-repository.js'
 import * as lessonRepository from '../repositories/lesson-repository.js'
 import * as attemptRepository from '../repositories/test-attempt-repository.js'
 import { withTransaction } from '../repositories/transaction-repository.js'
@@ -28,6 +29,7 @@ const completionRatio = 0.9
 function dependencies(overrides = {}) {
    return {
       learner: overrides.learner || learnerLessonRepository,
+      activity: overrides.activity || learningActivityRepository,
       lessons: overrides.repository || lessonRepository,
       attempts: overrides.attempts || attemptRepository,
       auth: overrides.auth || authRepository,
@@ -406,6 +408,7 @@ async function saveLessonProgressService(userId, courseIdValue, lessonIdValue, b
    let watchedRanges = Array.isArray(current?.watched_ranges) ? current.watched_ranges : []
    let reported = false
    let frequent = null
+   let watchGrowthSeconds = 0
    if (hasVideo) {
       if (body.completed !== undefined) {
          throw validationError('completed', 'Video lesson completion is derived from watched time')
@@ -420,8 +423,10 @@ async function saveLessonProgressService(userId, courseIdValue, lessonIdValue, b
       if (!reportedRanges) throw validationError('watchedRanges')
       frequent = tooFrequent(deps, current)
       reported = true
+      const uniqueBefore = totalSeconds(watchedRanges)
       watchedRanges = mergeRanges(watchedRanges, reportedRanges)
       const unique = totalSeconds(watchedRanges)
+      watchGrowthSeconds = Math.max(0, unique - uniqueBefore)
       watchedSeconds = Math.max(watchedSeconds, unique)
       if (!completesByTest && duration && unique >= Math.ceil(duration * completionRatio)) {
          completed = true
@@ -441,16 +446,39 @@ async function saveLessonProgressService(userId, courseIdValue, lessonIdValue, b
    )
    if (body.revision !== currentRevision) throw conflictError
    if (frequent) throw frequent
-   const written = await deps.learner.writeProgress({
-      userId: actorId,
-      lessonId: lesson.id,
-      status: completed ? 'completed' : 'in_progress',
-      playbackSeconds,
-      watchedSeconds,
-      completed,
-      revision: body.revision,
-      watchedRanges,
-      reported,
+   // The progress row and its activity events commit together; a stale revision writes nothing.
+   const now = deps.clock()
+   const newlyCompleted = completed && current?.status !== 'completed'
+   const written = await deps.transaction(async (client) => {
+      const row = await deps.learner.writeProgress({
+         userId: actorId,
+         lessonId: lesson.id,
+         status: completed ? 'completed' : 'in_progress',
+         playbackSeconds,
+         watchedSeconds,
+         completed,
+         revision: body.revision,
+         watchedRanges,
+         reported,
+      }, client)
+      if (!row) return null
+      await deps.activity.addWatchSeconds({
+         userId: actorId,
+         lessonId: lesson.id,
+         seconds: watchGrowthSeconds,
+         at: now,
+      }, client)
+      if (newlyCompleted) {
+         await deps.activity.recordActivityEvent({
+            userId: actorId,
+            lessonId: lesson.id,
+            code: 'lesson_completed',
+            sourceEventKey: `lesson_completed:${lesson.id}`,
+            occurredAt: now,
+            metadata: { by: hasVideo ? 'video' : 'manual' },
+         }, client)
+      }
+      return row
    })
    if (!written) throw conflictError
    return { progress: safeProgress(written) }

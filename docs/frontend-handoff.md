@@ -957,6 +957,59 @@ Response: `{ attemptQuestionId, answer, revision, savedAt, serverNow }`.
 
 `openAttemptId` is the running exam, if any ("continue" button).
 
+### Student home (M12 PR 1, 2026-11-16)
+
+Two read-only routes for the signed-in student. Any active account may call them (students, and staff for their own data); there is no permission. `403 ACCOUNT_NOT_ACTIVE` for a blocked account.
+
+**`GET /me/home`**: one request for the whole home page.
+
+```json
+{
+  "data": {
+    "continueLesson": {
+      "courseId": "12", "courseTitle": "…", "moduleId": "40", "lessonId": "301", "title": "…",
+      "playbackSeconds": 412, "durationSeconds": 1800, "updatedAt": "2026-11-16T09:12:00.000Z"
+    },
+    "courses": [{ "id": "12", "title": "…", "subject": { "id": "3", "color": "green", "title": "…" },
+      "moduleCount": 4, "lessonCount": 36, "progress": { "completedLessons": 9, "totalLessons": 36, "percent": 25 },
+      "enrollment": { "state": "active", "beginsAt": "…", "expiresAt": null }, "lastActivityAt": "…" }],
+    "tests": {
+      "open": [{ "id": "88", "testId": "70", "title": "…", "courseId": "12", "courseTitle": "…", "state": "open",
+        "opensAt": "…", "closesAt": "…", "deadlineAt": "…", "questionCount": 20, "timeLimitMinutes": 30,
+        "maxAttempts": 2, "attempts": { "status": "not_started", "attemptId": null, "remainingAttempts": 2 } }],
+      "upcoming": []
+    },
+    "readiness": {
+      "empty": false, "readinessPercent": 54.55, "completedTrainings": 2, "readinessWindow": 5,
+      "subjects": [{ "subjectId": "135", "subjectCode": "…", "titles": {}, "color": "orange", "readinessPercent": 54.55, "trainings": 2, "lastSubmittedAt": "…" }],
+      "lastMockExam": { "attemptId": "9", "score": "112.00", "maxScore": "160.00", "percent": 70, "submittedAt": "…" }
+    },
+    "recentResults": [{ "attemptId": "31", "origin": "authored", "title": "…", "testId": "70", "assignmentId": "88",
+      "courseId": "12", "subjectId": "3", "attemptNumber": 1, "status": "graded", "score": "16.00", "maxScore": "20.00",
+      "percent": 80, "passPercent": 60, "passed": true, "startedAt": "…", "submittedAt": "…" }],
+    "week": {
+      "timeZone": "Asia/Dushanbe",
+      "days": [{ "date": "2026-11-10", "watchSeconds": 1260, "lessonsCompleted": 1, "attemptsFinished": 0 }],
+      "totalWatchSeconds": 5400
+    },
+    "serverNow": "2026-11-16T09:30:00.000Z"
+  }
+}
+```
+
+- **`continueLesson`** is `null` when no unfinished lesson is accessible. Link to `/courses/{courseId}/lessons/{lessonId}` and seek to `playbackSeconds` (`durationSeconds` is `null` for a lesson without a video). Nothing guesses a "next" lesson.
+- **`courses`** is the `GET /courses` item plus `lastActivityAt` (`null` until a lesson is opened), most recently active first. Scheduled and expired courses are included with their `enrollment.state`.
+- **`tests`**: course tests across every course. `open` = the window is open and the student has a running attempt or attempts left. `upcoming` = not open yet. Each list has at most 10 items. `deadlineAt` is the earliest of the window end, the personal window end and the running attempt deadline; show a countdown from `serverNow`, not from the device clock. Trainer and mock exam tests are never listed.
+- **`readiness`**: the NCT trainer figures (same formula as `GET /trainer/overview`) for any account. `empty: true` and `readinessPercent: null` when the student has no finished trainings. `lastMockExam` is separate and is not part of `readinessPercent`.
+- **`recentResults`**: the last 5 finished attempts of every kind. For `trainer` and `mock_exam` the `title`, `testId` and `assignmentId` are `null`; build the title from `origin` and `subjectId` (subject names come from `/trainer/catalog`). `passed` is `null` without a pass threshold. No answers or keys are ever included.
+- **`week`**: seven local days, oldest first, the last one is today in the profile time zone (`UTC` when the zone is unknown). `watchSeconds` is unique watched time reported by the player. Activity is recorded from this release on (completed lessons and finished attempts from before it are filled in once; watch time before it is 0).
+
+**`GET /me/attempts?origin&subjectId&limit&offset`**: finished attempts of every kind, newest first.
+
+- `origin`: `authored` (course tests), `trainer` or `mock_exam`. `subjectId`: course subject, trainer subject, or any subject inside a mock exam. `limit` 1–100 (default 20), `offset` 0–100000. Anything else is `400 VALIDATION_ERROR`.
+- Response: `{ "attempts": [FinishedAttempt], "pagination": { "limit": 20, "offset": 0, "total": 57, "hasMore": true } }`. `FinishedAttempt` is the `recentResults` item above.
+- Only `graded` and `expired` attempts are listed (a running attempt is not history). Open a result with `GET /tests/attempts/{attemptId}/result` (course tests and trainings) or `GET /trainer/exams/{attemptId}/result` (mock exam).
+
 ### Admin: tests (M10)
 
 | Method | Path | Permission | Purpose |
@@ -1005,6 +1058,7 @@ As seeded by the migrations:
 | `tests.read`, `tests.manage`, `tests.assign`, `tests.results.read` | ✓ | ✓ | ✓ scoped | — |
 | `tests.results.regrade` | ✓ | ✓ | — | — |
 | `tests.publish` | ✓ | ✓ | — | — |
+| `progress.read` (no route uses it yet; staff progress views in M12 PR 3) | ✓ | ✓ | ✓ scoped | — |
 
 Notes:
 
