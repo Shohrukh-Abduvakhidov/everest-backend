@@ -1333,7 +1333,7 @@ The script prints pass or fail for the secrets, `CORS_ORIGINS`, `/health` and `/
 
 ### Not implemented (tables exist, no endpoints)
 
-16. Progress analytics (M12: home and profile summaries, group/course reports) and the activity API. Notes and favorites have endpoints (see §2).
+16. Progress analytics beyond the student home (M12 PR 2: profile analytics; PR 3: group and course reports) and an activity API. The home page (`GET /me/home`) and finished-attempt history (`GET /me/attempts`) exist. Notes and favorites have endpoints (see §2).
 17. Notifications and inbox, broadcast campaigns, Web Push.
 18. AI chat and budgets.
 19. Bonuses and achievements.
