@@ -2,8 +2,8 @@
 project: EVEREST Backend
 roadmap_version: 1
 current_milestone: M12
-current_status: done
-updated_at: 2026-11-07
+current_status: planned
+updated_at: 2026-11-14
 architecture: docs/architecture.md
 ---
 
@@ -189,7 +189,7 @@ This roadmap orders implementation; it does not replace the [current architectur
 
 ## M07-A — Media storage and resumable uploads
 
-- **Status:** In progress. Implemented and merged (PR #18). The tests that use a storage double pass; the real MinIO/S3 verification below is still open.
+- **Status:** Done. Merged in PR #18; lesson video uploads added in PR #54; deployed on the temporary VPS on 2026-11-14 (`docs/progress.md`, temporary VPS deployment).
 - **Goal:** Store original-quality videos and materials in S3-compatible storage through resumable, verified multipart uploads.
 - **Dependencies:** M05–M06; approved storage decisions (2026-10-29).
 - **Deliverables:**
@@ -201,12 +201,12 @@ This roadmap orders implementation; it does not replace the [current architectur
    - Seek-ready video only (superseded the remux hook in M07-B): MP4 with fast start, WebM with Cues first, QuickTime refused, `422 VIDEO_NOT_SEEKABLE`, no background jobs.
    - Local MinIO `docker-compose.yml` and the bucket configuration script.
 - **Verification:** Unit inspection tests and the PostgreSQL integration test `tests/integration/asset-uploads.test.js` (14 subtests after M07-B) pass against the storage double. The optional real-storage test is skipped automatically when storage is unreachable.
-- **Pending:** Real MinIO/S3 verification pending: install Docker Desktop (or the MinIO Windows binary), run docker-compose up, and run the optional real-storage test, including a 3 GB upload with a network interruption and resume.
+- **Real storage:** SeaweedFS replaced MinIO (locally and on the server). `tests/integration/real-storage.test.js` runs against local SeaweedFS: multipart upload, part listing for resume, complete, abort and a `206` Range read (`docs/progress.md`, 2026-11-13). On the server: bucket lifecycle (abort after 3 days) and CORS applied by `storage:configure`; a presigned GET through nginx returns `206` with `Accept-Ranges` and `Cache-Control`; the operator confirmed an interrupted upload resumes (2026-11-14).
 - **Exclusions:** No multi-quality video, HLS, `asset_variants`, transcoding or remux worker.
 
 ## M07-B — Lessons and protected delivery
 
-- **Status:** In progress. Implemented and merged (PR #19). The tests that use a storage double pass; the real MinIO/S3 verifications below are still open.
+- **Status:** Done. Merged in PR #19; deployed on the temporary VPS (`docs/progress.md`, temporary VPS deployment).
 - **Goal:** Deliver lessons and assets through access-aware contracts.
 - **Dependencies:** M07-A.
 - **Deliverables:**
@@ -219,17 +219,16 @@ This roadmap orders implementation; it does not replace the [current architectur
    - Lesson copy steps.
    - Migration `20261030020000000_add-lesson-playback.js` with the `lessons.*` permissions.
 - **Verification:** `tests/integration/lessons.test.js` (14 subtests, including direct editing of published lessons) passes against the storage double, together with the updated unit inspection and upload tests. `npm test` reports 174 tests (173 passed, 1 skipped); the disposable migration cycle passed 22/22/21/22.
-- **Pending:**
-   - Real MinIO/S3 verification pending: install Docker Desktop (or the MinIO Windows binary), run docker-compose up, and run the optional real-storage test, including a 3 GB upload with a network interruption and resume.
-   - Verify Range seeking of a real faststart mp4 through a signed URL against real storage.
+- **Real storage:** signed URLs verified against SeaweedFS behind nginx on the server: `206 Partial Content`, `Accept-Ranges: bytes`, `Content-Range`, `Cache-Control` from the signature, CORS for the app origin only. Checked on an image object; no lesson video was in the bucket yet. SeaweedFS ignores `If-Range` (answers `206` on an ETag mismatch); harmless because object keys are immutable.
 - **Exclusions:** Multi-quality video, HLS, `asset_variants`, workers and lesson favorites.
 
 ## M07-D — Video player backend (2026-11-15)
 
-- **Status:** Implemented on `feature/video-player-backend`, awaiting review. Not merged, not deployed.
+- **Status:** Done. Merged in PR #55; deployed together with frontend PRs #34–#41 on 2026-11-14 (migration applied on `everest_prod`, `OFFLINE_KEY_SECRET` set, frontend built with offline enabled).
 - **Deliverables:** chapters rules (1–120 titles, cleared on video replacement), unique-interval progress with a 10 s report interval and 90% completion, staff progress summary, playback URLs stable within a 6 h window with `Cache-Control`, watermark label, device registration and device-bound offline licenses (14 days, 2 devices, HMAC-derived AES-GCM key, never stored), license revocation with enrollment/module revocation. Migration `20261115010000000_add-video-player-state`.
 - **Verification:** see `docs/progress.md` (2026-11-15).
-- **Pending:** `Cache-Control` override and Range through SeaweedFS + nginx on the server; `OFFLINE_KEY_SECRET` on the server; frontend player, OPFS and Service Worker.
+- **Verified on the server:** `Cache-Control` override and `206` Range through SeaweedFS + nginx; CORS preflight for GET with Range and for part PUT; HTTPS on app, api and files hosts.
+- **Not verified:** a real lesson video played, seeked and downloaded offline in a browser.
 
 ## M-DOCS — OpenAPI specification and Swagger UI
 
@@ -266,7 +265,7 @@ This roadmap orders implementation; it does not replace the [current architectur
    - Answer keys (unknown → proposed → reviewer-verified), publication, archive and copy.
    - Migration `20261031010000000_add-question-bank-permissions.js`.
 - **Verified:** `tests/unit/question-content.test.js` and `tests/integration/question-bank.test.js` (9 subtests). `npm test`: 189 tests, 188 passed, 1 skipped. Migration cycle: 23/23/22/23.
-- **Follow-up (awaiting review, `feat/question-image-urls`):** presigned `url`/`expiresAt` on image blocks in admin question detail and learner attempt/result responses. No migration. `tests/integration/question-image-urls.test.js` passes on a disposable database (`npm test`: 376 passed). Not checked against real MinIO/S3.
+- **Follow-up (merged in PR #43, deployed):** presigned `url`/`expiresAt` on image blocks in admin question detail and learner attempt/result responses. No migration. `tests/integration/question-image-urls.test.js` passes on a disposable database (`npm test`: 376 passed). Presigned image GETs return `200` through SeaweedFS + nginx on the server.
 - **Goal:** Manage reviewed, publishable assessment content.
 - **Dependencies:** M02F, M07-A asset contracts.
 - **Deliverables:** Subjects, sections, topics/translations, banks, questions/options/matching, answer keys, topics/assets/sources, review, and publication.
@@ -276,7 +275,7 @@ This roadmap orders implementation; it does not replace the [current architectur
 
 ## M09 — Indexed book import
 
-- **Status:** Done (merged in PR #24). Real S3/MinIO import is not verified; it shares the open M07-A storage check.
+- **Status:** Done (merged in PR #24). Imported banks and their 470 storage objects were moved to the server and checked by hash (`docs/progress.md`, temporary VPS deployment).
 - **Implemented:**
    - CLI import of `everest.question-import.v1` packages (directory or ZIP) with a dry run.
    - Recorded idempotent runs with per-record errors and warnings, batches of ≤100 questions per transaction.
@@ -287,9 +286,9 @@ This roadmap orders implementation; it does not replace the [current architectur
    - Migration `20261031030000000_add-question-import-support.js`.
 - **Verified:** `tests/integration/question-import.test.js` (15 subtests) on real PostgreSQL with the storage double. Migration cycle 25/25/24/25. `verify-database.js` valid.
 - **Real packages:** the Tajik (972 questions) and biology pilot (20 questions) packages pass a dry run with 0 errors and import fully into a disposable database.
-- **Not verified:** real S3/MinIO storage, very large packages. `npm test` runs in a disposable database: 220 tests, 219 passed, 1 skipped.
-- **Follow-up (awaiting review, `feat/import-answer-keys`):** `npm run import:answer-keys` attaches `proposed` keys from an `everest.answer-key-import.v1` sidecar file to imported drafts, with optional `--set-matching-rules`. No migration. `tests/integration/answer-key-import.test.js` (11 subtests) and `tests/unit/answer-key-import.test.js` pass on a disposable database. **Not run** against the real Tajik bank: it is not imported in local `everest_db`. Merged in PR #41.
-- **Follow-up (awaiting review, `feat/bulk-verify-publish`):** `npm run verify:keys` and `npm run publish:questions` verify proposed keys and publish ready drafts of one bank through the admin services (runbook §7). No migration. Unit and integration tests pass on a disposable database (`npm test`: 371 passed). **Not run** against `nct-tg-2026`.
+- **Not verified:** very large packages. `npm test` runs in a disposable database: 220 tests, 219 passed, 1 skipped.
+- **Follow-up (merged in PR #41, deployed):** `npm run import:answer-keys` attaches `proposed` keys from an `everest.answer-key-import.v1` sidecar file to imported drafts, with optional `--set-matching-rules`. No migration. `tests/integration/answer-key-import.test.js` (11 subtests) and `tests/unit/answer-key-import.test.js` pass on a disposable database.
+- **Follow-up (merged in PR #42, dry-run fix PR #44, deployed):** `npm run verify:keys` and `npm run publish:questions` verify proposed keys and publish ready drafts of one bank through the admin services (runbook §7). No migration. Unit and integration tests pass on a disposable database (`npm test`: 371 passed). **Not run** against `nct-tg-2026`.
 - **Goal:** Import reviewable indexed question content safely and repeatably.
 - **Dependencies:** M07–M08 and approved input formats.
 - **Deliverables:** Tajik, mathematics, and biology importers; batch validation; assets/pages; duplicate detection; errors; review; dry run; idempotency; no automatic publication.
@@ -299,7 +298,9 @@ This roadmap orders implementation; it does not replace the [current architectur
 
 ## M10 — Test constructor and assignments
 
-- **Status:** In progress. Merged (PR #31, follow-up PR #33), but two listed deliverables are not built: parameter-based question selection and course or lesson audiences (see `docs/decisions.md`). Under the status rules it is not Done until they are built or removed from the deliverables.
+- **Status:** In progress. Merged (PR #31, follow-up PR #33) and deployed. Not Done until these two deliverables are built or removed from the list (see `docs/decisions.md`):
+   1. Parameter-based question selection in the test constructor (the NCT trainer selects by parameters for practice only).
+   2. Course and lesson audiences for assignments (only user and group audiences exist).
 - **Goal:** Author, publish, and assign tests with explicit policies.
 - **Dependencies:** M04–M06 and M08.
 - **Deliverables:** Test creation, manual/parameter selection, publication, course/user/group audiences, timing, and attempt policies.
@@ -311,14 +312,14 @@ This roadmap orders implementation; it does not replace the [current architectur
 
 ## M11 — Attempts, autosave and grading
 
-- **Status:** Done (merged in PR #35, `3bdeed7`, and PR #36, `233c10b`). Not verified: `worker:attempts` as a separate PM2 process.
+- **Status:** Done (merged in PR #35, `3bdeed7`, and PR #36, `233c10b`). `worker:attempts` runs as its own container on the server (docker compose instead of PM2).
 - **Goal:** Run durable, timed, safely graded attempts.
 - **Dependencies:** M06, M08, M10, M19 for expiry work.
 - **Deliverables:** Start, immutable snapshots, revision autosave, server timer, submit/expiry, grading, score revisions, idempotency, reveal policy, and student-safe serialization.
 - **Verification:** Ownership, timer, concurrent revision, finalization, expiry, grading, idempotency, and private-key/snapshot redaction tests.
 - **Documentation updates:** API, decisions, architecture, progress, roadmap.
-- **Fix (2026-11-08, `fix/lesson-completion-and-staff-passed`, awaiting review):** lessons with a test complete only by the test result (`409 LESSON_COMPLETES_BY_TEST` from the player); staff attempts carry `passed`.
-- **Extra attempts (2026-11-07, `feat/m11-extra-attempts`, awaiting review):**
+- **Fix (2026-11-08, merged in PR #40):** lessons with a test complete only by the test result (`409 LESSON_COMPLETES_BY_TEST` from the player); staff attempts carry `passed`.
+- **Extra attempts (2026-11-07, merged in PR #38; teacher grant PR #39):**
    - Append-only `test_attempt_grants` and the permission `tests.attempts.grant` (owner, admin and teacher within their own groups).
    - `GET|POST /admin/tests/:testId/assignments/:assignmentId/users/:userId/extra-attempts`.
    - The effective limit applies to starts, learner counts and reveal.
@@ -326,13 +327,13 @@ This roadmap orders implementation; it does not replace the [current architectur
    - `npm test` on a disposable database: 339 tests, 338 passed, 0 failed, 1 skipped. `test:migrations`: 32/32/31/32.
 - **Exclusions:** Unapproved partial scoring or reveal policy.
 - **NCT trainer (2026-11-10, merged in PR #46):** generated practice tests from published NCT questions on the M11 engine; `/trainer/catalog`, `/trainer/attempts`. Migration `20261110010000000`. `npm run test:auth` on a disposable database: 392 passed, 0 failed. Its course-enrollment access rule was replaced on 2026-11-11. It covers parameter-based selection for practice only; the M10 constructor deliverable stays open.
-- **NCT trainer access and overview (2026-11-11, `feat/nct-trainer-access-overview`, awaiting review):** access by active student account (`trainer.use`), no course; `GET /trainer/overview`; catalog topics. Migration `20261111010000000`. `npm run test:auth` on a disposable database: 396 passed, 0 failed.
-- **NCT mock exam (2026-11-13, `feat/nct-mock-exam`, awaiting review):** full exam simulation by answer-sheet blueprint (`nct-a5`: 105 questions, 220 minutes, 4 × 40 = 160 points) on the M11 engine; `/trainer/exams` (blueprints, create, history, view, answer, flag, submit, result). Server deadline with lazy expiry plus the attempt sweep. Migration `20261113010000000`. `npm run test:auth` on a disposable database: 416 tests, 416 passed, 0 failed. `test:migrations` 38/38/37/38.
+- **NCT trainer access and overview (2026-11-11, merged in PR #47; staff access PR #48):** access by active student account (`trainer.use`), no course; `GET /trainer/overview`; catalog topics. Migration `20261111010000000`. `npm run test:auth` on a disposable database: 396 passed, 0 failed.
+- **NCT mock exam (2026-11-13, merged in PR #49; cells questions in the trainer PR #53):** full exam simulation by answer-sheet blueprint (`nct-a5`: 105 questions, 220 minutes, 4 × 40 = 160 points) on the M11 engine; `/trainer/exams` (blueprints, create, history, view, answer, flag, submit, result). Server deadline with lazy expiry plus the attempt sweep. Migration `20261113010000000`. `npm run test:auth` on a disposable database: 416 tests, 416 passed, 0 failed. `test:migrations` 38/38/37/38.
 - **Follow-up (2026-11-07, merged in PR #36):** server-side lesson completion by test (submit, expiry, worker, regrade) by the owner's rule; `passPercent` in results; attempt history after revocation; `testId` in lesson lists; course `progress`. `npm test` on a disposable database: 330 tests, 329 passed, 0 failed, 1 skipped. No migration.
 
 ## M12 — Learning progress and analytics
 
-- **Status:** Planned
+- **Status:** Planned. Next milestone; the plan awaits owner approval.
 - **Goal:** Produce access-controlled learning insights.
 - **Dependencies:** M07 and M11.
 - **Deliverables:** Lesson/course progress, subject readiness, test history, strong/weak topics, profile analytics, homepage summaries, and required first-attempt statistics.
@@ -382,7 +383,7 @@ This roadmap orders implementation; it does not replace the [current architectur
 
 ## M17 — Administration API
 
-- **Status:** Partial. The admin-accounts slice is merged (PR #25):
+- **Status:** In progress (partial). The admin-accounts slice is merged (PR #25):
    - `GET /admin/users` (filters, search, `total`);
    - `total` on `GET /admin/users/pending`;
    - `PUT /admin/users/:userId/roles`;
@@ -408,7 +409,10 @@ This roadmap orders implementation; it does not replace the [current architectur
 
 ## M19 — Worker and background jobs
 
-- **Status:** Planned
+- **Status:** In progress (partial). Two dedicated workers exist and run as separate containers on the server:
+   - `worker:attempts`: finalizes expired attempts and mock exams (row locks, idempotent) and, with storage configured, expires abandoned uploads and aborts them in storage (PR #54, compose fix PR #56).
+   - `worker:imports`: processes question packages uploaded over HTTP (PR #33).
+- **Missing:** the general PostgreSQL queue on `background_jobs` with leases, retries and dead letters; notification delivery; analytics refresh; a multi-process lease-competition test.
 - **Goal:** Process durable asynchronous work safely across PM2 processes.
 - **Dependencies:** M01; introduced when the first domain needs it.
 - **Deliverables:** PostgreSQL queue, leases, retries, idempotency, attempt expiry, notification delivery, analytics refresh, and multi-process safety.
@@ -418,7 +422,9 @@ This roadmap orders implementation; it does not replace the [current architectur
 
 ## M20 — Security and reliability hardening
 
-- **Status:** Planned.
+- **Status:** In progress (partial).
+- **Done:** `TRUST_PROXY` with a forged-`X-Forwarded-For` test (PR #50); auth rate limits, lockout and CSRF (M02F-B); Swagger off in production; disposable migration down/up cycle on every migration PR; local daily database dumps with a weekly `restore-check.sh` on the server.
+- **Remaining:** k6 load test ("300 students start an exam"), dependency audit, server hardening (stage 2c: kernel and package updates with reboot, sshd password login off, ufw, fail2ban, in a window agreed with the co-hosted site).
 - **Goal:** Audit and harden the completed system before deployment.
 - **Dependencies:** Implemented feature milestones and a safe rollback-test database.
 - **Deliverables:** Authentication/authorization/concurrency/transaction reviews, secret handling, dependency audit, request limits, secure headers, logging, backup restore, and disposable migration rollback test.
@@ -428,7 +434,9 @@ This roadmap orders implementation; it does not replace the [current architectur
 
 ## M21 — Deployment
 
-- **Status:** Planned
+- **Status:** In progress (partial). Running on a temporary VPS shared with another project, on sslip.io hosts.
+- **Done:** docker compose stack (PostgreSQL 18, backend, two workers, SeaweedFS, frontend) with memory limits; `deploy.sh` with `:prev` image rollback and a pre-deploy dump; host nginx sites `everest-app`, `everest-api`, `everest-files` (large parts, Range, streaming) with Let's Encrypt TLS; daily local backups and weekly restore check; `TRUST_PROXY`; data moved to `everest_prod` (PRs #51, #52, #56).
+- **Remaining:** stage 2c server hardening; off-site encrypted backups (Backblaze B2); Telegram alerts, uptime and disk monitoring; the final domain `everestlc.tj` (env, storage CORS, frontend rebuild, certificates).
 - **Goal:** Operate EVEREST safely in production.
 - **Dependencies:** M20 and approved infrastructure/provider choices.
 - **Deliverables:** VPS, PostgreSQL, PM2, Nginx/TLS, secret management, storage, daily backups, monitoring, log rotation, deployment and rollback runbooks.
