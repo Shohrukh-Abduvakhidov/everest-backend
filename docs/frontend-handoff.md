@@ -957,9 +957,9 @@ Response: `{ attemptQuestionId, answer, revision, savedAt, serverNow }`.
 
 `openAttemptId` is the running exam, if any ("continue" button).
 
-### Student home (M12 PR 1, 2026-11-16)
+### Student home (M12 PR 1 and PR 2, 2026-11-16)
 
-Two read-only routes for the signed-in student. Any active account may call them (students, and staff for their own data); there is no permission. `403 ACCOUNT_NOT_ACTIVE` for a blocked account.
+Three read-only routes for the signed-in student. Any active account may call them (students, and staff for their own data); there is no permission. `403 ACCOUNT_NOT_ACTIVE` for a blocked account.
 
 **`GET /me/home`**: one request for the whole home page.
 
@@ -1009,6 +1009,32 @@ Two read-only routes for the signed-in student. Any active account may call them
 - `origin`: `authored` (course tests), `trainer` or `mock_exam`. `subjectId`: course subject, trainer subject, or any subject inside a mock exam. `limit` 1–100 (default 20), `offset` 0–100000. Anything else is `400 VALIDATION_ERROR`.
 - Response: `{ "attempts": [FinishedAttempt], "pagination": { "limit": 20, "offset": 0, "total": 57, "hasMore": true } }`. `FinishedAttempt` is the `recentResults` item above.
 - Only `graded` and `expired` attempts are listed (a running attempt is not history). Open a result with `GET /tests/attempts/{attemptId}/result` (course tests and trainings) or `GET /trainer/exams/{attemptId}/result` (mock exam).
+
+
+**`GET /me/analytics`** (M12 PR 2): profile figures.
+
+```json
+{
+  "data": {
+    "windowDays": 90,
+    "since": "2026-08-18T09:30:00.000Z",
+    "totals": { "watchSeconds": 18450, "lessonsCompleted": 23, "attemptsFinished": 41 },
+    "firstAttempt": { "count": 12, "averagePercent": 71.5, "withPassPercent": 8, "passed": 6, "passRate": 75 },
+    "topics": {
+      "minQuestions": 5, "weakBelowPercent": 60, "strongFromPercent": 85,
+      "strong": [{ "topicId": "51", "topicCode": "algebra", "subjectId": "3", "subjectCode": "math",
+        "titles": { "tg": "…", "ru": "…" }, "questions": 18, "points": "17.00", "maxPoints": "18.00", "percent": 94.44 }],
+      "weak": [{ "topicId": "54", "topicCode": "spelling", "subjectId": "135", "subjectCode": "…",
+        "titles": {}, "questions": 7, "points": "2.00", "maxPoints": "7.00", "percent": 28.57 }]
+    }
+  }
+}
+```
+
+- **`totals`** are all-time. `watchSeconds` is the unique watched time of every lesson (merged `watchedRanges`), so rewatching does not add up. `lessonsCompleted` counts completed lessons; `attemptsFinished` counts finished attempts of every kind.
+- **`firstAttempt`**: all-time first attempts of course tests (no trainer or mock exam). `averagePercent` is the mean of their percentages (`null` with none). `passRate` = `passed` ÷ `withPassPercent` × 100 and counts only tests with a pass threshold; it is `null` when none had one.
+- **`topics`**: finished attempts of every kind (course tests, trainer, mock exam) submitted in the last `windowDays` days (from `since`). Per topic: `points` ÷ `maxPoints`; an unanswered question earns 0. A topic appears only with at least `minQuestions` questions. `weak` is below `weakBelowPercent`, `strong` from `strongFromPercent` (on the rounded `percent`: exactly 60 is not weak, exactly 85 is strong). Topics in between are in neither list. At most 5 per list; weak lists the lowest first, strong the highest first, ties by more questions. Show the thresholds from the response instead of hard-coding them.
+- To practise a weak topic, start a training with `POST /trainer/attempts { subject: subjectId, topicCode, difficulty: "mixed", count }` when the topic exists in `/trainer/catalog`.
 
 ### Admin: tests (M10)
 
@@ -1333,7 +1359,7 @@ The script prints pass or fail for the secrets, `CORS_ORIGINS`, `/health` and `/
 
 ### Not implemented (tables exist, no endpoints)
 
-16. Progress analytics beyond the student home (M12 PR 2: profile analytics; PR 3: group and course reports) and an activity API. The home page (`GET /me/home`) and finished-attempt history (`GET /me/attempts`) exist. Notes and favorites have endpoints (see §2).
+16. Staff progress views (M12 PR 3: group and course reports) and an activity API. The student home (`GET /me/home`), finished-attempt history (`GET /me/attempts`) and profile analytics (`GET /me/analytics`) exist. Notes and favorites have endpoints (see §2).
 17. Notifications and inbox, broadcast campaigns, Web Push.
 18. AI chat and budgets.
 19. Bonuses and achievements.

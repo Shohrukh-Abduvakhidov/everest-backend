@@ -1,4 +1,8 @@
-import { getStudentHomeService, listStudentAttemptsService } from '../services/student-home-service.js'
+import {
+   getStudentAnalyticsService,
+   getStudentHomeService,
+   listStudentAttemptsService,
+} from '../services/student-home-service.js'
 
 function overrides(req) {
    return req.app.locals.serviceDependencies.studentHome
@@ -22,4 +26,13 @@ async function listStudentAttemptsController(req, res, next) {
    }
 }
 
-export { getStudentHomeController, listStudentAttemptsController }
+async function getStudentAnalyticsController(req, res, next) {
+   try {
+      const data = await getStudentAnalyticsService(req.auth.userId, overrides(req))
+      res.json({ data })
+   } catch (error) {
+      next(error)
+   }
+}
+
+export { getStudentAnalyticsController, getStudentHomeController, listStudentAttemptsController }

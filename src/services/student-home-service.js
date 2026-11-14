@@ -1,9 +1,11 @@
+import * as studentAnalyticsRepository from '../repositories/student-analytics-repository.js'
 import * as studentHomeRepository from '../repositories/student-home-repository.js'
 import * as attemptRepository from '../repositories/test-attempt-repository.js'
 import AppError from '../utils/app-error.js'
 import { scorePercent } from '../utils/attempt-grading.js'
 import { attemptPassed } from '../utils/attempt-policy.js'
 import { normalizeInternalId } from '../utils/internal-id.js'
+import { classifyTopics, firstAttemptStats, topicRules } from '../utils/learning-metrics.js'
 import { parseUserId, validationError } from './course-service.js'
 import { listLearnerCoursesService } from './learner-course-service.js'
 import {
@@ -17,12 +19,15 @@ const origins = ['authored', 'trainer', 'mock_exam']
 const homeListLimit = 10
 const recentResultsLimit = 5
 const weekDays = 7
+// Decision D4: topics look back 90 days.
+const analyticsWindowDays = 90
 
 // Optional overrides for tests: the repositories, the clock and the overrides of the services
 // this one composes (courses, trainer readiness, attempt finalization).
 function dependencies(overrides = {}) {
    return {
       repository: overrides.repository || studentHomeRepository,
+      analytics: overrides.analytics || studentAnalyticsRepository,
       attempts: overrides.attempts || attemptRepository,
       clock: overrides.clock || (() => new Date()),
       courses: overrides.courses,
@@ -270,4 +275,35 @@ async function listStudentAttemptsService(userId, query = {}, overrides) {
    }
 }
 
-export { getStudentHomeService, listStudentAttemptsService, safeFinishedAttempt }
+// GET /me/analytics: profile figures. Totals and first attempts are all-time; topics use the
+// last analyticsWindowDays days, measured from the attempt's submit (or expiry) time.
+async function getStudentAnalyticsService(userId, overrides) {
+   const deps = dependencies(overrides)
+   const actorId = parseUserId(userId)
+   await requireActiveAccount(deps, actorId)
+   const now = deps.clock()
+   const since = new Date(now.getTime() - analyticsWindowDays * 86400000)
+   const [totals, firstAttempts, topicRows] = await Promise.all([
+      deps.analytics.findLearningTotals(actorId),
+      deps.analytics.listFirstAttempts(actorId),
+      deps.analytics.listTopicTotals(actorId, since),
+   ])
+   return {
+      windowDays: analyticsWindowDays,
+      since: since.toISOString(),
+      totals: {
+         watchSeconds: Number(totals.watch_seconds),
+         lessonsCompleted: totals.lessons_completed,
+         attemptsFinished: totals.attempts_finished,
+      },
+      firstAttempt: firstAttemptStats(firstAttempts),
+      topics: {
+         minQuestions: topicRules.minQuestions,
+         weakBelowPercent: topicRules.weakBelowPercent,
+         strongFromPercent: topicRules.strongFromPercent,
+         ...classifyTopics(topicRows),
+      },
+   }
+}
+
+export { getStudentAnalyticsService, getStudentHomeService, listStudentAttemptsService, safeFinishedAttempt }
