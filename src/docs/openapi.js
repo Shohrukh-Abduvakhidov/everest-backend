@@ -476,7 +476,7 @@ const schemas = {
          readinessPercent: nullable(num()),
          completedTrainings: int(),
          readinessWindow: int(),
-         subjects: arr(anyObject('subjectId, subjectCode, titles, color, readinessPercent, trainings, lastSubmittedAt')),
+         subjects: arr(anyObject('Every trainable subject, ordered by title: subjectId, subjectCode, titles, color, readinessPercent (null without trainings), trainings, lastSubmittedAt')),
          lastMockExam: nullable(obj({ attemptId: id(), score: nullable(testPoints()), maxScore: testPoints(), percent: num(), submittedAt: dt() })),
       }, ['empty', 'readinessPercent', 'completedTrainings', 'readinessWindow', 'subjects', 'lastMockExam']),
       recentResults: arr(ref('FinishedAttempt')),
