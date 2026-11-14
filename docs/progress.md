@@ -6,11 +6,11 @@ Updated: 2026-11-14.
 
 M12 PR 2 on `feat/m12-student-analytics` (awaiting review). M12 PR 1 is merged (PR #58) and not deployed yet. Backend PRs up to #56 and frontend PRs up to #41 are deployed on the temporary VPS.
 
-## 2026-11-14 — Home readiness lists every trainable subject ()
+## 2026-11-14 — Home readiness lists every trainable subject (`feat/home-readiness-all-subjects`)
 
-- **What:**   now contains every trainable subject (published question with a verified key in a bank with the trainer prefix, the  set) plus subjects the student already trained, ordered by title in the primary language then id. Untrained subjects: , , . The overall figure is the mean of subjects with a value.  is unchanged. No migration.  has no active or sort_order column, so "active" means trainable (decisions.md).
-- **Checked:** disposable-database suite (real-storage test skipped): exit 0, 476 passed, 0 failed (new subtest in : new student gets all trainable subjects with null, one trained subject gets 75 and the rest null, overall ignores nulls, draft-only and non-trainer-bank subjects excluded, withdrawn trained subject stays). , , , : exit 0; : valid. Lint: the project has no lint script or ESLint config, so none was run.
-- **Not checked:** HTTP route with cookies; the server.
+- **What:** `GET /me/home` `readiness.subjects` now contains every trainable subject (a published question with a verified key in a bank with the trainer prefix, the `/trainer/catalog` set) plus subjects the student already trained, ordered by title in the primary language, then id. Untrained subjects: `readinessPercent: null`, `trainings: 0`, `lastSubmittedAt: null`. The overall figure is the mean of the subjects with a value. `/trainer/overview` is unchanged. No migration. `subjects` has no active or sort_order column, so "active" means trainable (decisions.md).
+- **Checked:** disposable-database suite (real-storage test skipped): exit 0, 476 passed, 0 failed. New subtest in `student-home.test.js`: a new student gets all trainable subjects with null; one trained subject gets 75 and the rest null; the overall figure ignores nulls; draft-only and non-trainer-bank subjects are excluded; a trained subject stays after its questions are withdrawn. `test:sources`, `test:integrity`, `test:server`, `test:migrations`: exit 0; `verify-database.js`: valid. Lint: the project has no lint script or ESLint config, so none was run.
+- **Not checked:** the HTTP route with cookies; the server.
 
 ## 2026-11-14 — M12 PR 2: student analytics (`feat/m12-student-analytics`)
 
