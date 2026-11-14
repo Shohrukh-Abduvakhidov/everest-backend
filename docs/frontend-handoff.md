@@ -1238,10 +1238,10 @@ The script prints pass or fail for the secrets, `CORS_ORIGINS`, `/health` and `/
 | RBAC & audit | `roles`, `permissions`, `role_permissions`, `user_roles`, `audit_events` | user_roles (user, role); audit_events (actor, subject, entity) | via account admin |
 | Groups | `groups`, `group_members`, `group_teachers`, `group_announcements`, `announcement_assets` | members and teachers → groups and users; groups **never** grant course access | yes |
 | Taxonomy | `subjects`, `subject_translations`, `sections`, `section_translations`, `topics`, `topic_translations` | sections and topics → subject; topic → section/parent (same subject) | yes (admin) |
-| Courses & learning | `courses`, `course_teachers`, `course_modules`, `lessons`, `lesson_video_chapters`, `lesson_resources`, `course_enrollments`, `module_access_grants`, `lesson_progress`, `lesson_notes`, `course_favorites`, `learning_activity_events`, `offline_downloads` | course → modules → lessons; enrollments and module grants per user (separate, admin-granted) | yes (notes, favorites, activity: schema only) |
+| Courses & learning | `courses`, `course_teachers`, `course_modules`, `lessons`, `lesson_video_chapters`, `lesson_resources`, `course_enrollments`, `module_access_grants`, `lesson_progress`, `lesson_notes`, `course_favorites`, `learning_activity_events`, `offline_devices`, `offline_downloads` | course → modules → lessons; enrollments and module grants per user (separate, admin-granted) | yes: lessons, progress (watched ranges), notes, favorites, offline devices and licenses; `learning_activity_events` has no API |
 | Assets | `assets`, `asset_uploads`, `asset_aliases` | uploads → asset + course; aliases (namespace, externalId) → asset | yes (uploads); aliases via import |
 | Question bank | `question_banks`, `questions`, `question_options`, `question_matching_items`, `question_answer_keys`, `question_topics`, `question_assets`, `question_duplicate_links`, `question_imports`, `question_import_errors` | bank → subject, owner; question → bank; options, items, key, topics, assets → question; correctness only in `question_answer_keys` | yes (admin); import via CLI; read-only run API |
-| Tests & attempts | `tests`, `test_questions`, `test_assignments`, `test_attempts`, `attempt_questions`, `student_answers`, `attempt_score_revisions` | tests → course; test_questions → test + question | authoring and assignment yes (M10); attempts **no API** (M11) |
+| Tests & attempts | `tests`, `test_questions`, `test_assignments`, `test_attempts`, `attempt_questions`, `student_answers`, `attempt_score_revisions` | tests → course; test_questions → test + question | yes: authoring and assignment (M10), attempts, autosave, grading and results (M11), NCT trainer and mock exam |
 | AI | `ai_*` (11 tables) | — | **no API** |
 | Bonus & achievements | `bonus_*` (5 tables), `achievements`, `user_achievements` | — | **no API** |
 | Notifications | `notifications`, `notification_deliveries`, `notification_preferences`, `push_subscriptions`, `broadcast_campaigns` | — | **no API** (only a Telegram test message) |
@@ -1279,7 +1279,7 @@ The script prints pass or fail for the secrets, `CORS_ORIGINS`, `/health` and `/
 
 ### Not implemented (tables exist, no endpoints)
 
-16. Progress analytics, notes, favorites and activity APIs.
+16. Progress analytics (M12: home and profile summaries, group/course reports) and the activity API. Notes and favorites have endpoints (see §2).
 17. Notifications and inbox, broadcast campaigns, Web Push.
 18. AI chat and budgets.
 19. Bonuses and achievements.
@@ -1289,7 +1289,7 @@ The script prints pass or fail for the secrets, `CORS_ORIGINS`, `/health` and `/
 ### Environment and verification
 
 22. **Production SMS provider:** none is configured; password recovery by SMS is accepted but not delivered. Telegram recovery needs a linked Telegram identity and a bot connection.
-23. **Real S3/MinIO** upload, playback and import were **not verified** in the backend environment (only a storage double in tests).
+23. **Real storage** is SeaweedFS (locally and on the server). Multipart upload, resume by part list, abort and Range reads pass against it; on the server a signed GET returns `206` with `Accept-Ranges` and `Cache-Control` through nginx. A real lesson video in a browser player is not verified yet.
 24. **Demo data:** `npm run seed:demo` (§5.3) seeds a disposable database. `bootstrap:owner` works once per database.
 25. **`.env.example`** was reported out of date in earlier handoffs (missing `JWT_ACCESS_SECRET`, `OTP_HMAC_SECRET` and `SWAGGER_ENABLED`). Rely on §5.1, not on that file.
 

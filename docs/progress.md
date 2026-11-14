@@ -1,19 +1,28 @@
 # EVEREST backend progress
 
-Updated: 2026-11-15.
+Updated: 2026-11-14.
 
 ## Current increment
 
-Video player backend on `feature/video-player-backend` (awaiting review).
+ROADMAP synchronized with merged and deployed work (`docs/roadmap-sync-deploy`). Next milestone: M12 learning progress and analytics, plan awaiting owner approval. Backend PRs up to #56 and frontend PRs up to #41 are merged and deployed.
 
-## 2026-11-15 — Video player backend (`feature/video-player-backend`)
+## Temporary VPS deployment (2026-11-11 and 2026-11-14)
+
+- **Where:** temporary OVH VPS shared with another project; hosts `app.`, `api.` and `files.51-83-197-15.sslip.io`; compose project `everest`; database `everest_prod` (old `everest_db` kept, not dropped).
+- **2026-11-11 (stage 2b):** stack from `main` (PRs #50–#52); SeaweedFS 4.51 with bucket lifecycle and CORS; data restored from a PG16 dump (3416 questions, 11 users, 38 migrations); 470 storage objects copied and checked by hash (470 equal, 0 different) and 467 database assets found by HeadObject; nginx `everest-app`, `everest-api`, `everest-files` with TLS; daily dump 22:30 UTC and weekly `restore-check.sh`, one run of each passed.
+- **2026-11-14:** backend `b075da1` (PRs #53–#56) and frontend `c031b60` (PRs #34–#40), then frontend `c394e67` (PR #41). Pre-deploy dump passed `pg_restore --list`. Migrations `20261114010000000` and `20261115010000000` applied. `storage:configure` applied the 3-day abort rule and CORS (GET/HEAD/PUT, Range, exposed ETag/Content-Range/Accept-Ranges). `everest-files` nginx: 128m body, Range/If-Range passed, no buffering, 900 s timeouts.
+- **Checked on the server:** `/health` and `/ready` 200; all containers healthy; no errors in logs; `worker-attempts` has storage configured (upload sweep on); presigned GET with `Range: bytes=0-1023` → `206`, `Accept-Ranges: bytes`, `Content-Range`, `Cache-Control: private, max-age=600`; preflight for GET with Range and for part PUT → `200` for the app origin, no CORS for a foreign origin; TLS valid on all three hosts; the co-hosted site answered with its baseline codes before and after every nginx change.
+- **Not checked:** a real lesson video upload, playback, seeking and offline download in a browser (no video in the bucket yet); `If-Range` is ignored by SeaweedFS (`206` on an ETag mismatch).
+- **Remaining:** stage 2c hardening, off-site backups (B2), alerts and monitoring, k6 load test, the `everestlc.tj` domain.
+
+## 2026-11-15 — Video player backend (`feature/video-player-backend`, merged as PR #55)
 
 - **What:** chapters (title 1–120, cleared when the video is replaced), progress by merged watched intervals (`watchedRanges`, 90% unique time, one report per 10 s, `429 PROGRESS_TOO_FREQUENT`), staff summary `GET /admin/courses/:courseId/lessons/:lessonId/progress`, playback URLs identical within a 6 h window with `ResponseCacheControl`, `watermark.label`, `/offline-devices` registration, device-bound offline licenses with HMAC-derived AES-GCM keys (never stored), 14-day lease, licenses revoked with enrollment/module revocation. Migration `20261115010000000_add-video-player-state`. New env: `VIDEO_PLAYBACK_URL_WINDOW_SECONDS`, `PROGRESS_MIN_INTERVAL_SECONDS`, `OFFLINE_LICENSE_DAYS`, `OFFLINE_MAX_DEVICES`, `OFFLINE_KEY_SECRET` (in `deploy/env.example`).
 - **Checked:** `npm test` exit 0 — sources, integrity, disposable suite 454/454 (new unit `video-player`: ranges, watermark, signing window, real S3 presigner URL equality/`SignedHeaders=host`/cache header, key derivation, lease, throttled progress; integration `lessons` extended: chapters validation and rights, progress intervals/429/90%/course progress/staff summary, stable playback URL and watermark, device licenses: limit, key determinism and difference, renewal, expiry, device removal, revocation on enrollment revoke), server. `test:migrations` 40/94, down 39/93, reapply.
 - **Not checked:** `Cache-Control` override and Range on SeaweedFS behind nginx (signature checked only offline); a real browser player, OPFS or Service Worker; `migrate:up` on `everest_db` (branch not merged).
 - **Incident:** a direct `node --test tests/integration/lessons.test.js` run hit `everest_db` and was stopped; its fixtures (11 users, 3 courses created at 10:42) were removed in one transaction; nothing else touched.
 
-## 2026-11-14 — Resumable lesson video uploads (`feature/video-upload`)
+## 2026-11-14 — Resumable lesson video uploads (`feature/video-upload`, merged as PR #54)
 
 - **What:** lesson videos through the existing `/assets/uploads` flow: optional `lessonId` with attach on completion, video size/quota/open-upload limits, `uploading`/`expired` states, `missingParts` for resuming, upload sweep in `worker:attempts`, 3-day bucket abort rule, deletion of replaced/removed lesson videos, 2 h playback URLs, nginx `everest-files.conf` for large parts and Range. Migration `20261114010000000_extend-asset-uploads-for-video`.
 - **Checked:** `test:sources`, `test:integrity`, `test:migrations` (39/93, down and reapply), `test:server`; disposable suite 446/446 pass (exit 0, ~77 s; new unit `video-upload`, integration `video-uploads`; memory storage double, no live S3).
