@@ -125,6 +125,7 @@ services:
     command: ["npm", "run", "worker:attempts"]
     environment:
       DB_HOST: db
+      S3_ENDPOINT: http://s3:8333
       NODE_OPTIONS: --max-old-space-size=128
     mem_limit: 192m
     cpus: 0.25
@@ -188,6 +189,7 @@ services:
         NEXT_PUBLIC_DATA_SOURCE: api
         NEXT_PUBLIC_APP_URL_STUDENT: ${APP_URL_STUDENT:-}
         NEXT_PUBLIC_APP_URL_MARKETING: ${APP_URL_MARKETING:-}
+        NEXT_PUBLIC_OFFLINE_ENABLED: ${OFFLINE_ENABLED:-false}
     image: everest-frontend:current
     restart: unless-stopped
     logging: *logging
