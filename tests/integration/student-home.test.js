@@ -407,6 +407,80 @@ test('student home, attempt history and learning activity events', async (t) => 
       }
    })
 
+   await t.test('readiness lists every trainable subject; subjects without trainings have null', async () => {
+      async function trainableSubject(code, title, { published = true, nctBank = true } = {}) {
+         const created = await createSubjectService(adminId, {
+            code: `ra-${code}-${suffix}`, primaryLanguage: 'en', translations: { en: { title } },
+         })
+         const bankRow = await createQuestionBankService(adminId, {
+            code: `${nctBank ? 'nct' : 'plain'}-ra-${code}-${suffix}`, title, subjectId: created.id, visibility: 'staff',
+         })
+         const made = await createQuestionService(adminId, bankRow.id, {
+            questionType: 'single_choice', languageCode: 'en', content: text(`Q ${code}`),
+            options: [{ key: 'A', content: text('Right') }, { key: 'B', content: text('Wrong') }],
+         })
+         if (published) {
+            await replaceAnswerKeyService(adminId, made.id, { answerData: { optionKey: 'A' }, source: 'expert_review' })
+            await verifyAnswerKeyService(adminId, made.id, { source: 'expert_review' })
+            await publishQuestionService(adminId, made.id)
+         }
+         return created.id
+      }
+      // Titles sort Alpha before Zeta although Zeta is created first.
+      const zeta = await trainableSubject('zeta', 'Zeta')
+      const alpha = await trainableSubject('alpha', 'Alpha')
+      const draftOnly = await trainableSubject('draft', 'Draft only', { published: false })
+      const noNctBank = await trainableSubject('plain', 'Plain bank', { nctBank: false })
+      const mine = new Set([zeta, alpha, draftOnly, noNctBank])
+      const listed = (home) => home.readiness.subjects.filter((entry) => mine.has(entry.subjectId))
+
+      const fresh = await student()
+      const home = await getStudentHomeService(fresh)
+      assert.deepEqual(listed(home).map((entry) => entry.subjectId), [alpha, zeta], 'only trainable subjects, ordered by title')
+      assert.ok(home.readiness.subjects.every((entry) => entry.readinessPercent === null), 'nothing trained yet')
+      const entry = listed(home)[0]
+      assert.deepEqual(Object.keys(entry).sort(), [
+         'color', 'lastSubmittedAt', 'readinessPercent', 'subjectCode', 'subjectId', 'titles', 'trainings',
+      ])
+      assert.equal(entry.titles.en, 'Alpha')
+      assert.equal(entry.trainings, 0)
+      assert.equal(entry.lastSubmittedAt, null)
+      assert.equal(home.readiness.empty, true)
+      assert.equal(home.readiness.readinessPercent, null)
+
+      // One finished training on Zeta: 75% there, null elsewhere, and the mean ignores the others.
+      const trained = await student()
+      const trainerTest = await client.query(
+         `INSERT INTO tests (title, mode, status, origin, created_by, generation_filters)
+          VALUES ('Generated', 'practice', 'draft', 'trainer', $1, $2::jsonb) RETURNING id`,
+         [trained, JSON.stringify({ subjectId: zeta, subjectCode: `ra-zeta-${suffix}` })],
+      )
+      const assignment = await client.query(
+         'INSERT INTO test_assignments (test_id, user_id, assigned_by) VALUES ($1, $2, $2) RETURNING id',
+         [trainerTest.rows[0].id, trained],
+      )
+      await client.query(
+         `INSERT INTO test_attempts (test_id, assignment_id, user_id, attempt_number, status, submitted_at,
+            graded_at, score, max_score, policy_snapshot)
+          VALUES ($1, $2, $3, 1, 'graded', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 3, 4, '{}'::jsonb)`,
+         [trainerTest.rows[0].id, assignment.rows[0].id, trained],
+      )
+      const after = await getStudentHomeService(trained)
+      const bySubject = new Map(listed(after).map((item) => [item.subjectId, item]))
+      assert.deepEqual([...bySubject.keys()], [alpha, zeta])
+      assert.equal(bySubject.get(zeta).readinessPercent, 75)
+      assert.equal(bySubject.get(zeta).trainings, 1)
+      assert.equal(bySubject.get(alpha).readinessPercent, null)
+      assert.equal(after.readiness.readinessPercent, 75, 'subjects without data stay out of the mean')
+      assert.equal(after.readiness.empty, false)
+
+      // A subject with trainings stays listed after its questions are withdrawn.
+      await client.query("UPDATE questions SET status = 'archived' WHERE subject_id = $1", [zeta])
+      const withdrawn = await getStudentHomeService(trained)
+      assert.equal(listed(withdrawn).find((item) => item.subjectId === zeta).readinessPercent, 75)
+      assert.equal(listed(await getStudentHomeService(fresh)).some((item) => item.subjectId === zeta), false)
+   })
+
    await t.test('trainer and mock exam attempts appear with their origin and subject', async () => {
       const learner = await student()
       const trainerTest = await client.query(

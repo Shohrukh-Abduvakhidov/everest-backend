@@ -25,6 +25,15 @@ async function listTrainableCounts(bankCodePrefix, db = pool) {
    return result.rows
 }
 
+// Subjects that have at least one trainable question: the subjects the trainer offers.
+async function listTrainableSubjectIds(bankCodePrefix, db = pool) {
+   const result = await db.query(
+      `SELECT DISTINCT question.subject_id ${trainableFrom}`,
+      [bankCodePrefix],
+   )
+   return result.rows.map((row) => row.subject_id)
+}
+
 async function listTrainableSections(bankCodePrefix, db = pool) {
    const result = await db.query(
       `SELECT section.subject_id, section.code,
@@ -369,6 +378,7 @@ export {
    listSubjects,
    listTrainableCounts,
    listTrainableSections,
+   listTrainableSubjectIds,
    listTrainerAttempts,
    listRecentFinished,
    listRecentFinishedBySubject,

@@ -410,15 +410,34 @@ function subjectReadiness(rows) {
 
 // Subject readiness and the overall figure from the last readinessWindow finished trainings of
 // each subject. Shared by the /nct overview and the student home page.
-async function computeReadiness(deps, actorId) {
+async function computeReadiness(deps, actorId, { allSubjects = false } = {}) {
    const windowRows = await deps.repository.listRecentFinishedBySubject(actorId, deps.config.readinessWindow)
    const bySubject = new Map()
    for (const row of windowRows) {
       bySubject.set(row.subject_id, [...(bySubject.get(row.subject_id) ?? []), row])
    }
-   const subjectRows = await deps.repository.listSubjects([...bySubject.keys()])
+   // The home page lists every trainable subject, also those without trainings (readinessPercent
+   // null); a subject with trainings stays listed even if its questions were withdrawn since.
+   const trainable = allSubjects ? await deps.repository.listTrainableSubjectIds(deps.config.bankCodePrefix) : []
+   const subjectRows = await deps.repository.listSubjects([...new Set([...bySubject.keys(), ...trainable])])
+   if (allSubjects) {
+      const label = (subject) => subject.titles[subject.primary_language] ?? subject.code
+      subjectRows.sort((left, right) => label(left).localeCompare(label(right), left.primary_language)
+         || (BigInt(left.id) < BigInt(right.id) ? -1 : 1))
+   }
    const subjects = subjectRows.map((subject) => {
       const rows = bySubject.get(subject.id)
+      if (!rows) {
+         return {
+            subjectId: subject.id,
+            subjectCode: subject.code,
+            titles: subject.titles,
+            color: subject.color,
+            readinessPercent: null,
+            trainings: 0,
+            lastSubmittedAt: null,
+         }
+      }
       return {
          subjectId: subject.id,
          subjectCode: subject.code,
@@ -430,10 +449,12 @@ async function computeReadiness(deps, actorId) {
       }
    })
    const completedTrainings = subjects.reduce((sum, subject) => sum + subject.trainings, 0)
+   // Subjects without trainings do not enter the mean.
+   const measured = subjects.filter((subject) => subject.readinessPercent !== null)
    return {
       completedTrainings,
-      readinessPercent: subjects.length
-         ? roundPercent(subjects.reduce((sum, subject) => sum + subject.readinessPercent, 0) / subjects.length)
+      readinessPercent: measured.length
+         ? roundPercent(measured.reduce((sum, subject) => sum + subject.readinessPercent, 0) / measured.length)
          : null,
       subjects,
    }
@@ -443,7 +464,7 @@ async function computeReadiness(deps, actorId) {
 // that never trained (teachers, new students).
 async function getReadinessSummaryService(userId, overrides) {
    const deps = dependencies(overrides)
-   const readiness = await computeReadiness(deps, parseUserId(userId))
+   const readiness = await computeReadiness(deps, parseUserId(userId), { allSubjects: true })
    return { ...readiness, readinessWindow: deps.config.readinessWindow }
 }
 
