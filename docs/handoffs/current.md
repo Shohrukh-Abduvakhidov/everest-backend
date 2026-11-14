@@ -1,37 +1,32 @@
 ---
 project: EVEREST Backend
 current_milestone: M12
-status: planned
-branch: docs/roadmap-sync-deploy
-base_commit: b075da1
+status: in_progress
+branch: feat/m12-student-home-attempts
+base_commit: b2599be
 updated_at: 2026-11-14
 ---
 
 # Current handoff
 
-## State
+## M12 PR 1 (branch `feat/m12-student-home-attempts`, awaiting review)
 
-- Backend `main` up to PR #56 and frontend `main` up to PR #41 are merged and deployed on the temporary VPS (sslip.io hosts, database `everest_prod`). Details and checks: `docs/progress.md` → "Temporary VPS deployment".
-- This branch only synchronizes `ROADMAP.md`, `docs/progress.md`, `docs/frontend-handoff.md` §6–7 and this handoff with that state. No code.
+- **Built:** activity events (`watch_hour`, `lesson_completed`, `attempt_finished`) written in the action's transaction; `GET /me/home`; `GET /me/attempts`; permission `progress.read` (owner, admin, teacher; no route uses it yet); migration `20261116010000000` (two indexes, one-time backfill of completions and finished attempts). Contract for the frontend: `docs/frontend-handoff.md` → "Student home"; decisions D1–D7: `docs/decisions.md` (2026-11-16).
+- **Verified:** disposable-database suite 463/463 (exit 0), `test:migrations` 41/41/40/41, `test:sources`, `test:integrity`, `test:server` exit 0, EXPLAIN on 1000 students under 4 ms.
+- **Not verified:** HTTP routes with cookies; `migrate:up` on `everest_db` and the server; the real-storage test (skipped on purpose).
+- **After merge (operator):** `migrate:up` on the server through the compose `migrate` service, then `deploy.sh backend`. The week view fills from this release on (watch time has no history).
 
-## Verified on the server (2026-11-14)
+## Server state (2026-11-14)
 
-- Migrations `20261114010000000` and `20261115010000000` applied; `/health` and `/ready` 200; all containers healthy; no errors in logs.
-- `worker-attempts` has storage configured (upload sweep on, PR #56); `storage:configure` applied the 3-day abort rule and CORS.
-- Signed GET through nginx/SeaweedFS: `206`, `Accept-Ranges`, `Content-Range`, `Cache-Control`; preflight for GET with Range and part PUT pass for the app origin only; TLS valid on app, api, files.
-
-## Not verified
-
-- A real lesson video upload, playback, seeking and offline download in a browser (no video in the bucket yet).
-- An interrupted and resumed multi-GB upload through the browser.
-- SeaweedFS ignores `If-Range` (`206` on an ETag mismatch); harmless while object keys are immutable.
+- Backend `b075da1` (PRs up to #56) and frontend `c394e67` (PR #41) are deployed on the temporary VPS; this branch is not. Details: `docs/progress.md` → "Temporary VPS deployment".
+- Not verified there: a real lesson video in a browser (upload, seek, offline); an interrupted multi-GB upload resumed.
 
 ## Next concrete task
 
-1. Merge this PR.
-2. M12 PR 1 from `main`: indexes and permission `progress.read` (one migration), `learning_activity_events` writes, `GET /me/home`, `GET /me/attempts`, decisions D1–D7 in `docs/decisions.md`, contract in `docs/api.md`, OpenAPI and `docs/frontend-handoff.md`.
-3. Then PR 2 (`GET /me/analytics`) and PR 3 (staff group/course summaries and student analytics).
-4. Operations, not code: stage 2c hardening, off-site backups (B2), alerts and monitoring, k6 load test, `docker builder prune` only with the owner's approval.
+1. Merge PR 1, then M12 PR 2: `GET /me/analytics` (decisions D4 strong/weak topics, first-attempt statistics, total watch time from `watched_ranges`).
+2. M12 PR 3: staff group and course summaries with the "behind" reasons (D5), visibility by D1/D2, plus the group-closing index with its queries.
+3. Known gaps: `scripts/verify-database.js` expected counts are stale since before this branch; `tests/integration/real-storage.test.js` keeps the test process alive for hours (close the S3 client).
+4. Operations, not code: stage 2c hardening, off-site backups, alerts, k6 load test, `docker builder prune` only with the owner's approval.
 
 ## Constraints
 

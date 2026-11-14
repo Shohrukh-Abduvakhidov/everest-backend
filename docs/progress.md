@@ -4,7 +4,15 @@ Updated: 2026-11-14.
 
 ## Current increment
 
-ROADMAP synchronized with merged and deployed work (`docs/roadmap-sync-deploy`). Next milestone: M12 learning progress and analytics, plan awaiting owner approval. Backend PRs up to #56 and frontend PRs up to #41 are merged and deployed.
+M12 PR 1 on `feat/m12-student-home-attempts` (awaiting review). Backend PRs up to #57 are merged; PRs up to #56 and frontend PRs up to #41 are deployed on the temporary VPS (this branch is not deployed).
+
+## 2026-11-14 — M12 PR 1: student home, attempt history, activity events (`feat/m12-student-home-attempts`)
+
+- **What:** `GET /me/home` (continue lesson, courses with `lastActivityAt`, open and upcoming tests across courses, readiness plus last mock exam, last 5 results, seven-day week) and `GET /me/attempts` (finished attempts of all three origins, filters `origin`/`subjectId`, paging with `total`). `learning_activity_events` is now written in the same transaction as the action: `watch_hour` (growth of unique watched time) and `lesson_completed` by the player, `lesson_completed` by test completion (also regrade), `attempt_finished` in `finalizeAttempt` (course tests, trainer, mock exam). Migration `20261116010000000_add-student-progress-reads`: permission `progress.read` (owner, admin, teacher), indexes `lesson_progress(user_id, updated_at DESC)` and `test_attempts(user_id, submitted_at DESC)` for finished attempts, one-time backfill of `lesson_completed` and `attempt_finished`. Decisions D1–D7: `docs/decisions.md` (2026-11-16). Contract: `docs/frontend-handoff.md` → "Student home", `docs/api.md`, OpenAPI.
+- **Changed existing behavior:** `saveLessonProgressService` writes the progress row and its events in one transaction; `trainer-service` readiness is shared through `computeReadiness`; `test-attempt-service` exports `safeLearnerAssignment`.
+- **Checked:** disposable-database suite (`node scripts/test-disposable-database.js --test-skip-pattern="real S3-compatible storage"`): exit 0, 463 tests, 463 passed, 0 failed (73 s). New `tests/integration/student-home.test.js` (10 subtests: watch growth and no double counting, one completion event, stale revision writes nothing, idempotent events, continue lesson, open/upcoming/closed tests, access revocation, blocked account, time-zone bucketing, history filters/paging/privacy, trainer origin, migration backfill run twice). Two older unit tests and the lessons cleanup were adapted to the new activity writes. `test:sources`, `test:integrity`, `test:server`: exit 0. `test:migrations`: 41/41/40/41, 94 tables (expected counts in `scripts/test-migration-cycle.js` updated). EXPLAIN ANALYZE on a disposable database with 1000 students (60 000 progress rows, 5 000 attempts, 100 000 events): 0.2–3.4 ms, all through indexes.
+- **Not checked:** HTTP routes with cookies (services called directly); `migrate:up` on `everest_db` and on the server (branch not merged); the real-storage test (skipped; it keeps the process alive for hours); `scripts/verify-database.js` (was already out of date before this branch: it expects 33 migrations and 726 columns; not changed).
+- **Next:** PR 2 `GET /me/analytics`, PR 3 staff summaries. After merging PR 1 run `migrate:up` (compose `migrate` service on the server).
 
 ## Temporary VPS deployment (2026-11-11 and 2026-11-14)
 

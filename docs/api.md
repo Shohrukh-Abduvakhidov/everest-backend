@@ -830,6 +830,14 @@ Missing messaging permission returns `409 TELEGRAM_CONNECTION_UNAVAILABLE`. Tele
 - `POST /admin/courses/:id/copy` does not copy tests, so copied lessons have no link; `copied.clearedTestLinks` counts them.
 - `GET` learner lesson with access adds `test: { id, title, questionCount, timeLimitMinutes, maxAttempts, assignment: { state, opensAt, closesAt } }` or `null`. `state` is `open|upcoming|closed|none`, taken from the student's own and group assignments, best window first. It never contains questions or answers. Starting an attempt arrives with M11.
 
+## Student home and history (M12, 2026-11-16)
+
+Full contract with examples: `docs/frontend-handoff.md` → "Student home". Both routes are read-only, use the signed-in student's own data and need only an active account (`403 ACCOUNT_NOT_ACTIVE`).
+
+- `GET /api/v1/me/home`: `continueLesson` (or `null`), `courses[]` (the `GET /courses` shape plus `lastActivityAt`, most recently active first), `tests.open[]` and `tests.upcoming[]` (the learner assignment shape plus `courseId`, `courseTitle`, `deadlineAt`; at most 10 each), `readiness` (trainer readiness plus `lastMockExam`), `recentResults[]` (last 5 finished attempts of any kind), `week` (seven local days of watch seconds, completed lessons and finished attempts) and `serverNow`.
+- `GET /api/v1/me/attempts?origin&subjectId&limit&offset`: finished attempts of every kind, newest first. `origin` is `authored`, `trainer` or `mock_exam`; `limit` 1–100 (default 20). Response `{ attempts[], pagination: { limit, offset, total, hasMore } }`. `400 VALIDATION_ERROR` for a bad filter or page.
+- Learning activity events (`lesson_completed`, `attempt_finished`, `watch_hour`) are written by the player, the attempt finalization and lesson completion by test; they have no API. The permission `progress.read` is seeded for owner, admin and teacher and is not used by a route yet (PR 3).
+
 ## NCT trainer
 
 Full contract with examples and error table: `docs/frontend-handoff.md` → "NCT trainer". Summary:

@@ -1,3 +1,4 @@
+import * as learningActivityRepository from '../repositories/learning-activity-repository.js'
 import * as learnerLessonRepository from '../repositories/learner-lesson-repository.js'
 import * as attemptRepository from '../repositories/test-attempt-repository.js'
 import { scorePercent, toHundredths } from '../utils/attempt-grading.js'
@@ -7,6 +8,7 @@ function dependencies(overrides = {}) {
    return {
       learner: overrides.learner || learnerLessonRepository,
       attempts: overrides.attempts || attemptRepository,
+      activity: overrides.activity || learningActivityRepository,
    }
 }
 
@@ -37,11 +39,22 @@ async function completeTestLessonsService({ attempt, completedAt }, client, over
       answered,
    })
    if (!completes) return []
-   return deps.learner.completeTestLessons({
+   const lessonIds = await deps.learner.completeTestLessons({
       userId: attempt.user_id,
       testId: attempt.test_id,
       completedAt,
    }, client)
+   for (const lessonId of lessonIds) {
+      await deps.activity.recordActivityEvent({
+         userId: attempt.user_id,
+         lessonId,
+         code: 'lesson_completed',
+         sourceEventKey: `lesson_completed:${lessonId}`,
+         occurredAt: completedAt,
+         metadata: { by: 'test' },
+      }, client)
+   }
+   return lessonIds
 }
 
 export { attemptCompletesLesson, completeTestLessonsService }

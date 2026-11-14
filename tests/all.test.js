@@ -48,6 +48,7 @@ import './integration/test-attempts.test.js';
 import './integration/question-image-urls.test.js';
 import './integration/nct-trainer.test.js';
 import './integration/nct-mock-exam.test.js';
+import './integration/student-home.test.js';
 import './integration/trainer-digits.test.js';
 import './integration/merge-tajik-subjects.test.js';
 import './integration/m11-gaps.test.js';

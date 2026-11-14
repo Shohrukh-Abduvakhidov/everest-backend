@@ -82,6 +82,37 @@ async function listLearnerAssignments(userId, courseId, lessonId, db = pool) {
    return result.rows
 }
 
+// Assignments the learner can still use or will be able to use, across every course: published
+// authored tests, an active enrollment and (for a module test) an active module grant at $2.
+// Closed windows and assignments the learner no longer holds are not listed.
+async function listLearnerHomeAssignments(userId, now, db = pool) {
+   const result = await db.query(
+      `SELECT ${assignmentColumns}, course.title AS course_title
+       FROM test_assignments AS assignment
+       JOIN tests AS test ON test.id = assignment.test_id
+       JOIN courses AS course ON course.id = test.course_id
+       WHERE test.origin = 'authored' AND test.status = 'published' AND course.status = 'published'
+         AND ${learnerAudienceSql}
+         AND (assignment.closes_at IS NULL OR assignment.closes_at > $2)
+         AND EXISTS (
+            SELECT 1 FROM course_enrollments AS enrollment
+            WHERE enrollment.user_id = $1 AND enrollment.course_id = test.course_id
+               AND enrollment.revoked_at IS NULL AND enrollment.begins_at <= $2
+               AND (enrollment.expires_at IS NULL OR enrollment.expires_at > $2)
+         )
+         AND (test.module_id IS NULL OR EXISTS (
+            SELECT 1 FROM module_access_grants AS module_grant
+            WHERE module_grant.user_id = $1 AND module_grant.module_id = test.module_id
+               AND module_grant.revoked_at IS NULL AND module_grant.begins_at <= $2
+               AND (module_grant.expires_at IS NULL OR module_grant.expires_at > $2)
+         ))
+       ORDER BY assignment.closes_at NULLS LAST, assignment.opens_at, assignment.id
+       LIMIT 200`,
+      [normalizeInternalId(userId), now],
+   )
+   return result.rows
+}
+
 // Serializes one student's starts of one assignment, so concurrent requests cannot both pick
 // the first attempt or pass the attempt limit.
 async function lockAttemptSlot(userId, assignmentId, client) {
@@ -603,6 +634,7 @@ export {
    listAttemptSource,
    listGradingRows,
    listLearnerAssignments,
+   listLearnerHomeAssignments,
    listScoreRevisions,
    listTestAttempts,
    listUserAttempts,

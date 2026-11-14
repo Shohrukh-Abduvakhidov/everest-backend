@@ -108,8 +108,22 @@ test('progress reports are throttled and complete only at 90 percent unique time
    const lesson = { id: '3', module_id: '2', course_id: '1', video_asset_id: '4', test_id: null }
    let row = null
    const writes = []
+   const watch = []
+   const completions = []
+   const transactionClient = { fake: true }
    const overrides = {
       progressMinIntervalSeconds: 10,
+      transaction: async (work) => work(transactionClient),
+      activity: {
+         addWatchSeconds: async (values, db) => {
+            assert.equal(db, transactionClient)
+            watch.push(values.seconds)
+         },
+         recordActivityEvent: async (event, db) => {
+            assert.equal(db, transactionClient)
+            completions.push(event.sourceEventKey)
+         },
+      },
       requireAccess: async () => {},
       repository: { findAsset: async () => ({ duration_seconds: 100 }) },
       learner: {
@@ -145,4 +159,7 @@ test('progress reports are throttled and complete only at 90 percent unique time
    assert.equal(done.progress.status, 'completed')
    assert.equal(writes.length, 3)
    assert.ok(writes.every((write) => write.reported === true))
+   // Only the growth of unique watched time is recorded, and completion once.
+   assert.deepEqual(watch, [10, 79, 1])
+   assert.deepEqual(completions, ['lesson_completed:3'])
 })

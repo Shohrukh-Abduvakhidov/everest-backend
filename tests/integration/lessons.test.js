@@ -67,6 +67,8 @@ async function cleanup(client) {
    await client.query(`DELETE FROM offline_downloads WHERE ${lessonFilter}`, [courseIds])
    await client.query('DELETE FROM offline_devices WHERE user_id = ANY($1::bigint[])', [userIds])
    await client.query('DELETE FROM user_phones WHERE user_id = ANY($1::bigint[])', [userIds])
+   await client.query(`DELETE FROM learning_activity_events WHERE ${lessonFilter}`, [courseIds])
+   await client.query('DELETE FROM learning_activity_events WHERE user_id = ANY($1::bigint[])', [userIds])
    await client.query(`DELETE FROM lesson_progress WHERE ${lessonFilter}`, [courseIds])
    await client.query(`DELETE FROM lesson_notes WHERE ${lessonFilter}`, [courseIds])
    await client.query(`DELETE FROM lesson_video_chapters WHERE ${lessonFilter}`, [courseIds])

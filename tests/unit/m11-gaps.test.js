@@ -35,11 +35,18 @@ test('the completion rule follows the owner decision', () => {
 })
 
 function completionDoubles({ answered = true } = {}) {
-   const calls = { answered: 0, completed: [] }
+   const calls = { answered: 0, completed: [], events: [] }
    return {
       calls,
       overrides: {
          attempts: { hasSavedAnswer: async (_id, db) => { assert.equal(db, client); calls.answered += 1; return answered } },
+         activity: {
+            recordActivityEvent: async (event, db) => {
+               assert.equal(db, client)
+               calls.events.push(event)
+               return true
+            },
+         },
          learner: {
             completeTestLessons: async (values, db) => {
                assert.equal(db, client)
@@ -61,6 +68,11 @@ test('completion writes through the caller client and checks answers only on exp
    assert.deepEqual(await completeTestLessonsService({ attempt: attempt(), completedAt: now }, client, graded.overrides), ['7'])
    assert.equal(graded.calls.answered, 0)
    assert.deepEqual(graded.calls.completed, [{ userId: '2', testId: '3', completedAt: now }])
+   // One idempotent activity event per newly completed lesson, in the same transaction client.
+   assert.deepEqual(graded.calls.events, [{
+      userId: '2', lessonId: '7', code: 'lesson_completed', sourceEventKey: 'lesson_completed:7',
+      occurredAt: now, metadata: { by: 'test' },
+   }])
 
    const empty = completionDoubles({ answered: false })
    assert.deepEqual(await completeTestLessonsService({
@@ -68,6 +80,7 @@ test('completion writes through the caller client and checks answers only on exp
    }, client, empty.overrides), [])
    assert.equal(empty.calls.answered, 1)
    assert.equal(empty.calls.completed.length, 0)
+   assert.equal(empty.calls.events.length, 0)
 
    const failed = completionDoubles()
    await completeTestLessonsService({

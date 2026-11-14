@@ -34,6 +34,10 @@ function obj(properties, required = [], { strict = false, description } = {}) {
 // Request bodies reject unknown fields, so they are declared strict.
 const body = (properties, required = [], description) => obj(properties, required, { strict: true, description })
 
+const allOfLearnerCourse = () => ({
+   allOf: [ref('LearnerCourse'), obj({ lastActivityAt: nullable(dt()) }, ['lastActivityAt'])],
+})
+
 const pagination = ref('Pagination')
 const page = (key, item) => obj({ [key]: arr(item), pagination }, [key, 'pagination'])
 const deleted = () => obj({ id: id(), status: str({ const: 'deleted' }) }, ['id', 'status'])
@@ -432,6 +436,57 @@ const schemas = {
       state: enumOf(['open', 'upcoming', 'closed', 'revoked'], { description: 'revoked: no longer assigned to you; listed only for your own attempts and never startable.' }),
       attempts: ref('AttemptState'),
    }),
+   HomeTestAssignment: {
+      allOf: [ref('LearnerTestAssignment'), obj({
+         courseId: id(),
+         courseTitle: str(),
+         deadlineAt: nullable(dt()),
+      }, ['courseId', 'courseTitle', 'deadlineAt'], { description: 'deadlineAt is the earliest of the window end, the personal window end and the running attempt deadline' })],
+   },
+   FinishedAttempt: obj({
+      attemptId: id(),
+      origin: enumOf(['authored', 'trainer', 'mock_exam']),
+      title: nullable(str({ description: 'Course tests only; trainer and mock exam titles are built by the client' })),
+      testId: nullable(id()),
+      assignmentId: nullable(id()),
+      courseId: nullable(id()),
+      subjectId: nullable(id()),
+      attemptNumber: int(),
+      status: enumOf(['graded', 'expired']),
+      score: nullable(testPoints()),
+      maxScore: testPoints(),
+      percent: num(),
+      passPercent: nullable(num()),
+      passed: nullable(bool()),
+      startedAt: dt(),
+      submittedAt: dt(),
+   }, ['attemptId', 'origin', 'title', 'testId', 'assignmentId', 'courseId', 'subjectId', 'attemptNumber', 'status', 'score', 'maxScore', 'percent', 'passPercent', 'passed', 'startedAt', 'submittedAt']),
+   StudentHome: obj({
+      continueLesson: nullable(obj({
+         courseId: id(), courseTitle: str(), moduleId: id(), lessonId: id(), title: str(),
+         playbackSeconds: int(), durationSeconds: nullable(int()), updatedAt: dt(),
+      }, ['courseId', 'courseTitle', 'moduleId', 'lessonId', 'title', 'playbackSeconds', 'durationSeconds', 'updatedAt'])),
+      courses: arr(allOfLearnerCourse()),
+      tests: obj({
+         open: arr(ref('HomeTestAssignment')),
+         upcoming: arr(ref('HomeTestAssignment')),
+      }, ['open', 'upcoming']),
+      readiness: obj({
+         empty: bool(),
+         readinessPercent: nullable(num()),
+         completedTrainings: int(),
+         readinessWindow: int(),
+         subjects: arr(anyObject('subjectId, subjectCode, titles, color, readinessPercent, trainings, lastSubmittedAt')),
+         lastMockExam: nullable(obj({ attemptId: id(), score: nullable(testPoints()), maxScore: testPoints(), percent: num(), submittedAt: dt() })),
+      }, ['empty', 'readinessPercent', 'completedTrainings', 'readinessWindow', 'subjects', 'lastMockExam']),
+      recentResults: arr(ref('FinishedAttempt')),
+      week: obj({
+         timeZone: str({ description: 'Profile time zone; UTC when it is unknown' }),
+         days: arr(obj({ date: str({ format: 'date' }), watchSeconds: int(), lessonsCompleted: int(), attemptsFinished: int() }, ['date', 'watchSeconds', 'lessonsCompleted', 'attemptsFinished']), { description: 'Seven local days, oldest first, the last one is today' }),
+         totalWatchSeconds: int(),
+      }, ['timeZone', 'days', 'totalWatchSeconds']),
+      serverNow: dt(),
+   }, ['continueLesson', 'courses', 'tests', 'readiness', 'recentResults', 'week', 'serverNow']),
    AttemptQuestion: obj({
       id: id(),
       position: int(),
@@ -1815,6 +1870,25 @@ const routes = [
       tag: 'Learner tests', summary: 'Result of a finished attempt; details follow the reveal policy',
       response: ref('AttemptResult'),
       errors: { 400: ['VALIDATION_ERROR', 'INVALID_ATTEMPT_ID'], 404: ['ATTEMPT_NOT_FOUND'], 409: ['RESULT_NOT_READY'] },
+   }],
+   // Student home and history (M12)
+   ['get', '/me/home', {
+      tag: 'Student home', summary: 'Everything the home page shows, in one response',
+      description: 'Own data only. continueLesson is the last unfinished lesson that is still accessible. tests lists course tests that are open (with attempts left or running) and upcoming, at most 10 each, across all courses. readiness comes from the NCT trainer and does not require the trainer permission. week buckets watch time, completed lessons and finished attempts by the profile time zone, from learning_activity_events (written since this release).',
+      response: ref('StudentHome'),
+      errors: { 400: ['INVALID_USER_ID'], 403: ['ACCOUNT_NOT_ACTIVE'] },
+   }],
+   ['get', '/me/attempts', {
+      tag: 'Student home', summary: 'My finished attempts of every kind, newest first',
+      description: 'Course tests, trainer trainings and mock exams that are graded or closed by the timer. Running attempts are not listed. subjectId matches the course subject, the trainer subject and the subjects of a mock exam.',
+      query: [
+         { name: 'origin', schema: enumOf(['authored', 'trainer', 'mock_exam']) },
+         { name: 'subjectId', schema: id() },
+         { name: 'limit', schema: int({ minimum: 1, maximum: 100 }) },
+         { name: 'offset', schema: int({ minimum: 0 }) },
+      ],
+      response: obj({ attempts: arr(ref('FinishedAttempt')), pagination: obj({ limit: int(), offset: int(), total: int(), hasMore: bool() }, ['limit', 'offset', 'total', 'hasMore']) }, ['attempts', 'pagination']),
+      errors: { 400: ['VALIDATION_ERROR', 'INVALID_USER_ID'], 403: ['ACCOUNT_NOT_ACTIVE'] },
    }],
    ['get', '/trainer/catalog', {
       tag: 'NCT trainer', summary: 'Subjects with trainable NCT questions, counts per language and difficulty',

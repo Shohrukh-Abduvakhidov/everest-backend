@@ -408,16 +408,10 @@ function subjectReadiness(rows) {
    return roundPercent((score * 100) / maxScore)
 }
 
-async function getTrainerOverviewService(userId, overrides) {
-   const deps = dependencies(overrides)
-   const actorId = parseUserId(userId)
-   await requireTrainerLearner(deps, actorId)
-   const { config } = deps
-   const [windowRows, topicRows, recentRows] = await Promise.all([
-      deps.repository.listRecentFinishedBySubject(actorId, config.readinessWindow),
-      deps.repository.listTopicResults(actorId, config.weakTopicMinAnswers, config.weakTopicsLimit),
-      deps.repository.listRecentFinished(actorId, config.recentResultsLimit),
-   ])
+// Subject readiness and the overall figure from the last readinessWindow finished trainings of
+// each subject. Shared by the /nct overview and the student home page.
+async function computeReadiness(deps, actorId) {
+   const windowRows = await deps.repository.listRecentFinishedBySubject(actorId, deps.config.readinessWindow)
    const bySubject = new Map()
    for (const row of windowRows) {
       bySubject.set(row.subject_id, [...(bySubject.get(row.subject_id) ?? []), row])
@@ -437,10 +431,36 @@ async function getTrainerOverviewService(userId, overrides) {
    })
    const completedTrainings = subjects.reduce((sum, subject) => sum + subject.trainings, 0)
    return {
-      empty: completedTrainings === 0,
+      completedTrainings,
       readinessPercent: subjects.length
          ? roundPercent(subjects.reduce((sum, subject) => sum + subject.readinessPercent, 0) / subjects.length)
          : null,
+      subjects,
+   }
+}
+
+// Own data only, no trainer permission check: the home page shows an empty block for accounts
+// that never trained (teachers, new students).
+async function getReadinessSummaryService(userId, overrides) {
+   const deps = dependencies(overrides)
+   const readiness = await computeReadiness(deps, parseUserId(userId))
+   return { ...readiness, readinessWindow: deps.config.readinessWindow }
+}
+
+async function getTrainerOverviewService(userId, overrides) {
+   const deps = dependencies(overrides)
+   const actorId = parseUserId(userId)
+   await requireTrainerLearner(deps, actorId)
+   const { config } = deps
+   const [readiness, topicRows, recentRows] = await Promise.all([
+      computeReadiness(deps, actorId),
+      deps.repository.listTopicResults(actorId, config.weakTopicMinAnswers, config.weakTopicsLimit),
+      deps.repository.listRecentFinished(actorId, config.recentResultsLimit),
+   ])
+   const { completedTrainings, subjects } = readiness
+   return {
+      empty: completedTrainings === 0,
+      readinessPercent: readiness.readinessPercent,
       completedTrainings,
       readinessWindow: config.readinessWindow,
       subjects,
@@ -469,6 +489,7 @@ async function getTrainerOverviewService(userId, overrides) {
 
 export {
    createTrainerAttemptService,
+   getReadinessSummaryService,
    getTrainerOverviewService,
    getTrainerCatalogService,
    listTrainerHistoryService,

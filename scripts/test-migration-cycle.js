@@ -56,25 +56,25 @@ try {
 
   await runMigration('up');
   const afterUp = await readState();
-  if (afterUp.migrations !== 40 || afterUp.tables !== 94 || afterUp.functions !== 7) {
+  if (afterUp.migrations !== 41 || afterUp.tables !== 94 || afterUp.functions !== 7) {
     throw new Error(`Unexpected state after up: ${JSON.stringify(afterUp)}`);
   }
 
   await runMigration('up');
   const afterNoOpUp = await readState();
-  if (afterNoOpUp.migrations !== 40) {
+  if (afterNoOpUp.migrations !== 41) {
     throw new Error(`Second up was not a no-op: ${JSON.stringify(afterNoOpUp)}`);
   }
 
   await runMigration('down');
   const afterDown = await readState();
-  if (afterDown.migrations !== 39 || afterDown.tables !== 93 || afterDown.functions !== 7) {
+  if (afterDown.migrations !== 40 || afterDown.tables !== 94 || afterDown.functions !== 7) {
     throw new Error(`Down did not roll back exactly one migration: ${JSON.stringify(afterDown)}`);
   }
 
   await runMigration('up');
   const afterReapply = await readState();
-  if (afterReapply.migrations !== 40 || afterReapply.tables !== 94
+  if (afterReapply.migrations !== 41 || afterReapply.tables !== 94
       || afterReapply.functions !== 7) {
     throw new Error(`Reapply did not restore the migration: ${JSON.stringify(afterReapply)}`);
   }

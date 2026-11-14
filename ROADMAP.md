@@ -2,7 +2,7 @@
 project: EVEREST Backend
 roadmap_version: 1
 current_milestone: M12
-current_status: planned
+current_status: in_progress
 updated_at: 2026-11-14
 architecture: docs/architecture.md
 ---
@@ -333,7 +333,10 @@ This roadmap orders implementation; it does not replace the [current architectur
 
 ## M12 — Learning progress and analytics
 
-- **Status:** Planned. Next milestone; the plan awaits owner approval.
+- **Status:** In progress. Plan approved by the owner on 2026-11-14 (decisions D1–D7 in `docs/decisions.md`), delivered in three PRs:
+   1. **PR 1** (branch `feat/m12-student-home-attempts`, awaiting review): `learning_activity_events` written by the player, lesson completion by test and attempt finalization; `GET /me/home`; `GET /me/attempts`; permission `progress.read`; migration `20261116010000000`. `npm test` parts on a disposable database: 463 passed, 0 failed; `test:migrations` 41/41/40/41.
+   2. **PR 2** (planned): `GET /me/analytics` — strong and weak topics, first-attempt statistics, total watch time.
+   3. **PR 3** (planned): staff group and course progress summaries, student analytics and trainer/mock exam results for teachers in scope (`progress.read`).
 - **Goal:** Produce access-controlled learning insights.
 - **Dependencies:** M07 and M11.
 - **Deliverables:** Lesson/course progress, subject readiness, test history, strong/weak topics, profile analytics, homepage summaries, and required first-attempt statistics.
