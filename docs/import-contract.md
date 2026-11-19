@@ -606,7 +606,8 @@ Mapping rules:
 | `chemistry { latex, display }` | `chemistry { formula }` | `CONTENT_DISPLAY_IGNORED` if `display: true` |
 | `image { assetExternalId, alt, sourceNamespace? }` | `image { assetId, alt }` (resolved through the package assets) | another namespace → `REFERENCE_UNKNOWN` |
 | `table { rows: [{ cells: [{ blocks, rowSpan, colSpan, isHeader }] }] }` | `table { rows: string[][] }` (cell text) | `CONTENT_TABLE_FLATTENED` for headers or merged cells |
-| `columnHeaders { left, right }` (matching) | a one-row `table [[left, right]]` | `MATCHING_COLUMN_HEADERS_AS_TABLE` |
+| `columnHeaders { left, right }` (matching) | a one-row `table [[left, right]]`; one letter stranded at the end of `left` while `right` continues in lowercase is moved back (`Тоҷикистон С` / `оли` → `Тоҷикистон` / `Соли`) | `MATCHING_COLUMN_HEADERS_AS_TABLE`; `CONTENT_SPLIT_WORD_REPAIRED` when repaired, `CONTENT_SPLIT_WORD_SUSPECTED` when damaged but not certain (kept as is) |
+| `paragraph` that is only one Cyrillic capital + lowercase words (`З анбӯруғҳо`) | the capital is joined to the word, unless it is a single-letter word of the question language | `CONTENT_SPLIT_WORD_REPAIRED` |
 
 Warnings are reported once per code and record.
 

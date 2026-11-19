@@ -9,6 +9,7 @@ import './unit/password-recovery.test.js';
 import './unit/media-inspection.test.js';
 import './unit/question-content.test.js';
 import './unit/question-package-adapter.test.js';
+import './unit/question-text-audit.test.js';
 import './unit/answer-key-import.test.js';
 import './unit/question-bulk-review.test.js';
 import './unit/openapi.test.js';

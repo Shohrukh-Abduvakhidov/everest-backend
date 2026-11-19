@@ -2,14 +2,21 @@
 project: EVEREST Backend
 current_milestone: M12
 status: in_progress
-branch: feat/m12-student-analytics
-base_commit: 49e9c16
-updated_at: 2026-11-14
+branch: fix/question-text-split-letters
+base_commit: 948f2f1
+updated_at: 2026-11-19
 ---
 
 # Current handoff
 
-## M12 PR 2 (branch `feat/m12-student-analytics`, awaiting review)
+## Question text repair (branch `fix/question-text-split-letters`, awaiting review)
+
+- **Built:** `src/utils/question-text-audit.js` (pure checks and two certain repairs); the package adapter repairs a letter stranded between matching `columnHeaders` and a capital cut off a short item, and warns `CONTENT_SPLIT_WORD_REPAIRED` / `CONTENT_SPLIT_WORD_SUSPECTED`; `scripts/audit-question-text.js` (read-only report); `scripts/fix-question-text.js` (`--dry-run`, `--apply --log`, `--rollback`). No migration. Details: `docs/progress.md` (2026-11-19), decision: `docs/decisions.md` (2026-11-19).
+- **Verified:** disposable-database suite 484/484; `test:sources`, `test:integrity` exit 0; `verify-database.js` valid; apply, rollback, re-apply and refusals on a disposable copy of `everest_db`.
+- **Not verified:** `--apply` on local `everest_db` (not run; permission check); anything on the server.
+- **After merge (operator):** deploy the backend image, `backup-db.sh predeploy`, dry run, then `--apply --log` through the compose `migrate` service (commands in the PR). 51 findings in 30 questions remain for a teacher; 1907 and 1917 need the stem rebuilt from the book.
+
+## M12 PR 2 (merged in PR #59, not deployed)
 
 - **Built:** `GET /me/analytics` (totals, first attempts, strong/weak topics by D4 and D6); pure formulas in `src/utils/learning-metrics.js`; contract in `docs/frontend-handoff.md` → "Student home", `docs/api.md`, OpenAPI. No migration. `scripts/verify-database.js` matches the catalog again (separate commit).
 - **Verified:** disposable-database suite 475/475; `test:migrations`, `test:sources`, `test:integrity`, `test:server` exit 0; `verify-database.js` valid on a fresh database.
@@ -29,7 +36,7 @@ updated_at: 2026-11-14
 
 ## Next concrete task
 
-1. Review and merge PR 2. Deploy PR 1 and PR 2 together (`migrate:up` for `20261116010000000`, then `deploy.sh backend`).
+1. Review and merge the question text repair. Deploy PR 1 and PR 2 together (`migrate:up` for `20261116010000000`, then `deploy.sh backend`).
 2. M12 PR 3: staff group and course summaries with the "behind" reasons (D5), visibility by D1/D2, plus the group-closing index with its queries.
 3. Known gaps: `scripts/verify-database.js` counts must be updated with every migration; `tests/integration/real-storage.test.js` keeps the test process alive for hours (close the S3 client).
 4. Operations, not code: stage 2c hardening, off-site backups, alerts, k6 load test, `docker builder prune` only with the owner's approval.

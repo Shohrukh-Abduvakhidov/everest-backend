@@ -1,10 +1,21 @@
 # EVEREST backend progress
 
-Updated: 2026-11-14.
+Updated: 2026-11-19.
 
 ## Current increment
 
-M12 PR 2 on `feat/m12-student-analytics` (awaiting review). M12 PR 1 is merged (PR #58) and not deployed yet. Backend PRs up to #56 and frontend PRs up to #41 are deployed on the temporary VPS.
+Question text repair on `fix/question-text-split-letters` (awaiting review). M12 PR 1 and PR 2 are merged (PRs #58, #59) and not deployed yet. Backend PRs up to #56 and frontend PRs up to #41 are deployed on the temporary VPS.
+
+## 2026-11-19 — Damaged question text from PDF extraction (`fix/question-text-split-letters`)
+
+- **Symptom:** biology question 1852 (`nct-bio-tg-2026-matching-0042`) showed the header "Мамнуъгоҳи Тоҷикистон С | оли ташкилшавӣ". Stored as `table.rows [["Мамнуъгоҳи Тоҷикистон С", "оли ташкилшавӣ"]]`; " | " is how the frontend joins the two cells, the data has no separator character.
+- **Root cause:** the package itself. The external PDF extractor writes matching headers as `columnHeaders { left, right }` cut at a column x-coordinate, and the cut fell inside the word "Соли". `question-package-adapter.js` copied `left`/`right` unchanged. Two more records (`-0097`, `-0107`) are worse: the end of the stem (after the hyphenated "вита-") landed in the headers. No DOCX parser or character split exists in this code.
+- **Import fix:** `src/utils/question-text-audit.js` (pure). The adapter moves a single stranded letter back (`CONTENT_SPLIT_WORD_REPAIRED`) and joins a capital cut off a short item such as "З анбӯруғҳо" (same code); any other damaged header pair is stored as is with `CONTENT_SPLIT_WORD_SUSPECTED`. Single-letter words of the question language (tg: ё, у, ӯ; ru: в, к, с, о, а, и, я, у) are never moved. `convertContent` takes `{ language }` and sees the preceding text block.
+- **Audit:** `node scripts/audit-question-text.js [--bank] [--json] [--examples]` (READ ONLY). Local `everest_db`, 3431 questions: bio 6 with findings (split header 3, hyphen wrap 4, stranded letter 1), physics 13 (double space 23 in nuclear equations, hyphen wrap 6, space before punctuation 2), chemistry 3 (space before punctuation 3), Tajik 9 (space before punctuation 5, hyphen wrap 3, stranded letter 1), demo `biologiya` 1 (three equal "Salom" items). None: replacement, control or invisible characters, "|" in text, empty cells, uneven rows, missing keys, keys pointing at unknown options.
+- **Data fix:** `node scripts/fix-question-text.js` (`--dry-run` default, `--apply --log <file|->`, `--rollback <log>`). Automatic: 2 rows (1852 header; 1880 matching item l4 "З анбӯруғҳо" → "Занбӯруғҳо"). Manual review: 51 findings in 30 questions, printed and written to the log. Only content JSON changes; an integrity snapshot (ids, keys, positions, labels, answer keys, test links, attempt orders and grading snapshots, student answers) must match before and after, or the transaction rolls back. Guards on published content are disabled inside the transaction only (decisions.md 2026-11-19). One `audit_events` row `question.text_repaired` per question.
+- **Attempts:** 1852 is in one graded attempt (243). Grading snapshots hold only keys, so the score and the answer review do not change; the review shows the new text.
+- **Checked:** disposable-database suite exit 0, 484 passed, 0 failed (new `tests/unit/question-text-audit.test.js`, 7 tests with the real fragments, including an adapter run). `test:sources`, `test:integrity`: exit 0. `verify-database.js`: valid. On a disposable copy of `everest_db` (`CREATE DATABASE … TEMPLATE`, dropped after): `--apply` changed 2 rows; the guards are enabled again and still reject edits (`QUESTION_IMMUTABLE`); attempt 243 result unchanged (0.00 / 30.00, same keys) with the new header; `--rollback` restored content byte for byte (md5 of all question and matching content equal); a second rollback is refused; a second `--apply` changes 0 rows; `--apply` without `--log` is refused.
+- **Not done:** `--apply` on local `everest_db` (blocked by the session permission check; a dump of the three question tables is in `C:/Temp/everest-question-text-fix/`); the server. The 51 manual findings need a teacher; 1907 and 1917 need the stem rebuilt from the book and the headers removed or retyped.
 
 ## 2026-11-14 — Home readiness lists every trainable subject (`feat/home-readiness-all-subjects`)
 
