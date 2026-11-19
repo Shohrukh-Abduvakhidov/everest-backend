@@ -771,6 +771,13 @@ Password login uses a generic invalid-credentials response for unknown phones an
 - **Hidden from staff screens.** Admin test lists, test detail/edit, lesson links, extra-attempt grants, staff results and course assignment lists filter `origin = 'authored'`. Staff can therefore not see trainer results yet (next step).
 - **Result DTO:** `correct` added to reviewed questions (full points), for all attempts. It is additive.
 
+## 2026-11-19 — Repairing damaged text of published questions in place
+
+- **Context:** PDF extraction left words cut across matching header cells in published questions, one of them already in a graded attempt. Published questions are immutable (`guard_question`, `guard_question_child`); the normal path is a copy, which gives a new id and would detach the question from tests, attempts and trainer history.
+- **Decision:** `scripts/fix-question-text.js` changes only the `content` JSON of `questions`, `question_options` and `question_matching_items`, in place, in one transaction. It disables `questions_guard`, `question_options_guard` and `question_matching_guard` inside that transaction only and enables them before commit, like migration `20261109010000000`. It is an operator script, not a service; the API keeps the immutability rule.
+- **Limits:** only repairs that are certain (one stranded letter between header cells; one stranded capital at the start of a short item). Everything else is reported for manual review. Answer keys, ids, keys, positions, labels, test links, attempt rows and student answers are compared before and after; any difference aborts. Every applied change is logged with its old value and can be reverted with `--rollback`. No migration.
+- **Why acceptable:** grading snapshots store keys only (`leftKeys`, `rightKeys`, `answerData`, `optionKeys`), so changing the visible text of a cut word cannot change any score or answer.
+
 ## 2026-11-09 — Merge of the duplicate Tajik subject
 
 - **Canonical subject:** `zaboni-tochiki` (the older one). `tajik_language` (created by the `nct-tg-2026` import) is merged into it and deleted; subjects have no archive state.
