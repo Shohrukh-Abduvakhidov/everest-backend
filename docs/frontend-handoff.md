@@ -1036,6 +1036,114 @@ Three read-only routes for the signed-in student. Any active account may call th
 - **`topics`**: finished attempts of every kind (course tests, trainer, mock exam) submitted in the last `windowDays` days (from `since`). Per topic: `points` ÷ `maxPoints`; an unanswered question earns 0. A topic appears only with at least `minQuestions` questions. `weak` is below `weakBelowPercent`, `strong` from `strongFromPercent` (on the rounded `percent`: exactly 60 is not weak, exactly 85 is strong). Topics in between are in neither list. At most 5 per list; weak lists the lowest first, strong the highest first, ties by more questions. Show the thresholds from the response instead of hard-coding them.
 - To practise a weak topic, start a training with `POST /trainer/attempts { subject: subjectId, topicCode, difficulty: "mixed", count }` when the topic exists in `/trainer/catalog`.
 
+### Staff progress (M12 PR 3, 2026-11-19)
+
+Read-only screens for teachers, administrators and owners. No CSRF (GET only).
+
+| Route | Access | Screen | Errors |
+|---|---|---|---|
+| `GET /admin/groups/:groupId/progress` | `progress.read` | Group: one row per student | `400 INVALID_GROUP_ID`, `404 GROUP_NOT_FOUND` |
+| `GET /admin/courses/:courseId/progress` | `progress.read` | Course: modules, lessons, students | `400 INVALID_COURSE_ID`, `404 COURSE_NOT_FOUND` |
+| `GET /admin/users/:userId/analytics` | `progress.read` | One student (home + analytics + history) | `400 INVALID_USER_ID`, `404 USER_NOT_FOUND` |
+| `GET /admin/users/:userId/attempts` | `progress.read` | History tab of one student | as above |
+| `GET /admin/tests/:testId/assignments/:assignmentId/results` | `tests.results.read` | Results of one assignment | `400 INVALID_TEST_ID` / `INVALID_ASSIGNMENT_ID`, `404 ASSIGNMENT_NOT_FOUND` |
+
+**Who sees what (decision D1).** Owner and admin see every group, course, student and assignment. A teacher sees:
+
+- a group where they have `canViewResults`, and every student who is an active member of such a group (whole student: courses, tests, trainer, mock exams);
+- a course they teach with `canViewResults`, and its students for that course only;
+- an assignment of a course they teach, or to a group they teach, with `canViewResults`.
+
+Anything else answers the same `404` as a missing id. Show "not found" and do not hint that the item exists. Students get `403 ACTION_FORBIDDEN` (no `progress.read`).
+
+**List parameters** (group and course): `limit` 1–100 (default 20), `offset`, `sort`, `order=asc|desc`, `behind=true|false`.
+
+- Group sorts: `name` (default, asc), `lastActivity`, `readiness`, `progress`, `behind` (number of reasons).
+- Course sorts: `name`, `lastActivity`, `progress`, `behind`.
+- Every sort other than `name` defaults to `desc`. Empty values (`null`) always come last. `pagination.total` counts after the `behind` filter.
+- The whole group or course is computed on every request, then sorted and paged. Totals and the course overview always cover everyone, whatever the page.
+
+**"Behind" (decision D5).** `behind: { isBehind, reasons[] }`. A student is behind when any reason is set. Show the reasons as chips:
+
+| Reason | Meaning |
+|---|---|
+| `no_activity_7d` | `lastActivityAt` is empty or older than 7 days (a learning event, a lesson progress write or an attempt start) |
+| `missed_deadline` | an assignment to the student or their group closed without a finished attempt (`missedAssignments`) |
+| `below_pass` | over the last 3 tests that have a pass threshold (latest attempt of each), the mean percent is under the mean threshold |
+| `progress_lag` | in a course, at least 25 points under the median of the students with an active enrollment, only when there are at least 5 of them (group median on the group screen, course median on the course screen) |
+
+The thresholds come back in `rules` (`inactiveDays`, `belowPassTests`, `progressLagPoints`, `progressLagMinStudents`). Show them from the response.
+
+**Group screen** (`GET /admin/groups/:groupId/progress`):
+
+```json
+{
+  "data": {
+    "group": { "id": "5", "code": "11a-3f2c1d", "title": "11 A", "status": "active" },
+    "totals": { "students": 24, "behind": 6, "withoutActivity7d": 3, "averageReadinessPercent": 61.4, "averageProgressPercent": 72.5 },
+    "courses": [{ "courseId": "12", "title": "Biology", "students": 22, "activeStudents": 21, "averagePercent": 70.33 }],
+    "rules": { "inactiveDays": 7, "belowPassTests": 3, "progressLagPoints": 25, "progressLagMinStudents": 5 },
+    "students": [{
+      "userId": "301", "name": "Ali Karimov", "accountStatus": "active",
+      "lastLoginAt": "2026-11-18T07:10:00.000Z", "lastActivityAt": "2026-11-18T08:02:11.000Z",
+      "readiness": { "readinessPercent": 75, "completedTrainings": 12 },
+      "progressPercent": 66,
+      "courses": [{ "courseId": "12", "title": "Biology", "enrollmentActive": true, "totalLessons": 30,
+        "completedLessons": 20, "startedLessons": 2, "notStartedLessons": 8, "percent": 66, "lagging": false }],
+      "recentResults": [{ "attemptId": "77", "testId": "70", "assignmentId": "88", "courseId": "12", "title": "Cells",
+        "attemptNumber": 2, "status": "graded", "score": "8.00", "maxScore": "10.00", "percent": 80,
+        "passPercent": 60, "passed": true, "submittedAt": "…" }],
+      "missedAssignments": { "count": 1, "latest": [{ "assignmentId": "90", "testId": "71", "courseId": "12", "title": "Genetics", "closesAt": "…" }] },
+      "belowPassThreshold": false,
+      "behind": { "isBehind": true, "reasons": ["missed_deadline"] }
+    }],
+    "pagination": { "limit": 20, "offset": 0, "total": 24, "hasMore": true },
+    "serverNow": "…"
+  }
+}
+```
+
+- Groups grant no courses: `courses` lists the courses the members are enrolled in (revoked enrollments excluded). `enrollmentActive: false` means the window has not begun or has ended. Such a course is shown but left out of `progressPercent`, the averages and the median.
+- Lessons = published lessons of published modules, the same total for every student. The student's own course card counts only the lessons open to them now, so the two percentages can differ.
+- `readiness` is the trainer formula of `/me/home` (decision D3). It is `null` until the student has trained.
+- `recentResults`: the last 3 finished course-test attempts (not trainer or mock exams). `belowPassThreshold` is `null` when no test had a threshold.
+
+**Course screen** (`GET /admin/courses/:courseId/progress`): `course`, `totals { students, activeStudents, lessons, averagePercent, averageCompletedLessons, completedCourse, notStarted, behind }`, `modules[{ moduleId, title, position, lessonCount, averagePercent, lessons[{ lessonId, title, position, lessonType, completed, started, notStarted, completedPercent }] }]`, `rules`, `students[]`, `pagination`, `serverNow`.
+
+- One student row: `{ userId, name, accountStatus, lastLoginAt, lastActivityAt, enrollmentActive, progress: { totalLessons, completedLessons, startedLessons, notStartedLessons, percent, lagging }, modules[{ moduleId, totalLessons, completedLessons, startedLessons, notStartedLessons, percent }], recentResults[], missedAssignments, belowPassThreshold, behind }`.
+- Results, missed assignments and `below_pass` count only tests of this course. There is no trainer readiness on this screen.
+- Lesson counts cover every student with a non-revoked enrollment. Averages cover students with an active enrollment. `completedPercent` = completed ÷ students, rounded down.
+- For one lesson's watch details, keep using `GET /admin/courses/:courseId/lessons/:lessonId/progress`.
+
+**Student screen** (`GET /admin/users/:userId/analytics`): `{ student: { id, name, accountStatus, lastLoginAt }, scope: { kind, courseIds }, home, analytics, attempts: { attempts[], pagination } }`.
+
+- `scope.kind = "full"`: `home` is exactly the `/me/home` response of that student, and `analytics` exactly `/me/analytics`. `attempts` is the first 20 finished attempts of every kind (course tests, trainer, mock exams).
+- `scope.kind = "courses"` (a course teacher only): `home` keeps only `scope.courseIds` (courses, tests, recent results, continue lesson). `home.readiness`, `home.week` and `analytics` are `null`, and `attempts` holds only course tests of those courses. Hide the trainer, week and analytics blocks.
+- More history: `GET /admin/users/:userId/attempts?origin&subjectId&limit&offset`, with the same filters and response as `/me/attempts`.
+- The staff view never finalizes expired attempts. A just-expired attempt may still show as running until `worker:attempts` closes it (within 30 s).
+
+**Assignment results** (`GET /admin/tests/:testId/assignments/:assignmentId/results?sort=name|percent|attempts|status&order&status&limit&offset`):
+
+```json
+{
+  "data": {
+    "test": { "id": "70", "title": "Cells", "maxAttempts": 3, "resultPolicy": "best", "passPercent": 60 },
+    "assignment": { "id": "88", "status": "active", "opensAt": "…", "closesAt": "…", "audience": { "type": "group", "id": "5" } },
+    "totals": { "students": 24, "notStarted": 4, "inProgress": 1, "finished": 19, "passed": 15, "failed": 4, "attempts": 31, "averagePercent": 71.05, "averageScore": 7.1 },
+    "students": [{ "userId": "301", "name": "Ali Karimov", "status": "passed", "attemptsUsed": 2, "maxAttempts": 3,
+      "result": { "attemptId": "77", "attemptNumber": 2, "score": "8.00", "maxScore": "10.00", "percent": 80, "passed": true, "submittedAt": "…" },
+      "bestPercent": 80, "lastSubmittedAt": "…" }],
+    "pagination": { "limit": 20, "offset": 0, "total": 24, "hasMore": true },
+    "serverNow": "…"
+  }
+}
+```
+
+- Rows: the audience (the user, the active members of the group, or the enrolled students of the course or lesson) plus anyone who already has an attempt, e.g. a student who left the group.
+- `status`: `passed` / `failed` (result against `passPercent`), `finished` (no threshold), `in_progress`, `not_started`.
+- `result` follows the test's `resultPolicy` (first, best or last finished attempt). `maxAttempts` includes extra attempts and is `null` when unlimited. Averages are over `result`.
+- The attempt list with answers stays at `GET /admin/tests/:testId/attempts?assignmentId=`.
+
 ### Admin: tests (M10)
 
 | Method | Path | Permission | Purpose |
@@ -1084,7 +1192,7 @@ As seeded by the migrations:
 | `tests.read`, `tests.manage`, `tests.assign`, `tests.results.read` | ✓ | ✓ | ✓ scoped | — |
 | `tests.results.regrade` | ✓ | ✓ | — | — |
 | `tests.publish` | ✓ | ✓ | — | — |
-| `progress.read` (no route uses it yet; staff progress views in M12 PR 3) | ✓ | ✓ | ✓ scoped | — |
+| `progress.read` (staff progress views, M12 PR 3) | ✓ | ✓ | ✓ scoped | — |
 
 Notes:
 

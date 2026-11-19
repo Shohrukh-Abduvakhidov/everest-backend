@@ -3,7 +3,7 @@ project: EVEREST Backend
 roadmap_version: 1
 current_milestone: M12
 current_status: in_progress
-updated_at: 2026-11-14
+updated_at: 2026-11-19
 architecture: docs/architecture.md
 ---
 
@@ -94,6 +94,7 @@ This roadmap orders implementation; it does not replace the [current architectur
 - **Verification:** Unit and real-PostgreSQL integration tests passed rotation races, replay-family revocation, expiry, logout idempotency, ownership, safe serialization, blocking regression, and transaction rollback. The full regression suite passed.
 - **Documentation updates:** API, security decisions, architecture, progress, roadmap, and current handoff.
 - **Exclusions:** RBAC and password recovery.
+- **Follow-up (2026-11-19, merged in PR #62, deployed 2026-11-19):** 30 s grace window for a refresh token replayed after a lost response (same session, original refresh expiry, audited), a per-session refresh limit and separate per-IP limits for refresh and password login, cookies cleared only on 401. No migration. Disposable-database suite: 491 passed. PR #63 (open) lists the four new variables in `deploy/env.example`.
 
 ## M02E — Password recovery
 
@@ -288,6 +289,7 @@ This roadmap orders implementation; it does not replace the [current architectur
 - **Real packages:** the Tajik (972 questions) and biology pilot (20 questions) packages pass a dry run with 0 errors and import fully into a disposable database.
 - **Not verified:** very large packages. `npm test` runs in a disposable database: 220 tests, 219 passed, 1 skipped.
 - **Follow-up (merged in PR #41, deployed):** `npm run import:answer-keys` attaches `proposed` keys from an `everest.answer-key-import.v1` sidecar file to imported drafts, with optional `--set-matching-rules`. No migration. `tests/integration/answer-key-import.test.js` (11 subtests) and `tests/unit/answer-key-import.test.js` pass on a disposable database.
+- **Follow-up (2026-11-19, merged in PR #61, deployed and applied 2026-11-19):** the package adapter repairs a letter cut off across matching column headers; `scripts/audit-question-text.js` (read-only) and `scripts/fix-question-text.js` (dry run, apply with a log, rollback). On `everest_prod` the fix changed exactly 2 rows (`nct-bio-tg-2026-matching-0042`, `-0070`); 51 findings in 30 questions wait for manual review. No migration.
 - **Follow-up (merged in PR #42, dry-run fix PR #44, deployed):** `npm run verify:keys` and `npm run publish:questions` verify proposed keys and publish ready drafts of one bank through the admin services (runbook §7). No migration. Unit and integration tests pass on a disposable database (`npm test`: 371 passed). **Not run** against `nct-tg-2026`.
 - **Goal:** Import reviewable indexed question content safely and repeatably.
 - **Dependencies:** M07–M08 and approved input formats.
@@ -333,10 +335,10 @@ This roadmap orders implementation; it does not replace the [current architectur
 
 ## M12 — Learning progress and analytics
 
-- **Status:** In progress. Plan approved by the owner on 2026-11-14 (decisions D1–D7 in `docs/decisions.md`), delivered in three PRs:
-   1. **PR 1** (merged in PR #58): `learning_activity_events` written by the player, lesson completion by test and attempt finalization; `GET /me/home`; `GET /me/attempts`; permission `progress.read`; migration `20261116010000000`. `npm test` parts on a disposable database: 463 passed, 0 failed; `test:migrations` 41/41/40/41.
-   2. **PR 2** (branch `feat/m12-student-analytics`, awaiting review): `GET /me/analytics` — totals, first-attempt statistics, strong and weak topics (D4, D6). No migration. Disposable-database suite: 475 passed, 0 failed.
-   3. **PR 3** (planned): staff group and course progress summaries, student analytics and trainer/mock exam results for teachers in scope (`progress.read`).
+- **Status:** In progress until PR 3 is merged. Plan approved by the owner on 2026-11-14 (decisions D1–D7 in `docs/decisions.md`), delivered in three PRs:
+   1. **PR 1** (merged in PR #58, deployed): `learning_activity_events` written by the player, lesson completion by test and attempt finalization; `GET /me/home`; `GET /me/attempts`; permission `progress.read`; migration `20261116010000000`. `npm test` parts on a disposable database: 463 passed, 0 failed; `test:migrations` 41/41/40/41.
+   2. **PR 2** (merged in PR #59, deployed): `GET /me/analytics` — totals, first-attempt statistics, strong and weak topics (D4, D6). No migration. Disposable-database suite: 475 passed, 0 failed. Follow-up PR #60 (merged, deployed): home readiness lists every trainable subject.
+   3. **PR 3** (branch `feat/m12-staff-progress`, awaiting review): `GET /admin/groups/:groupId/progress`, `GET /admin/courses/:courseId/progress`, `GET /admin/users/:userId/analytics` and `/attempts`, `GET /admin/tests/:testId/assignments/:assignmentId/results`; D1 scope, D5 "behind" reasons. No migration. Verification in `docs/progress.md` (2026-11-19).
 - **Goal:** Produce access-controlled learning insights.
 - **Dependencies:** M07 and M11.
 - **Deliverables:** Lesson/course progress, subject readiness, test history, strong/weak topics, profile analytics, homepage summaries, and required first-attempt statistics.
@@ -438,7 +440,7 @@ This roadmap orders implementation; it does not replace the [current architectur
 ## M21 — Deployment
 
 - **Status:** In progress (partial). Running on a temporary VPS shared with another project, on sslip.io hosts.
-- **Done:** docker compose stack (PostgreSQL 18, backend, two workers, SeaweedFS, frontend) with memory limits; `deploy.sh` with `:prev` image rollback and a pre-deploy dump; host nginx sites `everest-app`, `everest-api`, `everest-files` (large parts, Range, streaming) with Let's Encrypt TLS; daily local backups and weekly restore check; `TRUST_PROXY`; data moved to `everest_prod` (PRs #51, #52, #56).
+- **Done:** docker compose stack (PostgreSQL 18, backend, two workers, SeaweedFS, frontend) with memory limits; `deploy.sh` with `:prev` image rollback and a pre-deploy dump; host nginx sites `everest-app`, `everest-api`, `everest-files` (large parts, Range, streaming) with Let's Encrypt TLS; daily local backups and weekly restore check; `TRUST_PROXY`; data moved to `everest_prod` (PRs #51, #52, #56). Last deploy 2026-11-19: backend up to PR #62 (no new migration, 41 applied), frontend up to PR #47, the question text fix applied (2 rows).
 - **Remaining:** stage 2c server hardening; off-site encrypted backups (Backblaze B2); Telegram alerts, uptime and disk monitoring; the final domain `everestlc.tj` (env, storage CORS, frontend rebuild, certificates).
 - **Goal:** Operate EVEREST safely in production.
 - **Dependencies:** M20 and approved infrastructure/provider choices.

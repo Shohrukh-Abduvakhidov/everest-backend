@@ -4,7 +4,33 @@ Updated: 2026-11-19.
 
 ## Current increment
 
-Refresh resilience on `feat/refresh-resilience` (awaiting review). Question text repair is merged (PR #61). M12 PR 1 and PR 2 are merged (PRs #58, #59) and not deployed yet. Backend PRs up to #56 and frontend PRs up to #41 are deployed on the temporary VPS.
+M12 PR 3 (staff progress views) on `feat/m12-staff-progress` (awaiting review). Deployed on the temporary VPS on 2026-11-19: backend up to PR #62 (M12 PR 1 and PR 2, the question text repair applied to 2 rows, refresh resilience), frontend up to PR #47. PR #63 (deploy/env.example variables) is open.
+
+## 2026-11-19 — M12 PR 3: staff progress views (`feat/m12-staff-progress`)
+
+- **What:** five read-only routes.
+   - Group summary `GET /admin/groups/:groupId/progress`: one row per active member with name, last login and activity, readiness, lessons per course, last 3 results, missed assignments and D5 reasons. Sorting, paging, `behind` filter.
+   - Course summary `GET /admin/courses/:courseId/progress`: per module and lesson completed/started/not started, per-student module breakdown, averages, who is behind.
+   - Student view `GET /admin/users/:userId/analytics`: `/me/home` and `/me/analytics` as the student sees them plus the first page of attempts. History in `GET /admin/users/:userId/attempts`.
+   - Assignment results `GET /admin/tests/:testId/assignments/:assignmentId/results`: status per student, attempts, result by the result policy, averages.
+   - Scope by D1 inside the queries, 404 outside it.
+   - New: `src/repositories/stats/staff-progress-repository.js`, `staff-progress-service.js`, controller, `progress-admin-middleware.js`; D5 and readiness formulas in `utils/learning-metrics.js` (the trainer uses the same readiness function now).
+   - `student-home-service` builders take a student id and an optional course filter (the `/me/*` behaviour is unchanged).
+   - No migration, no new env. Decisions: `docs/decisions.md` 2026-11-19.
+- **Already there and reused:** the `/me/*` builders, the M07-D lesson summary (unchanged), `selectResultAttempt`/`effectiveMaxAttempts`/`attemptPassed` for results.
+- **Tests:**
+   - `tests/integration/staff-progress.test.js` (9 subtests): group rows with readiness 75 from two subjects, course percents, recent results, missed deadline (running attempt only, joined before the close, not enrolled → not counted), each D5 reason including the median with 6 students; sorting with nulls last, paging, `behind` filter, invalid parameters; scope: teacher with the flag, without it, of another group, course teacher (404 `GROUP_NOT_FOUND`/`COURSE_NOT_FOUND`/`USER_NOT_FOUND`/`ASSIGNMENT_NOT_FOUND`); empty group; student without activity; course modules and lessons; course-limited student view without trainer, week or analytics; assignment results (best policy, in progress, not started, averages); HTTP: student 403, foreign group 404 identical to a missing one, no phone/token/answer fields.
+   - `tests/unit/learning-metrics.test.js`: readiness, median, `below_pass`, `progress_lag` (5-student minimum, exactly 25 points), inactivity boundary.
+- **EXPLAIN** (disposable database, 2200 students, a group of 200, 79 000 lesson progress rows, 60 000 attempts, 110 000 activity events; script outside the repository):
+   - Execution times: students 0.6 ms, last activity 4.6 ms, course progress 40 ms, readiness windows 65 ms, recent results 32 ms, pass thresholds 47 ms, missed assignments 30 ms (was 353 ms before the rewrite to two branches and a hashed `NOT IN`), module progress 10 ms, assignment audience 9 ms, assignment attempts 3 ms.
+   - Seq scans only on small tables (`group_members`, `tests`).
+   - Whole services, warm: group 110 ms, course with 2200 students 425–600 ms, assignment results 80–100 ms. First call 700 ms (cold cache).
+- **Checked:**
+   - Disposable-database suite exit 0, 505 passed, 0 failed (includes `test:sources`, `test:integrity`, `test:server`).
+   - `verify-database.js`: valid, 41 migrations.
+   - OpenAPI test (route coverage and documented codes) passes.
+   - Only disposable test servers on ephemeral ports ran; nothing left running.
+- **Not checked:** the frontend screens; the server (not deployed).
 
 ## 2026-11-19 — Refresh resilience (`feat/refresh-resilience`)
 
