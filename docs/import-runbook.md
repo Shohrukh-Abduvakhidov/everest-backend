@@ -40,6 +40,8 @@ Fix the package until the dry run reports `"status": "valid"`. Warnings do not b
 | `IMAGE_BLOCK_APPENDED` | an image linked in `question_assets` had no image block; it was appended to the question content | check its position during review |
 | `QUESTION_TYPE_MAPPED` / `INTERACTION_SETTINGS_DROPPED` | an `open` question was imported as `short_text`/`numeric`; its input-cell settings are not stored | review the grading rule later (M10/M11) |
 | `MATCHING_COLUMN_HEADERS_AS_TABLE` | matching column headers were stored as a one-row table | none |
+| `CONTENT_SPLIT_WORD_REPAIRED` | PDF extraction cut a letter off its word and the importer joined it back: a stranded letter between column headers (`Тоҷикистон С` + `оли` → `Тоҷикистон` + `Соли`) or a stranded capital in a short item (`З анбӯруғҳо` → `Занбӯруғҳо`) | glance at the question during review |
+| `CONTENT_SPLIT_WORD_SUSPECTED` | column headers look damaged but the repair is not certain (stem text in the headers, a word cut after several letters, an empty header); stored as is | fix the question text during review; `node scripts/audit-question-text.js` lists such questions after import |
 | `PACKAGE_NOT_READY_FOR_IMPORT` / `PACKAGE_EXTRACTION_INCOMPLETE` | the package itself says it is a pilot or partial | import only if a draft review of a partial book is intended |
 
 ## 2. Real run

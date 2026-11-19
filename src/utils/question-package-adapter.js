@@ -1,5 +1,6 @@
 import { isPlainObject } from './question-content.js'
 import { sha256 } from './question-package.js'
+import { repairColumnHeaders, repairStrandedInitial } from './question-text-audit.js'
 
 // Converts the relational `everest.question-import.v1` package (manifest.json + data/*.json
 // entity envelopes, see docs/import-contract.md §9) into the importer's internal model.
@@ -173,7 +174,16 @@ function textBlock(text, marks) {
    return { type: 'text', text, ...(marks.length ? { marks } : {}) }
 }
 
-function convertParagraph(block, warn) {
+// PDF extraction sometimes cuts a capital letter off the first word ("З анбӯруғҳо"). Only the
+// unambiguous short-item case is repaired (utils/question-text-audit.js), with a warning.
+function repairText(text, warn, context) {
+   const repaired = repairStrandedInitial(text, context.language)
+   if (repaired === null) return text
+   warn('CONTENT_SPLIT_WORD_REPAIRED', `a letter cut off its word was joined back: ${repaired.slice(0, 200)}`)
+   return repaired
+}
+
+function convertParagraph(block, warn, context) {
    const children = Array.isArray(block.children) ? block.children : []
    if (children.some((child) => child?.type === 'math' || child?.type === 'chemistry')) {
       warn('CONTENT_INLINE_FORMULA_SPLIT', 'inline math/chemistry was split into separate formula blocks')
@@ -207,7 +217,7 @@ function convertParagraph(block, warn) {
    }
    const { marks, mixed } = commonMarks(children)
    if (mixed) warn('CONTENT_INLINE_MARKS_FLATTENED', 'inline marks inside a paragraph were reduced to the marks shared by the whole text')
-   return [textBlock(text, marks)]
+   return [textBlock(repairText(text, warn, context), marks)]
 }
 
 function plainText(blocks) {
@@ -219,11 +229,25 @@ function plainText(blocks) {
    }).join('\n')
 }
 
-function convertBlock(block, warn) {
+// The column boundary of matching headers comes from PDF coordinates and can fall inside a
+// word: { left: "Мамнуъгоҳи Тоҷикистон С", right: "оли ташкилшавӣ" }. A single stranded letter
+// is moved back to its word; any other damaged pair is kept as is and reported for review.
+function convertColumnHeaders(block, warn, context) {
+   warn('MATCHING_COLUMN_HEADERS_AS_TABLE', 'matching column headers were stored as a one-row table in the question content')
+   const repair = repairColumnHeaders(String(block.left ?? ''), String(block.right ?? ''), context)
+   if (repair.status === 'fixed') {
+      warn('CONTENT_SPLIT_WORD_REPAIRED', `a letter cut off a column header was moved back: ${`${repair.left} | ${repair.right}`.slice(0, 200)}`)
+   } else if (repair.status === 'review') {
+      warn('CONTENT_SPLIT_WORD_SUSPECTED', `column headers look damaged (${repair.reason}); check the question text`)
+   }
+   return [{ type: 'table', rows: [[repair.left, repair.right]] }]
+}
+
+function convertBlock(block, warn, context) {
    if (!isPlainObject(block)) return [block]
    switch (block.type) {
       case 'paragraph':
-         return convertParagraph(block, warn)
+         return convertParagraph(block, warn, context)
       case 'line_group': {
          const lines = Array.isArray(block.lines) ? block.lines : []
          if (lines.some((line) => (line?.children || []).some((child) => child?.type !== 'text' || child.marks?.length))) {
@@ -253,16 +277,21 @@ function convertBlock(block, warn) {
          return [{ type: 'table', rows }]
       }
       case 'columnHeaders':
-         warn('MATCHING_COLUMN_HEADERS_AS_TABLE', 'matching column headers were stored as a one-row table in the question content')
-         return [{ type: 'table', rows: [[String(block.left ?? ''), String(block.right ?? '')]] }]
+         return convertColumnHeaders(block, warn, context)
       default:
          return [block]
    }
 }
 
-function convertContent(content, warn) {
+// options.language selects the single-letter words of the question language (tg, ru).
+function convertContent(content, warn, { language } = {}) {
    if (!isPlainObject(content) || !Array.isArray(content.blocks)) return content
-   return { blocks: content.blocks.flatMap((block) => convertBlock(block, warn)) }
+   const blocks = []
+   for (const block of content.blocks) {
+      const previousText = blocks.findLast((converted) => converted?.type === 'text')?.text ?? ''
+      blocks.push(...convertBlock(block, warn, { language, previousText }))
+   }
+   return { blocks }
 }
 
 function referencedAssets(content, into) {
@@ -450,7 +479,7 @@ function adaptEntityPackage(pkg) {
          ...(record.languageCode === undefined ? {} : { language: record.languageCode }),
          ...(record.difficulty === undefined || record.difficulty === null ? {} : { difficulty: record.difficulty }),
          ...(record.difficultySource === undefined || record.difficultySource === null ? {} : { difficultySource: record.difficultySource }),
-         content: convertContent(record.content, warn),
+         content: convertContent(record.content, warn, { language: record.languageCode }),
          ...(interactionSettings === undefined ? {} : { interactionSettings }),
          source: mapSourceMetadata(record.sourceMetadata, 'questions', collect),
       }
@@ -480,7 +509,7 @@ function adaptEntityPackage(pkg) {
       target.question.options = entries.sort(byPosition).map(({ record }) => ({
          key: record.optionKey,
          ...(record.sourceLabel === undefined || record.sourceLabel === null ? {} : { label: record.sourceLabel }),
-         content: convertContent(record.content, target.warn),
+         content: convertContent(record.content, target.warn, { language: target.question.language }),
       }))
    }
    for (const [, entries] of groupBy(data.question_matching_items, 'questionExternalId')) {
@@ -489,7 +518,7 @@ function adaptEntityPackage(pkg) {
       const side = (name) => entries.filter(({ record }) => record.side === name).sort(byPosition).map(({ record }) => ({
          key: record.itemKey,
          ...(record.sourceLabel === undefined || record.sourceLabel === null ? {} : { label: record.sourceLabel }),
-         content: convertContent(record.content, target.warn),
+         content: convertContent(record.content, target.warn, { language: target.question.language }),
       }))
       const unknownSide = entries.find(({ record }) => !['left', 'right'].includes(record.side))
       if (unknownSide) collect.error('PACKAGE_SCHEMA_INVALID', `${unknownSide.path}.side`, 'side must be left or right', unknownSide.record.questionExternalId)
@@ -509,7 +538,7 @@ function adaptEntityPackage(pkg) {
          ...(record.answerDataExternal === undefined || record.answerDataExternal === null
             ? {}
             : { answerData: mapAnswerData(record.answerDataExternal, target.question.type, target.warn) }),
-         ...(record.explanation === undefined ? {} : { explanation: convertContent(record.explanation, target.warn) }),
+         ...(record.explanation === undefined ? {} : { explanation: convertContent(record.explanation, target.warn, { language: target.question.language }) }),
       }
    }
    for (const entry of data.question_topics) {
