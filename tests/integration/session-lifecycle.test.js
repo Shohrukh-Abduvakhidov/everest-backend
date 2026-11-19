@@ -8,6 +8,7 @@ import env from '../../src/configs/env.js';
 import * as authRepository from '../../src/repositories/auth-repository.js';
 import * as sessionRepository from '../../src/repositories/session-repository.js';
 import { withTransaction } from '../../src/repositories/transaction-repository.js';
+import { hashRefreshToken } from '../../src/utils/refresh-token.js';
 import {
   createSessionLifecycleTestService,
   createSessionTestService,
@@ -22,6 +23,9 @@ const config = {
   jwtAccessSecret: 'session-lifecycle-integration-secret-longer-than-32-characters',
   authSessionTtlSeconds: 900,
   authRefreshTtlSeconds: 86400,
+  authRefreshReuseGraceSeconds: 30,
+  authRefreshSessionRateLimit: 1000,
+  authRefreshIpRateLimit: 10000,
   telegram: {
     clientId: 'test-client', clientSecret: 'test-secret', redirectUri: 'http://localhost/callback',
     botUsername: 'test_bot', botToken: 'test-token', webhookSecret: 'test-webhook',
@@ -82,6 +86,22 @@ async function api(port, path, {
   return { response, body: await response.json() };
 }
 
+function refreshCookie(response) {
+  const value = cookieValue(response, 'everest_refresh');
+  return value ? decodeURIComponent(value) : value;
+}
+
+function refresh(port, refreshToken) {
+  return api(port, '/api/v1/auth/refresh', { method: 'POST', refreshToken });
+}
+
+async function listen(app) {
+  const server = await new Promise((resolve) => {
+    const listener = app.listen(0, '127.0.0.1', () => resolve(listener));
+  });
+  return { server, port: server.address().port };
+}
+
 async function cleanup(client) {
   if (!fixtureIds.length) return;
   await client.query('DELETE FROM audit_events WHERE actor_user_id = ANY($1::bigint[]) OR subject_user_id = ANY($1::bigint[])', [fixtureIds]);
@@ -93,7 +113,25 @@ async function cleanup(client) {
 test('secure multi-device session lifecycle integration', async (t) => {
   const client = new Client(env.database);
   await client.connect();
-  await client.query("DELETE FROM auth_security_counters WHERE scope = 'refresh.ip'");
+  const clearRefreshCounters = () => client.query(
+    "DELETE FROM auth_security_counters WHERE scope IN ('refresh.ip', 'refresh.session')"
+  );
+  const sessionState = async (sessionId) => (await client.query(
+    `SELECT session.revoked_at,
+       count(*) FILTER (WHERE token.revoked_at IS NULL)::int AS live_tokens,
+       count(*) FILTER (WHERE token.revoked_at IS NULL AND token.used_at IS NULL)::int AS live_unused
+     FROM auth_sessions AS session JOIN auth_refresh_tokens AS token ON token.session_id = session.id
+     WHERE session.id = $1 GROUP BY session.id`,
+    [sessionId]
+  )).rows[0];
+  const auditCount = async (sessionId, code) => (await client.query(
+    'SELECT count(*)::int AS count FROM audit_events WHERE entity_id = $1 AND event_code = $2',
+    [sessionId, code]
+  )).rows[0].count;
+  const tokenUsedAt = async (token) => (await client.query(
+    'SELECT used_at FROM auth_refresh_tokens WHERE token_hash = $1', [hashRefreshToken(token)]
+  )).rows[0].used_at;
+  await clearRefreshCounters();
   const sessionService = createSessionTestService({ config });
   const lifecycle = createSessionLifecycleTestService({ config });
   const authService = createTelegramAuthTestService({ config });
@@ -159,14 +197,201 @@ test('secure multi-device session lifecycle integration', async (t) => {
       assert.equal((await api(port, '/api/v1/auth/refresh', { method: 'POST', refreshToken: deadSession.refreshToken })).response.status, 401);
     });
 
-    await t.test('detects reuse and serializes concurrent refresh', async () => {
+    await t.test('serializes concurrent refresh and keeps one chain after the grace replay', async () => {
       const issued = await issue(sessionService, userId);
       const [first, second] = await Promise.all([
-        api(port, '/api/v1/auth/refresh', { method: 'POST', refreshToken: issued.refreshToken }),
-        api(port, '/api/v1/auth/refresh', { method: 'POST', refreshToken: issued.refreshToken }),
+        refresh(port, issued.refreshToken),
+        refresh(port, issued.refreshToken),
       ]);
-      assert.deepEqual([first.response.status, second.response.status].sort(), [200, 401]);
-      const failed = first.response.status === 401 ? first : second;
+      assert.deepEqual([first.response.status, second.response.status], [200, 200]);
+      const [a, b] = [first, second].map(({ response }) => refreshCookie(response));
+      assert.notEqual(a, b);
+      assert.equal(await auditCount(issued.sessionId, 'auth.refresh.grace_reissued'), 1);
+      // Whichever sibling rotates first closes the other branch.
+      assert.equal((await refresh(port, a)).response.status, 200);
+      const stale = await refresh(port, b);
+      assert.equal(stale.response.status, 401);
+      assert.equal(stale.body.error.code, 'REFRESH_TOKEN_REUSE_DETECTED');
+      assert.ok((await sessionState(issued.sessionId)).revoked_at);
+    });
+
+    await t.test('re-issues a pair for a replay inside the window without extending the refresh lifetime', async () => {
+      const issued = await issue(sessionService, userId);
+      const original = await client.query(
+        'SELECT expires_at FROM auth_refresh_tokens WHERE token_hash = $1', [hashRefreshToken(issued.refreshToken)]
+      );
+      const lost = await refresh(port, issued.refreshToken);
+      assert.equal(lost.response.status, 200);
+      const usedAt = await tokenUsedAt(issued.refreshToken);
+
+      const replay = await refresh(port, issued.refreshToken);
+      assert.equal(replay.response.status, 200);
+      assert.equal(replay.body.data.status, 'refreshed');
+      assert.ok(cookieValue(replay.response, 'everest_access'));
+      const reissued = refreshCookie(replay.response);
+      assert.notEqual(reissued, refreshCookie(lost.response));
+      const stored = await client.query(
+        'SELECT session_id, expires_at FROM auth_refresh_tokens WHERE token_hash = $1', [hashRefreshToken(reissued)]
+      );
+      assert.equal(stored.rows[0].session_id, issued.sessionId);
+      assert.equal(stored.rows[0].expires_at.getTime(), original.rows[0].expires_at.getTime());
+      assert.equal(new Date(replay.body.data.refreshExpiresAt).getTime(), original.rows[0].expires_at.getTime());
+      // The window is anchored at the first use: a replay does not move it.
+      assert.equal((await tokenUsedAt(issued.refreshToken)).getTime(), usedAt.getTime());
+      assert.equal((await sessionState(issued.sessionId)).revoked_at, null);
+      assert.equal(await auditCount(issued.sessionId, 'auth.refresh.grace_reissued'), 1);
+      assert.equal(await auditCount(issued.sessionId, 'auth.refresh.reuse_detected'), 0);
+
+      // The client carries on with the re-issued token.
+      const next = await refresh(port, reissued);
+      assert.equal(next.response.status, 200);
+      assert.equal((await sessionState(issued.sessionId)).live_unused, 1);
+    });
+
+    await t.test('treats a replay outside the window as theft', async () => {
+      const issued = await issue(sessionService, userId);
+      assert.equal((await refresh(port, issued.refreshToken)).response.status, 200);
+      await client.query(
+        `UPDATE auth_refresh_tokens SET used_at = used_at - make_interval(secs => $2)
+         WHERE token_hash = $1`,
+        [hashRefreshToken(issued.refreshToken), config.authRefreshReuseGraceSeconds + 1]
+      );
+      const replay = await refresh(port, issued.refreshToken);
+      assert.equal(replay.response.status, 401);
+      assert.equal(replay.body.error.code, 'REFRESH_TOKEN_REUSE_DETECTED');
+      assert.match(replay.response.headers.get('set-cookie'), /everest_refresh=;/);
+      const state = await sessionState(issued.sessionId);
+      assert.ok(state.revoked_at);
+      assert.equal(state.live_tokens, 0);
+      assert.equal(await auditCount(issued.sessionId, 'auth.refresh.reuse_detected'), 1);
+      assert.equal(await auditCount(issued.sessionId, 'auth.refresh.grace_reissued'), 0);
+    });
+
+    await t.test('turns the window off when the grace period is zero', async () => {
+      const strictApp = createApp({
+        telegramAuth: authService.dependencies,
+        sessionLifecycle: { ...lifecycle.dependencies, config: { ...config, authRefreshReuseGraceSeconds: 0 } },
+      });
+      const strict = await listen(strictApp);
+      try {
+        const issued = await issue(sessionService, userId);
+        assert.equal((await refresh(strict.port, issued.refreshToken)).response.status, 200);
+        const replay = await refresh(strict.port, issued.refreshToken);
+        assert.equal(replay.body.error.code, 'REFRESH_TOKEN_REUSE_DETECTED');
+      } finally {
+        await new Promise((resolve) => strict.server.close(resolve));
+      }
+    });
+
+    await t.test('rejects a replay once the chain moved on, and never touches another session', async () => {
+      const victim = await issue(sessionService, userId);
+      const bystander = await issue(sessionService, otherUserId);
+      const stolen = victim.refreshToken;
+      const rotated = await refresh(port, stolen);
+      // The legitimate client already rotated past the stolen token inside the window.
+      assert.equal((await refresh(port, refreshCookie(rotated.response))).response.status, 200);
+      const replay = await refresh(port, stolen);
+      assert.equal(replay.response.status, 401);
+      assert.equal(replay.body.error.code, 'REFRESH_TOKEN_REUSE_DETECTED');
+      assert.ok((await sessionState(victim.sessionId)).revoked_at);
+      assert.equal(await auditCount(victim.sessionId, 'auth.refresh.grace_reissued'), 0);
+
+      // A token revoked by logout gets no grace either.
+      const loggedOut = await issue(sessionService, userId);
+      const used = await refresh(port, loggedOut.refreshToken);
+      await api(port, '/api/v1/auth/logout', { method: 'POST', refreshToken: refreshCookie(used.response) });
+      assert.equal((await refresh(port, loggedOut.refreshToken)).response.status, 401);
+      assert.equal(await auditCount(loggedOut.sessionId, 'auth.refresh.grace_reissued'), 0);
+
+      assert.equal((await sessionState(bystander.sessionId)).revoked_at, null);
+      assert.equal((await refresh(port, bystander.refreshToken)).response.status, 200);
+    });
+
+    await t.test('limits refresh per session and separately per IP', async () => {
+      await clearRefreshCounters();
+      const sessionLimited = await listen(createApp({
+        telegramAuth: { ...authService.dependencies, config: { ...config, authRefreshSessionRateLimit: 3 } },
+        sessionLifecycle: lifecycle.dependencies,
+      }));
+      try {
+        const busy = await issue(sessionService, userId);
+        let token = busy.refreshToken;
+        for (let index = 0; index < 3; index += 1) {
+          const result = await refresh(sessionLimited.port, token);
+          assert.equal(result.response.status, 200);
+          token = refreshCookie(result.response);
+        }
+        // The key is the session, so rotation does not reset it.
+        const limited = await refresh(sessionLimited.port, token);
+        assert.equal(limited.response.status, 429);
+        assert.equal(limited.body.error.code, 'AUTH_RATE_LIMITED');
+        assert.ok(Number(limited.response.headers.get('retry-after')) >= 1);
+        assert.equal(limited.response.headers.get('set-cookie'), null);
+        // Another session behind the same address is unaffected.
+        const neighbour = await issue(sessionService, userId);
+        assert.equal((await refresh(sessionLimited.port, neighbour.refreshToken)).response.status, 200);
+      } finally {
+        await new Promise((resolve) => sessionLimited.server.close(resolve));
+      }
+
+      await clearRefreshCounters();
+      const ipLimited = await listen(createApp({
+        telegramAuth: {
+          ...authService.dependencies,
+          config: { ...config, authPublicRateLimit: 1, authRefreshIpRateLimit: 3 },
+        },
+        sessionLifecycle: lifecycle.dependencies,
+      }));
+      try {
+        // The shared public limit (1) does not apply to refresh; its own IP limit (3) does.
+        for (let index = 0; index < 3; index += 1) {
+          const own = await issue(sessionService, userId);
+          assert.equal((await refresh(ipLimited.port, own.refreshToken)).response.status, 200);
+        }
+        const fourth = await issue(sessionService, userId);
+        const limited = await refresh(ipLimited.port, fourth.refreshToken);
+        assert.equal(limited.response.status, 429);
+        assert.equal(limited.response.headers.get('set-cookie'), null);
+      } finally {
+        await new Promise((resolve) => ipLimited.server.close(resolve));
+        await clearRefreshCounters();
+      }
+    });
+
+    await t.test('keeps the cookies on a server error and clears them only on 401', async () => {
+      const broken = await listen(createApp({
+        telegramAuth: authService.dependencies,
+        sessionLifecycle: {
+          ...lifecycle.dependencies,
+          transaction: async () => { throw new Error('database unavailable'); },
+        },
+      }));
+      try {
+        const issued = await issue(sessionService, userId);
+        const failed = await refresh(broken.port, issued.refreshToken);
+        assert.equal(failed.response.status, 500);
+        assert.equal(failed.body.error.code, 'INTERNAL_ERROR');
+        assert.equal(failed.response.headers.get('set-cookie'), null);
+        // Nothing was consumed: the same token still works once the server recovers.
+        assert.equal(await tokenUsedAt(issued.refreshToken), null);
+        assert.equal((await refresh(port, issued.refreshToken)).response.status, 200);
+      } finally {
+        await new Promise((resolve) => broken.server.close(resolve));
+      }
+      const rejected = await refresh(port, 'not-a-real-token');
+      assert.equal(rejected.response.status, 401);
+      assert.match(rejected.response.headers.get('set-cookie'), /everest_refresh=;/);
+    });
+
+    await t.test('revokes the whole family, descendants included, on reuse', async () => {
+      const issued = await issue(sessionService, userId);
+      const first = await refresh(port, issued.refreshToken);
+      await client.query(
+        `UPDATE auth_refresh_tokens SET used_at = used_at - make_interval(secs => $2)
+         WHERE token_hash = $1`,
+        [hashRefreshToken(issued.refreshToken), config.authRefreshReuseGraceSeconds + 1]
+      );
+      const failed = await refresh(port, issued.refreshToken);
       assert.equal(failed.body.error.code, 'REFRESH_TOKEN_REUSE_DETECTED');
       const state = await client.query(
         `SELECT session.revoked_at, count(*) FILTER (WHERE token.revoked_at IS NULL)::int AS live_tokens
@@ -181,11 +406,7 @@ test('secure multi-device session lifecycle integration', async (t) => {
         [issued.sessionId]
       );
       assert.equal(audit.rows[0].count, 1);
-      const succeeded = first.response.status === 200 ? first : second;
-      const descendant = decodeURIComponent(cookieValue(succeeded.response, 'everest_refresh'));
-      assert.equal((await api(port, '/api/v1/auth/refresh', {
-        method: 'POST', refreshToken: descendant,
-      })).response.status, 401);
+      assert.equal((await refresh(port, refreshCookie(first.response))).response.status, 401);
     });
 
     await t.test('lists only owned sessions with safe device metadata', async () => {
@@ -327,7 +548,7 @@ test('secure multi-device session lifecycle integration', async (t) => {
       assert.equal(stored.rows[0].live_tokens, 1);
     });
   } finally {
-    await client.query("DELETE FROM auth_security_counters WHERE scope = 'refresh.ip'");
+    await clearRefreshCounters();
     await cleanup(client);
     await client.end();
     await new Promise((resolve) => server.close(resolve));

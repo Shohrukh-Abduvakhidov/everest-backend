@@ -1,5 +1,24 @@
 # Decisions
 
+## 2026-11-19 — Refresh that survives a bad network and a class behind one NAT
+
+**Grace window for a replayed refresh token.** Before, any second use of a refresh token revoked the whole session (`REFRESH_TOKEN_REUSE_DETECTED`). A phone on a weak network that sends the refresh, loses the response and retries was logged out. Now a used token presented again is accepted as a lost response when **all** of these hold, checked under the existing `FOR UPDATE` lock on token, session and account:
+
+- `AUTH_REFRESH_REUSE_GRACE_SECONDS` is above 0 (default 30, max 300);
+- the token was used less than that many seconds ago, counted from its first use (`used_at` is not touched by a replay, so repeats do not move the window);
+- the token itself was never revoked, and the session, its expiry, the token's expiry and the account status are all live;
+- no other token of the same session has been used at or after it (`hasLaterUsedRefreshToken`, compared in SQL). If the real client already rotated past the token, the replay comes from a copy and is theft.
+
+The response is a **new** pair in the same session: a new refresh token whose `expires_at` equals the presented token's (no extension of the refresh lifetime) and a normal access token. The previously issued successor is left alone, so two tabs racing on the same cookie both end up with a working token whatever order their `Set-Cookie` headers arrive in. To keep the family a single chain, every normal rotation now revokes the session's other unused tokens. Every grace response writes `auth.refresh.grace_reissued` (`metadata.secondsSinceUse`); theft keeps `auth.refresh.reuse_detected`.
+
+Why this is safe enough: a replay only ever yields tokens for the session the token belongs to (the session id comes from the token row, not from the request); it cannot revive a revoked session or token; it cannot outlive the original refresh expiry; it is capped by the per-session refresh limit; and the attacker branch and the real one cannot both survive. Whichever rotates first revokes the other, and the loser's next refresh hits a revoked token and revokes the session as before. The remaining risk is someone who copies a token and replays it within 30 seconds of its use before the real client rotates again; that is the deliberate trade-off. `0` restores the old strict behaviour. The raw replacement token is not stored anywhere, which is why the original successor is not re-sent. No migration: the existing `used_at`/`revoked_at` columns are enough.
+
+**Refresh limits.** `refresh.ip` used the shared `AUTH_PUBLIC_RATE_LIMIT` (100 per 15 min per IP). One class of 150 students behind one NAT, each refreshing every 15 minutes, crosses that in one access-token lifetime and blocks the whole room for 15 minutes. Refresh now has `AUTH_REFRESH_IP_RATE_LIMIT` (default 2000, about 13 per student per window for 150 students) and a new `refresh.session` scope, `AUTH_REFRESH_SESSION_RATE_LIMIT` (default 20 per session per window; a healthy client needs one or two). The session key is the session id behind the cookie, looked up from the token hash, used or not, so rotation does not reset it; an unknown token is keyed by its hash and is covered by the IP limit.
+
+**Login per IP.** `login.ip` also used the shared 100. It now has `AUTH_LOGIN_IP_RATE_LIMIT`, default 1000: 150 students at the start of a lesson, with typos, retries and a second device, need roughly 300–600 attempts; 1000 leaves room while still stopping a scripted spray from one address. Password guessing stays bounded by `login.account` (`AUTH_LOGIN_MAX_ATTEMPTS`, 5 per phone per 15 min), which is **not** changed. Registration, recovery and Telegram scopes keep `AUTH_PUBLIC_RATE_LIMIT`.
+
+**Cookies on refresh errors.** The controller cleared the cookies on any error, so a database timeout logged the user out. It now clears them only for an `AppError` with status 401. A 429, 5xx or unexpected error leaves the cookies, and since the failed transaction rolled back, the same token still works on the retry.
+
 ## 2026-11-16 — M12 learning progress and analytics (decisions D1–D7)
 
 Approved by the owner on 2026-11-14 (D5 with the two refinements below). PR 1 builds the data foundation and the student home; the formulas D3–D5 are implemented in PR 2 and PR 3.

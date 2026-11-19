@@ -59,4 +59,18 @@ async function findRefreshSessionCsrfHash(tokenHash, db = pool) {
    return result.rows[0]?.csrf_token_hash || null
 }
 
-export { clearCounter, consumeCounter, findRefreshSessionCsrfHash, findSessionCsrfHash }
+async function findRefreshTokenSessionId(tokenHash, db = pool) {
+   const result = await db.query(
+      'SELECT session_id FROM auth_refresh_tokens WHERE token_hash = $1',
+      [tokenHash],
+   )
+   return result.rows[0]?.session_id || null
+}
+
+export {
+   clearCounter,
+   consumeCounter,
+   findRefreshSessionCsrfHash,
+   findRefreshTokenSessionId,
+   findSessionCsrfHash,
+}

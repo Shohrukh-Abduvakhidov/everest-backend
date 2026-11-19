@@ -55,6 +55,27 @@ function dependencies(overrides = {}) {
    }
 }
 
+function refreshTokenIsLive(token, currentTime) {
+   return (
+      token.token_expires_at > currentTime &&
+      token.session_expires_at > currentTime &&
+      !token.session_revoked_at &&
+      token.status === 'active'
+   )
+}
+
+// A used token presented again counts as a lost response, not theft, only when: the window is on,
+// the token was used less than authRefreshReuseGraceSeconds ago (measured from its first use, so
+// repeats do not slide the window), it was never revoked, and no later token of the same session
+// has been used. Anything else falls through to reuse detection.
+async function isGraceReplay(token, currentTime, config, repository, client) {
+   const graceSeconds = config.authRefreshReuseGraceSeconds || 0
+   if (!graceSeconds || !token.used_at || token.token_revoked_at) return false
+   const elapsed = currentTime.getTime() - new Date(token.used_at).getTime()
+   if (elapsed >= graceSeconds * 1000) return false
+   return !(await repository.hasLaterUsedRefreshToken(token.token_id, client))
+}
+
 async function refreshSessionService(rawToken, overrides) {
    const { config, repository, auth, transaction, now } = dependencies(overrides)
    const tokenHash = hashRefreshToken(rawToken)
@@ -64,6 +85,56 @@ async function refreshSessionService(rawToken, overrides) {
    const outcome = await transaction(async (client) => {
       const token = await repository.findRefreshTokenForUpdate(tokenHash, client)
       if (!token) return { invalid: true }
+      const currentTime = now()
+      const live = refreshTokenIsLive(token, currentTime)
+      const issuePair = async () => {
+         // The replacement inherits the presented token's expiry: neither rotation nor a grace
+         // replay extends the refresh lifetime.
+         await repository.createRefreshToken(
+            {
+               sessionId: token.session_id,
+               tokenHash: hashRefreshToken(replacementToken),
+               expiresAt: token.token_expires_at,
+            },
+            client,
+         )
+         await repository.touchSessionLastUsedNow(token.session_id, client)
+         const expiresAt = new Date(currentTime.getTime() + config.authSessionTtlSeconds * 1000)
+         return {
+            status: 'refreshed',
+            accessToken: await createAccessToken(
+               {
+                  userId: token.user_id,
+                  sessionId: token.session_id,
+                  expiresAt,
+               },
+               config.jwtAccessSecret,
+            ),
+            expiresAt,
+            refreshToken: replacementToken,
+            refreshExpiresAt: token.token_expires_at,
+            user: { id: token.user_id },
+         }
+      }
+      if (live && (await isGraceReplay(token, currentTime, config, repository, client))) {
+         await auth.appendAuditEvent(
+            {
+               actorUserId: token.user_id,
+               subjectUserId: token.user_id,
+               code: 'auth.refresh.grace_reissued',
+               entityType: 'auth_session',
+               entityId: token.session_id,
+               metadata: {
+                  secondsSinceUse: Math.max(
+                     0,
+                     Math.floor((currentTime.getTime() - new Date(token.used_at).getTime()) / 1000),
+                  ),
+               },
+            },
+            client,
+         )
+         return issuePair()
+      }
       if (token.used_at || token.token_revoked_at) {
          await repository.revokeSession(token.session_id, 'refresh_token_reuse', client)
          await repository.revokeSessionRefreshTokens(token.session_id, client)
@@ -80,40 +151,12 @@ async function refreshSessionService(rawToken, overrides) {
          )
          return { reuse: true }
       }
-      const currentTime = now()
-      if (
-         token.token_expires_at <= currentTime ||
-         token.session_expires_at <= currentTime ||
-         token.session_revoked_at ||
-         token.status !== 'active'
-      )
-         return { invalid: true }
+      if (!live) return { invalid: true }
       await repository.markRefreshTokenUsed(token.token_id, client)
-      await repository.createRefreshToken(
-         {
-            sessionId: token.session_id,
-            tokenHash: hashRefreshToken(replacementToken),
-            expiresAt: token.token_expires_at,
-         },
-         client,
-      )
-      await repository.touchSessionLastUsedNow(token.session_id, client)
-      const expiresAt = new Date(currentTime.getTime() + config.authSessionTtlSeconds * 1000)
-      return {
-         status: 'refreshed',
-         accessToken: await createAccessToken(
-            {
-               userId: token.user_id,
-               sessionId: token.session_id,
-               expiresAt,
-            },
-            config.jwtAccessSecret,
-         ),
-         expiresAt,
-         refreshToken: replacementToken,
-         refreshExpiresAt: token.token_expires_at,
-         user: { id: token.user_id },
-      }
+      // A grace replay may have left a sibling token unused; rotating closes every branch except
+      // the one being issued now, so the family stays a single chain.
+      await repository.revokeUnusedSessionRefreshTokens(token.session_id, client)
+      return issuePair()
    })
    if (outcome.reuse) throw invalidRefreshToken('REFRESH_TOKEN_REUSE_DETECTED')
    if (outcome.invalid) throw invalidRefreshToken()

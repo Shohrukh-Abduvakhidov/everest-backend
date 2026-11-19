@@ -47,7 +47,7 @@ test('login rate limits behind a trusted proxy count the real client address', a
    const config = {
       ...env,
       jwtAccessSecret: 'auth-protection-integration-secret-longer-than-32-characters',
-      authPublicRateLimit: 1,
+      authLoginIpRateLimit: 1,
       authRateWindowSeconds: 60,
       authRateBlockSeconds: 60,
    }

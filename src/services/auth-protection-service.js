@@ -37,6 +37,16 @@ async function clearRateLimitService(scope, key, overrides) {
    await repository.clearCounter(scope, securityKey(key, config))
 }
 
+// Rate-limit key for POST /auth/refresh: the session id when the token is known (used or not),
+// otherwise the token hash. Returns null for a malformed token.
+async function refreshRateKeyService(refreshToken, overrides) {
+   const { repository } = dependencies(overrides)
+   const tokenHash = hashRefreshToken(refreshToken)
+   if (!tokenHash) return null
+   const sessionId = await repository.findRefreshTokenSessionId(tokenHash)
+   return sessionId ? `session:${sessionId}` : `token:${tokenHash}`
+}
+
 function validateOrigin(origin, config) {
    if (!origin || !config.corsOrigins.includes(origin)) {
       throw new AppError(403, 'CSRF_ORIGIN_REJECTED', 'Request origin is not allowed')
@@ -68,6 +78,7 @@ async function validateRefreshCsrfService({ refreshToken, token, origin }, overr
 export {
    clearRateLimitService,
    consumeRateLimitService,
+   refreshRateKeyService,
    securityKey,
    validateRefreshCsrfService,
    validateSessionCsrfService,

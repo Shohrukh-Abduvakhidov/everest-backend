@@ -2,6 +2,7 @@ import env from '../configs/env.js'
 import { authenticateService } from '../services/telegram-auth-service.js'
 import {
    consumeRateLimitService,
+   refreshRateKeyService,
    validateRefreshCsrfService,
    validateSessionCsrfService,
 } from '../services/auth-protection-service.js'
@@ -36,15 +37,35 @@ async function limitKey(req, scope, key, limitName) {
    )
 }
 
-function publicRateMiddleware(scope) {
+function publicRateMiddleware(scope, limitName = 'authPublicRateLimit') {
    return async function publicAuthRateMiddleware(req, res, next) {
       try {
          void res
-         await limit(req, scope, 'authPublicRateLimit')
+         await limit(req, scope, limitName)
          next()
       } catch (error) {
          next(error)
       }
+   }
+}
+
+// Per-session refresh limit. The key is the session behind the refresh cookie (stable across
+// rotations); an unknown token is keyed by its own hash. Requests without a cookie only count
+// against the IP limit.
+async function refreshSessionRateMiddleware(req, res, next) {
+   try {
+      void res
+      const refreshToken = readRefreshToken(req)
+      if (refreshToken) {
+         const key = await refreshRateKeyService(
+            refreshToken,
+            req.app.locals.serviceDependencies.authProtection,
+         )
+         if (key) await limitKey(req, 'refresh.session', key, 'authRefreshSessionRateLimit')
+      }
+      next()
+   } catch (error) {
+      next(error)
    }
 }
 
@@ -148,4 +169,5 @@ export {
    publicRateMiddleware,
    logoutCsrfMiddleware,
    refreshCsrfMiddleware,
+   refreshSessionRateMiddleware,
 }

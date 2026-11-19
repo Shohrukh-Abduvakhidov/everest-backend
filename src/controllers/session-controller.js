@@ -33,7 +33,9 @@ async function refreshSessionController(req, res, next) {
       setAuthCookies(res, result, env)
       res.json({ data: safeResult(result) })
    } catch (error) {
-      clearAuthCookies(res, env)
+      // Only a definitive rejection (invalid, expired, revoked or reused token) ends the browser
+      // session. A 5xx or other transient failure keeps the cookies so the client can retry.
+      if (error?.name === 'AppError' && error.status === 401) clearAuthCookies(res, env)
       next(error)
    }
 }
