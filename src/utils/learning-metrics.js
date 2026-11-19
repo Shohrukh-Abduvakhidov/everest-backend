@@ -55,4 +55,84 @@ function firstAttemptStats(rows) {
    }
 }
 
-export { classifyTopics, firstAttemptStats, topicRules }
+// NCT readiness of one subject (decision D3): points over possible points of its last trainings.
+function subjectReadiness(rows) {
+   const score = rows.reduce((sum, row) => sum + Number(row.score), 0)
+   const maxScore = rows.reduce((sum, row) => sum + Number(row.max_score), 0)
+   return round2((score * 100) / maxScore)
+}
+
+// Overall readiness: the mean of the subject values, every trained subject counting equally.
+// rows: the last trainings of each subject (subject_id, score, max_score). null without any.
+function overallReadiness(rows) {
+   const bySubject = new Map()
+   for (const row of rows) bySubject.set(row.subject_id, [...(bySubject.get(row.subject_id) ?? []), row])
+   if (!bySubject.size) return null
+   const values = [...bySubject.values()].map(subjectReadiness)
+   return round2(values.reduce((sum, value) => sum + value, 0) / values.length)
+}
+
+function median(values) {
+   if (!values.length) return null
+   const sorted = [...values].sort((left, right) => left - right)
+   const middle = Math.floor(sorted.length / 2)
+   return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2
+}
+
+// M12 decision D5 ("behind"). Each reason is set on its own; a student is behind when any is set.
+const behindRules = Object.freeze({
+   inactiveDays: 7,
+   belowPassTests: 3,
+   progressLagPoints: 25,
+   progressLagMinStudents: 5,
+})
+
+// below_pass: the latest finished attempt of each of the last belowPassTests tests that have a
+// passPercent; the mean percentage under the mean threshold. null when no such test exists.
+function belowPass(rows) {
+   if (!rows.length) return null
+   const percent = rows.reduce((sum, row) => sum + scorePercent(row.score ?? 0, row.max_score), 0) / rows.length
+   const threshold = rows.reduce((sum, row) => sum + Number(row.policy_snapshot.passPercent), 0) / rows.length
+   return round2(percent) < round2(threshold)
+}
+
+// progress_lag per course: at least progressLagPoints under the median of the students with an
+// active enrollment, counted only when at least progressLagMinStudents of them are compared.
+function laggingCourses(students, rules = behindRules) {
+   const byCourse = new Map()
+   for (const student of students) {
+      for (const course of student.courses) {
+         if (!course.enrollmentActive) continue
+         byCourse.set(course.courseId, [...(byCourse.get(course.courseId) ?? []), course.percent])
+      }
+   }
+   const medians = new Map()
+   for (const [courseId, values] of byCourse) {
+      if (values.length >= rules.progressLagMinStudents) medians.set(courseId, median(values))
+   }
+   return (course) => course.enrollmentActive && medians.has(course.courseId)
+      && course.percent <= medians.get(course.courseId) - rules.progressLagPoints
+}
+
+function behindReasons({ lastActivityAt, now, missedAssignments, belowPassThreshold, lagging }, rules = behindRules) {
+   const reasons = []
+   const inactiveSince = now.getTime() - rules.inactiveDays * 86400000
+   if (lastActivityAt === null || new Date(lastActivityAt).getTime() < inactiveSince) reasons.push('no_activity_7d')
+   if (missedAssignments > 0) reasons.push('missed_deadline')
+   if (belowPassThreshold === true) reasons.push('below_pass')
+   if (lagging) reasons.push('progress_lag')
+   return reasons
+}
+
+export {
+   behindReasons,
+   behindRules,
+   belowPass,
+   classifyTopics,
+   firstAttemptStats,
+   laggingCourses,
+   median,
+   overallReadiness,
+   subjectReadiness,
+   topicRules,
+}

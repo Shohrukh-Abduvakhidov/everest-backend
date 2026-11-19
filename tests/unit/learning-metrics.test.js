@@ -1,7 +1,16 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { classifyTopics, firstAttemptStats, topicRules } from '../../src/utils/learning-metrics.js'
+import {
+   behindReasons,
+   belowPass,
+   classifyTopics,
+   firstAttemptStats,
+   laggingCourses,
+   median,
+   overallReadiness,
+   topicRules,
+} from '../../src/utils/learning-metrics.js'
 
 let nextId = 0
 function topic(points, maxPoints, questions = 5, extra = {}) {
@@ -92,4 +101,51 @@ test('first attempt statistics', () => {
       count: 4, averagePercent: 24.98, withPassPercent: 3, passed: 1, passRate: 33.33,
    })
    assert.equal(firstAttemptStats([attempt('3.00', '4.00')]).passRate, null, 'no threshold anywhere')
+})
+
+test('readiness: mean of subject shares, null without trainings', () => {
+   assert.equal(overallReadiness([]), null)
+   assert.equal(overallReadiness([
+      { subject_id: '1', score: '3.00', max_score: '4.00' },
+      { subject_id: '1', score: '1.00', max_score: '4.00' },
+      { subject_id: '2', score: '4.00', max_score: '4.00' },
+   ]), 75)
+})
+
+test('median of odd and even lists', () => {
+   assert.equal(median([]), null)
+   assert.equal(median([3, 1, 2]), 2)
+   assert.equal(median([100, 33, 100, 66]), 83)
+})
+
+test('below_pass compares the mean percentage with the mean threshold', () => {
+   const row = (score, passPercent) => ({ score, max_score: '10.00', policy_snapshot: { passPercent } })
+   assert.equal(belowPass([]), null)
+   assert.equal(belowPass([row('6.00', 60)]), false, 'exactly the threshold is not below')
+   assert.equal(belowPass([row('5.99', 60)]), true)
+   assert.equal(belowPass([row('9.00', 50), row('2.00', 70)]), true, 'mean 55 is under the mean threshold 60')
+})
+
+test('progress_lag needs five active students and 25 points under the median', () => {
+   const student = (percent, active = true) => ({ courses: [{ courseId: '1', enrollmentActive: active, percent }] })
+   const four = [student(100), student(100), student(100), student(10)]
+   assert.equal(four.map((row) => laggingCourses(four)(row.courses[0])).some(Boolean), false, 'four students: never')
+   const five = [...four, student(100)]
+   const lag = laggingCourses(five)
+   assert.equal(lag(five[3].courses[0]), true)
+   assert.equal(lag({ courseId: '1', enrollmentActive: true, percent: 75 }), true, 'exactly 25 under')
+   assert.equal(lag({ courseId: '1', enrollmentActive: true, percent: 76 }), false)
+   assert.equal(lag({ courseId: '1', enrollmentActive: false, percent: 0 }), false, 'expired enrollment is not compared')
+})
+
+test('behind reasons: inactivity boundary and each reason on its own', () => {
+   const now = new Date('2026-11-19T12:00:00Z')
+   const sevenDays = new Date(now.getTime() - 7 * 86400000).toISOString()
+   const base = { now, missedAssignments: 0, belowPassThreshold: null, lagging: false }
+   assert.deepEqual(behindReasons({ ...base, lastActivityAt: sevenDays }), [])
+   assert.deepEqual(behindReasons({ ...base, lastActivityAt: new Date(now.getTime() - 7 * 86400000 - 1).toISOString() }), ['no_activity_7d'])
+   assert.deepEqual(behindReasons({ ...base, lastActivityAt: null }), ['no_activity_7d'])
+   assert.deepEqual(behindReasons({
+      ...base, lastActivityAt: now.toISOString(), missedAssignments: 2, belowPassThreshold: true, lagging: true,
+   }), ['missed_deadline', 'below_pass', 'progress_lag'])
 })
