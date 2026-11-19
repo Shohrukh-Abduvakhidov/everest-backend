@@ -1124,9 +1124,9 @@ const routes = [
       errors: { 401: ['INVALID_RESET_AUTHORIZATION'] },
    }],
    ['post', '/auth/refresh', {
-      tag: 'Auth', auth: 'public', csrf: true, rate: 'public auth limit',
+      tag: 'Auth', auth: 'public', csrf: true, rate: 'refresh limits per IP and per session',
       summary: 'Rotate the refresh cookie and issue a new access cookie',
-      description: 'Reads only the `everest_refresh` cookie. CSRF is required when a valid refresh cookie identifies a live session.',
+      description: 'Reads only the `everest_refresh` cookie. CSRF is required when a valid refresh cookie identifies a live session. A token used less than `AUTH_REFRESH_REUSE_GRACE_SECONDS` ago is accepted again (lost response) while the session is live and its chain has not moved on; the new pair keeps the original refresh expiry. Cookies are cleared only on 401.',
       response: ref('AuthResult'),
       errors: { 401: ['INVALID_REFRESH_TOKEN', 'REFRESH_TOKEN_REQUIRED', 'REFRESH_TOKEN_REUSE_DETECTED'] },
    }],

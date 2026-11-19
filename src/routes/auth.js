@@ -26,16 +26,23 @@ import {
    logoutCsrfMiddleware,
    publicRateMiddleware,
    refreshCsrfMiddleware,
+   refreshSessionRateMiddleware,
 } from '../middleware/auth-protection-middleware.js'
 
 const authRouter = express.Router()
 
 authRouter.post('/register', publicRateMiddleware('register.ip'), registerController)
-authRouter.post('/login/password', publicRateMiddleware('login.ip'), loginController)
+authRouter.post('/login/password', publicRateMiddleware('login.ip', 'authLoginIpRateLimit'), loginController)
 authRouter.post('/password-recovery/request', publicRateMiddleware('recovery.request.ip'), requestPasswordRecoveryController)
 authRouter.post('/password-recovery/verify', publicRateMiddleware('recovery.verify.ip'), verifyPasswordRecoveryController)
 authRouter.post('/password-recovery/reset', publicRateMiddleware('recovery.reset.ip'), resetPasswordController)
-authRouter.post('/refresh', publicRateMiddleware('refresh.ip'), refreshCsrfMiddleware, refreshSessionController)
+authRouter.post(
+   '/refresh',
+   publicRateMiddleware('refresh.ip', 'authRefreshIpRateLimit'),
+   refreshSessionRateMiddleware,
+   refreshCsrfMiddleware,
+   refreshSessionController,
+)
 authRouter.post('/logout', logoutCsrfMiddleware, logoutController)
 authRouter.post('/logout-all', authMiddleware, authenticatedCsrfMiddleware, logoutAllController)
 authRouter.get('/sessions', authMiddleware, listSessionsController)

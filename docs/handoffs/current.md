@@ -2,12 +2,19 @@
 project: EVEREST Backend
 current_milestone: M12
 status: in_progress
-branch: fix/question-text-split-letters
-base_commit: 948f2f1
+branch: feat/refresh-resilience
+base_commit: 5a6df55
 updated_at: 2026-11-19
 ---
 
 # Current handoff
+
+## Refresh resilience (branch `feat/refresh-resilience`, awaiting review)
+
+- **Built:** 30 s grace window for a replayed refresh token (new pair in the same session, original refresh expiry, audit `auth.refresh.grace_reissued`); per-session refresh limit (`refresh.session`, 20) and separate per-IP limits for refresh (2000) and password login (1000); refresh cookies cleared only on 401. New env: `AUTH_REFRESH_REUSE_GRACE_SECONDS`, `AUTH_REFRESH_SESSION_RATE_LIMIT`, `AUTH_REFRESH_IP_RATE_LIMIT`, `AUTH_LOGIN_IP_RATE_LIMIT`. No migration. Details: `docs/progress.md`, `docs/decisions.md` (2026-11-19), `docs/api.md`.
+- **Verified:** disposable-database suite 491/491 (twice); `verify-database.js` valid.
+- **Not verified:** a real client on a lossy network; the server.
+- **After merge (operator):** deploy the backend; the defaults apply without env changes.
 
 ## Question text repair (branch `fix/question-text-split-letters`, awaiting review)
 

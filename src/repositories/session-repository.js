@@ -32,6 +32,30 @@ async function markRefreshTokenUsed(tokenId, client) {
    ])
 }
 
+// True when another token of the same session was used at or after the given token, i.e. the
+// rotation chain moved past it. Compared in SQL to keep microsecond precision.
+async function hasLaterUsedRefreshToken(tokenId, client) {
+   const result = await client.query(
+      `SELECT EXISTS (
+       SELECT 1 FROM auth_refresh_tokens AS other
+       JOIN auth_refresh_tokens AS replayed ON replayed.id = $1
+       WHERE other.session_id = replayed.session_id AND other.id <> replayed.id
+         AND other.used_at >= replayed.used_at
+     ) AS advanced`,
+      [normalizeInternalId(tokenId)],
+   )
+   return result.rows[0].advanced
+}
+
+async function revokeUnusedSessionRefreshTokens(sessionId, client) {
+   const result = await client.query(
+      `UPDATE auth_refresh_tokens SET revoked_at = CURRENT_TIMESTAMP
+     WHERE session_id = $1 AND used_at IS NULL AND revoked_at IS NULL`,
+      [normalizeInternalId(sessionId)],
+   )
+   return result.rowCount
+}
+
 async function lockOwnedSession(userId, sessionId, client) {
    const result = await client.query(
       `SELECT id, user_id, created_at, last_used_at, expires_at, revoked_at,
@@ -108,12 +132,14 @@ async function touchSessionLastUsedNow(sessionId, client) {
 export {
    createRefreshToken,
    findRefreshTokenForUpdate,
+   hasLaterUsedRefreshToken,
    listUserSessions,
    lockOwnedSession,
    markRefreshTokenUsed,
    revokeAllUserSessions,
    revokeSession,
    revokeSessionRefreshTokens,
+   revokeUnusedSessionRefreshTokens,
    touchSessionLastUsed,
    touchSessionLastUsedNow,
 }

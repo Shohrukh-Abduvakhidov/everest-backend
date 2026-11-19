@@ -116,6 +116,13 @@ const env = Object.freeze({
   authRateBlockSeconds: readInteger('AUTH_RATE_BLOCK_SECONDS', 900),
   authLoginMaxAttempts: readInteger('AUTH_LOGIN_MAX_ATTEMPTS', 5, { max: 100 }),
   authPublicRateLimit: readInteger('AUTH_PUBLIC_RATE_LIMIT', 100, { max: 10000 }),
+  // A whole class can share one NAT address, so login and refresh have their own per-IP limits.
+  authLoginIpRateLimit: readInteger('AUTH_LOGIN_IP_RATE_LIMIT', 1000, { max: 100000 }),
+  authRefreshIpRateLimit: readInteger('AUTH_REFRESH_IP_RATE_LIMIT', 2000, { max: 100000 }),
+  authRefreshSessionRateLimit: readInteger('AUTH_REFRESH_SESSION_RATE_LIMIT', 20, { max: 10000 }),
+  // Seconds after a refresh token is used during which the same token may be presented again
+  // (a client that lost the response). 0 turns the window off.
+  authRefreshReuseGraceSeconds: readInteger('AUTH_REFRESH_REUSE_GRACE_SECONDS', 30, { min: 0, max: 300 }),
   authAdminRateLimit: readInteger('AUTH_ADMIN_RATE_LIMIT', 100, { max: 10000 }),
   playbackRateLimit: readInteger('PLAYBACK_RATE_LIMIT', 120, { max: 10000 }),
   questionImportRateLimit: readInteger('QUESTION_IMPORT_RATE_LIMIT', 20, { max: 10000 }),

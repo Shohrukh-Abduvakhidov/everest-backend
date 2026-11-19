@@ -4,7 +4,14 @@ Updated: 2026-11-19.
 
 ## Current increment
 
-Question text repair on `fix/question-text-split-letters` (awaiting review). M12 PR 1 and PR 2 are merged (PRs #58, #59) and not deployed yet. Backend PRs up to #56 and frontend PRs up to #41 are deployed on the temporary VPS.
+Refresh resilience on `feat/refresh-resilience` (awaiting review). Question text repair is merged (PR #61). M12 PR 1 and PR 2 are merged (PRs #58, #59) and not deployed yet. Backend PRs up to #56 and frontend PRs up to #41 are deployed on the temporary VPS.
+
+## 2026-11-19 — Refresh resilience (`feat/refresh-resilience`)
+
+- **What:** grace window for a replayed refresh token (`AUTH_REFRESH_REUSE_GRACE_SECONDS`, 30): a used token sent again inside the window, with a live session whose chain has not moved on, gets a new pair in the same session with the original refresh expiry and the audit event `auth.refresh.grace_reissued`; otherwise reuse detection as before. Normal rotation now also revokes the session's other unused tokens. Separate limits: `refresh.ip` → `AUTH_REFRESH_IP_RATE_LIMIT` (2000), new `refresh.session` → `AUTH_REFRESH_SESSION_RATE_LIMIT` (20 per session), `login.ip` → `AUTH_LOGIN_IP_RATE_LIMIT` (1000); the per-phone login limit is unchanged. The refresh controller clears cookies only on a 401. No migration. Reasons in decisions.md 2026-11-19.
+- **Tests:** `session-lifecycle.test.js`: concurrent refresh (both 200, one chain afterwards), replay inside the window (new pair, same session, same expiry, window not moved, audit), replay outside the window (reuse, session revoked, cookies cleared), window off at 0, replay after the chain moved on and after logout (no grace, another user's session untouched), per-session limit across rotations and per-IP limit independent of the shared public limit (429 without `Set-Cookie`), 500 without `Set-Cookie` and the token still usable, 401 clears. `auth-protection.test.js` uses `authLoginIpRateLimit` for the login IP case.
+- **Checked:** disposable-database suite exit 0, 491 passed, 0 failed (run twice; includes `test:sources`, `test:integrity`, `test:server`). `verify-database.js`: valid. Only test servers on ephemeral ports were started; nothing left running.
+- **Not checked:** a real mobile client on a lossy network; deployment.
 
 ## 2026-11-19 — Damaged question text from PDF extraction (`fix/question-text-split-letters`)
 
