@@ -544,9 +544,10 @@ const schemas = {
       progressPercent: nullable(int({ description: 'Over the lessons of all active enrollments; null without any' })),
       courses: arr(obj({
          courseId: id(), title: str(), enrollmentActive: bool(),
-         totalLessons: int(), completedLessons: int(), startedLessons: int(), notStartedLessons: int(), percent: int(),
+         totalPublishedLessons: int({ description: 'Every published lesson of the course' }),
+         totalLessons: int({ description: 'Lessons open to the student now, as on their own course card' }), completedLessons: int(), startedLessons: int(), notStartedLessons: int(), percent: int(),
          lagging: bool({ description: 'progress_lag for this course' }),
-      }, ['courseId', 'title', 'enrollmentActive', 'totalLessons', 'completedLessons', 'startedLessons', 'notStartedLessons', 'percent', 'lagging'])),
+      }, ['courseId', 'title', 'enrollmentActive', 'totalPublishedLessons', 'totalLessons', 'completedLessons', 'startedLessons', 'notStartedLessons', 'percent', 'lagging'])),
       recentResults: arr(ref('StaffRecentResult'), { description: 'Last 3 finished course-test attempts' }),
       missedAssignments: ref('StaffMissedAssignments'),
       belowPassThreshold: nullable(bool()),
@@ -573,7 +574,7 @@ const schemas = {
       students: arr(obj({
          userId: id(), name: nullable(str()), accountStatus: str(), lastLoginAt: nullable(dt()), lastActivityAt: nullable(dt()),
          enrollmentActive: bool(),
-         progress: nullable(obj({ totalLessons: int(), completedLessons: int(), startedLessons: int(), notStartedLessons: int(), percent: int(), lagging: bool() }, ['totalLessons', 'completedLessons', 'startedLessons', 'notStartedLessons', 'percent', 'lagging'])),
+         progress: nullable(obj({ totalPublishedLessons: int(), totalLessons: int(), completedLessons: int(), startedLessons: int(), notStartedLessons: int(), percent: int(), lagging: bool() }, ['totalPublishedLessons', 'totalLessons', 'completedLessons', 'startedLessons', 'notStartedLessons', 'percent', 'lagging'])),
          modules: arr(obj({ moduleId: id(), totalLessons: int(), completedLessons: int(), startedLessons: int(), notStartedLessons: int(), percent: int() }, ['moduleId', 'totalLessons', 'completedLessons', 'startedLessons', 'notStartedLessons', 'percent'])),
          recentResults: arr(ref('StaffRecentResult')),
          missedAssignments: ref('StaffMissedAssignments'),

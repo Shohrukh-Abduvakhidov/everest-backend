@@ -7,13 +7,17 @@ import pg from 'pg'
 import { createApp } from '../../src/app.js'
 import env from '../../src/configs/env.js'
 import { withTransaction } from '../../src/repositories/transaction-repository.js'
-import { grantCourseEnrollmentService } from '../../src/services/course-access-service.js'
+import {
+   grantCourseEnrollmentService,
+   grantModuleAccessService,
+} from '../../src/services/course-access-service.js'
 import { addCourseTeacherService } from '../../src/services/course-service.js'
 import {
    addGroupMemberService,
    addGroupTeacherService,
    createGroupService,
 } from '../../src/services/group-service.js'
+import { listLearnerCoursesService } from '../../src/services/learner-course-service.js'
 import { createLessonService, publishLessonService } from '../../src/services/lesson-service.js'
 import {
    createQuestionBankService,
@@ -79,11 +83,13 @@ test('staff progress: group, course, student and assignment views with D1 scope'
          [`${title} ${suffix}`, subject.id, adminId],
       )).rows[0].id
       const lessons = []
+      const moduleIds = []
       for (const [position, count] of modules.entries()) {
          const moduleId = (await client.query(
             `INSERT INTO course_modules (course_id, title, position, status) VALUES ($1, $2, $3, 'published') RETURNING id`,
             [courseId, `M${position + 1}`, position + 1],
          )).rows[0].id
+         moduleIds.push(moduleId)
          for (let index = 0; index < count; index += 1) {
             const lesson = await createLessonService(adminId, courseId, moduleId, {
                title: `L${position + 1}.${index + 1}`, lessonType: 'text',
@@ -94,20 +100,25 @@ test('staff progress: group, course, student and assignment views with D1 scope'
          // A draft lesson never counts.
          await createLessonService(adminId, courseId, moduleId, { title: `Draft ${position}`, lessonType: 'text' })
       }
-      return { courseId, lessons }
+      return { courseId, lessons, moduleIds }
    }
 
    const courseA = await course('Course A', [2, 1])
    const courseB = await course('Course B', [1])
 
-   // s1..s6 are enrolled in A, s7 is in the group without any course; s1 is also in B.
+   // s1..s6 are enrolled in A with both modules open, s7 is in the group without any course; s1 is
+   // also in B. Progress counts only the lessons open to the student (as on their own course card).
    const students = []
    for (let index = 1; index <= 7; index += 1) students.push(await createUser('student', `S${index}`))
    const [s1, s2, s3, s4, s5, s6, s7] = students
    for (const id of students.slice(0, 6)) {
       await grantCourseEnrollmentService(adminId, courseA.courseId, { userId: id, expiresAt: null })
+      for (const moduleId of courseA.moduleIds) {
+         await grantModuleAccessService(adminId, courseA.courseId, id, { moduleId, expiresAt: null })
+      }
    }
    await grantCourseEnrollmentService(adminId, courseB.courseId, { userId: s1, expiresAt: null })
+   await grantModuleAccessService(adminId, courseB.courseId, s1, { moduleId: courseB.moduleIds[0], expiresAt: null })
 
    const group = await createGroupService(adminId, { name: `Group ${suffix}` })
    const emptyGroup = await createGroupService(adminId, { name: `Empty ${suffix}` })
@@ -214,8 +225,8 @@ test('staff progress: group, course, student and assignment views with D1 scope'
       assert.deepEqual(first.readiness, { readinessPercent: 75, completedTrainings: 3 })
       const firstA = first.courses.find((entry) => entry.courseId === courseA.courseId)
       assert.deepEqual(
-         [firstA.totalLessons, firstA.completedLessons, firstA.startedLessons, firstA.notStartedLessons, firstA.percent],
-         [3, 3, 0, 0, 100],
+         [firstA.totalPublishedLessons, firstA.totalLessons, firstA.completedLessons, firstA.startedLessons, firstA.notStartedLessons, firstA.percent],
+         [3, 3, 3, 0, 0, 100],
       )
       assert.equal(first.courses.length, 2, 's1 is also in course B')
       assert.equal(first.lastActivityAt !== null && new Date(first.lastActivityAt) >= new Date(now.getTime() - 60000), true)
@@ -298,7 +309,8 @@ test('staff progress: group, course, student and assignment views with D1 scope'
       assert.equal(rows.has(s7), false)
       const fifth = rows.get(s5)
       assert.deepEqual(fifth.progress, {
-         totalLessons: 3, completedLessons: 1, startedLessons: 1, notStartedLessons: 1, percent: 33, lagging: true,
+         totalPublishedLessons: 3, totalLessons: 3, completedLessons: 1, startedLessons: 1, notStartedLessons: 1,
+         percent: 33, lagging: true,
       })
       assert.deepEqual(fifth.modules.map((module) => [module.completedLessons, module.startedLessons, module.percent]), [
          [1, 1, 50], [0, 0, 0],
@@ -350,6 +362,43 @@ test('staff progress: group, course, student and assignment views with D1 scope'
       for (const [actor, studentId] of [[blindTeacher, s1], [otherTeacher, s1], [courseTeacher, s2], [s2, s1], [adminId, '999999999']]) {
          await assert.rejects(getStaffStudentAnalyticsService(actor, studentId, deps), { code: 'USER_NOT_FOUND' })
          await assert.rejects(listStaffStudentAttemptsService(actor, studentId, {}, deps), { code: 'USER_NOT_FOUND' })
+      }
+   })
+
+   await t.test('progress counts the lessons open to the student, the same as their own course card', async () => {
+      // Close module 2 (one lesson) for s4 (all three done) and s5 (one done, one started in module 1).
+      const closeModule = (userId, revokedAt) => client.query(
+         'UPDATE module_access_grants SET revoked_at = $3 WHERE user_id = $1 AND module_id = $2',
+         [userId, courseA.moduleIds[1], revokedAt],
+      )
+      await closeModule(s4, new Date())
+      await closeModule(s5, new Date())
+      try {
+         const summary = await getGroupProgressService(adminId, group.id, { limit: '100' }, deps)
+         const rows = byUser(summary.students)
+         const pick = (course) => [course.totalPublishedLessons, course.totalLessons, course.completedLessons,
+            course.startedLessons, course.notStartedLessons, course.percent]
+         // The lesson completed in the closed module no longer counts.
+         assert.deepEqual(pick(rows.get(s4).courses[0]), [3, 2, 2, 0, 0, 100])
+         assert.deepEqual(pick(rows.get(s5).courses[0]), [3, 2, 1, 1, 0, 50])
+         assert.deepEqual(pick(rows.get(s6).courses[0]), [3, 3, 2, 0, 1, 66], 'open modules unchanged')
+         for (const userId of [s4, s5, s6]) {
+            const own = (await listLearnerCoursesService(userId)).courses.find((entry) => entry.id === courseA.courseId)
+            const staff = rows.get(userId).courses[0]
+            assert.deepEqual(
+               [staff.completedLessons, staff.totalLessons, staff.percent],
+               [own.progress.completedLessons, own.progress.totalLessons, own.progress.percent],
+               'the teacher sees the student\'s own numbers',
+            )
+         }
+         const course = await getCourseProgressService(adminId, courseA.courseId, { limit: '100' }, deps)
+         const fifth = byUser(course.students).get(s5)
+         assert.equal(fifth.progress.totalPublishedLessons, 3)
+         assert.equal(fifth.progress.totalLessons, 2)
+         assert.equal(fifth.progress.percent, 50)
+      } finally {
+         await closeModule(s4, null)
+         await closeModule(s5, null)
       }
    })
 

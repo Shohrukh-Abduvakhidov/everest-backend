@@ -1088,7 +1088,7 @@ The thresholds come back in `rules` (`inactiveDays`, `belowPassTests`, `progress
       "lastLoginAt": "2026-11-18T07:10:00.000Z", "lastActivityAt": "2026-11-18T08:02:11.000Z",
       "readiness": { "readinessPercent": 75, "completedTrainings": 12 },
       "progressPercent": 66,
-      "courses": [{ "courseId": "12", "title": "Biology", "enrollmentActive": true, "totalLessons": 30,
+      "courses": [{ "courseId": "12", "title": "Biology", "enrollmentActive": true, "totalPublishedLessons": 36, "totalLessons": 30,
         "completedLessons": 20, "startedLessons": 2, "notStartedLessons": 8, "percent": 66, "lagging": false }],
       "recentResults": [{ "attemptId": "77", "testId": "70", "assignmentId": "88", "courseId": "12", "title": "Cells",
         "attemptNumber": 2, "status": "graded", "score": "8.00", "maxScore": "10.00", "percent": 80,
@@ -1104,13 +1104,16 @@ The thresholds come back in `rules` (`inactiveDays`, `belowPassTests`, `progress
 ```
 
 - Groups grant no courses: `courses` lists the courses the members are enrolled in (revoked enrollments excluded). `enrollmentActive: false` means the window has not begun or has ended. Such a course is shown but left out of `progressPercent`, the averages and the median.
-- Lessons = published lessons of published modules, the same total for every student. The student's own course card counts only the lessons open to them now, so the two percentages can differ.
+- Lessons are counted as on the student's own course card, so the numbers match what the student sees:
+   - `totalLessons`: the published lessons of published modules open to the student now (enrollment and module grant).
+   - `completedLessons`, `startedLessons`, `notStartedLessons` and `percent`: only those lessons. A lesson completed in a module that has since been closed does not count.
+   - `totalPublishedLessons`: every published lesson of the course. When it is larger than `totalLessons`, part of the course is not open to the student: show for example "30 of 36 open".
 - `readiness` is the trainer formula of `/me/home` (decision D3). It is `null` until the student has trained.
 - `recentResults`: the last 3 finished course-test attempts (not trainer or mock exams). `belowPassThreshold` is `null` when no test had a threshold.
 
 **Course screen** (`GET /admin/courses/:courseId/progress`): `course`, `totals { students, activeStudents, lessons, averagePercent, averageCompletedLessons, completedCourse, notStarted, behind }`, `modules[{ moduleId, title, position, lessonCount, averagePercent, lessons[{ lessonId, title, position, lessonType, completed, started, notStarted, completedPercent }] }]`, `rules`, `students[]`, `pagination`, `serverNow`.
 
-- One student row: `{ userId, name, accountStatus, lastLoginAt, lastActivityAt, enrollmentActive, progress: { totalLessons, completedLessons, startedLessons, notStartedLessons, percent, lagging }, modules[{ moduleId, totalLessons, completedLessons, startedLessons, notStartedLessons, percent }], recentResults[], missedAssignments, belowPassThreshold, behind }`.
+- One student row: `{ userId, name, accountStatus, lastLoginAt, lastActivityAt, enrollmentActive, progress: { totalPublishedLessons, totalLessons, completedLessons, startedLessons, notStartedLessons, percent, lagging }, modules[{ moduleId, totalLessons, completedLessons, startedLessons, notStartedLessons, percent }], recentResults[], missedAssignments, belowPassThreshold, behind }`.
 - Results, missed assignments and `below_pass` count only tests of this course. There is no trainer readiness on this screen.
 - Lesson counts cover every student with a non-revoked enrollment. Averages cover students with an active enrollment. `completedPercent` = completed ÷ students, rounded down.
 - For one lesson's watch details, keep using `GET /admin/courses/:courseId/lessons/:lessonId/progress`.

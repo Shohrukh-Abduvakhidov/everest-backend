@@ -126,12 +126,14 @@ async function listLastActivity(userIds, db = pool) {
    return result.rows
 }
 
-// Course progress of every non-revoked enrollment, optionally of one course. Total = published
-// lessons of published modules (the same for every student, so values compare).
+// Course progress of every non-revoked enrollment, optionally of one course. As on the student's
+// own course card: total = published lessons of published modules that can_access_module opens
+// to the student at $3, and completed/started count only those lessons. total_published_lessons
+// is every published lesson of the course, so staff see when not everything is open.
 async function listCourseProgress(userIds, courseId, now, db = pool) {
    const result = await db.query(
-      `WITH totals AS (
-          SELECT lesson.course_id, count(*)::integer AS total_lessons
+      `WITH published AS (
+          SELECT lesson.course_id, count(*)::integer AS total_published_lessons
           FROM lessons AS lesson JOIN course_modules AS module ON module.id = lesson.module_id
           WHERE lesson.status = 'published' AND module.status = 'published'
           GROUP BY lesson.course_id
@@ -139,21 +141,23 @@ async function listCourseProgress(userIds, courseId, now, db = pool) {
        SELECT enrollment.user_id, enrollment.course_id, course.title AS course_title,
          (enrollment.begins_at <= $3 AND (enrollment.expires_at IS NULL OR enrollment.expires_at > $3))
             AS enrollment_active,
-         COALESCE(totals.total_lessons, 0) AS total_lessons,
-         COALESCE(done.completed_lessons, 0) AS completed_lessons,
-         COALESCE(done.started_lessons, 0) AS started_lessons
+         COALESCE(published.total_published_lessons, 0) AS total_published_lessons,
+         open.total_lessons, open.completed_lessons, open.started_lessons
        FROM course_enrollments AS enrollment
        JOIN courses AS course ON course.id = enrollment.course_id
-       LEFT JOIN totals ON totals.course_id = enrollment.course_id
-       LEFT JOIN LATERAL (
-          SELECT count(*) FILTER (WHERE progress.status = 'completed')::integer AS completed_lessons,
+       LEFT JOIN published ON published.course_id = enrollment.course_id
+       CROSS JOIN LATERAL (
+          SELECT count(*)::integer AS total_lessons,
+             count(*) FILTER (WHERE progress.status = 'completed')::integer AS completed_lessons,
              count(*) FILTER (WHERE progress.status = 'in_progress')::integer AS started_lessons
-          FROM lesson_progress AS progress
-          JOIN lessons AS lesson ON lesson.id = progress.lesson_id
+          FROM lessons AS lesson
           JOIN course_modules AS module ON module.id = lesson.module_id
-          WHERE progress.user_id = enrollment.user_id AND lesson.course_id = enrollment.course_id
+          LEFT JOIN lesson_progress AS progress
+             ON progress.lesson_id = lesson.id AND progress.user_id = enrollment.user_id
+          WHERE lesson.course_id = enrollment.course_id
             AND lesson.status = 'published' AND module.status = 'published'
-       ) AS done ON TRUE
+            AND can_access_module(enrollment.user_id, module.id, $3)
+       ) AS open
        WHERE enrollment.user_id = ANY($1::bigint[]) AND enrollment.revoked_at IS NULL
          AND ($2::bigint IS NULL OR enrollment.course_id = $2)
        ORDER BY enrollment.user_id, course.title, enrollment.course_id`,

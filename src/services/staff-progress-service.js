@@ -150,6 +150,7 @@ function safeCourseProgress(row) {
       courseId: row.course_id,
       title: row.course_title,
       enrollmentActive: row.enrollment_active,
+      totalPublishedLessons: row.total_published_lessons,
       totalLessons: total,
       completedLessons: completed,
       startedLessons: started,
@@ -367,6 +368,7 @@ async function getCourseProgressService(userId, courseIdValue, query = {}, overr
          ...row,
          enrollmentActive: progress?.enrollmentActive ?? false,
          progress: progress === null ? null : {
+            totalPublishedLessons: progress.totalPublishedLessons,
             totalLessons: progress.totalLessons,
             completedLessons: progress.completedLessons,
             startedLessons: progress.startedLessons,
