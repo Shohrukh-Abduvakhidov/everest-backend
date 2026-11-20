@@ -16,7 +16,7 @@ M12 PR 3 (staff progress views) on `feat/m12-staff-progress` (awaiting review). 
    - In attempts: 2330, 2627, 1109 (one attempt each; grading snapshots hold only keys).
    - Excluded: the 6 listed questions. Left for manual review: 9 findings, all in excluded questions. No join-list warning.
 - **Tests:** `tests/unit/question-text-cosmetics.test.js` (each rule with positive and negative cases, fixContent with formulas untouched and idempotence, the planner with join list, exclusions, bank matching, review and warnings, the shipped lists); `tests/integration/question-text-fix.test.js` (the script on its own bank: dry run changes nothing, `--apply` without `--log` refused, apply changes only content with ids/keys/positions/answer key unchanged, audit event, guards on again, second apply changes 0, rollback restores exactly, second rollback refused).
-- **Checked:** `npm test` (disposable database) exit 0, 517 passed, 0 failed. `verify-database.js`: valid.
+- **Checked:** `npm test` (disposable database) exit 0, 531 passed, 0 failed (after merging the time zone cache and staff capabilities from main). `verify-database.js`: valid.
 - **Not done:** `--apply` on local `everest_db` and on the server (not requested).
 
 ## 2026-11-20 — My staff rights for the frontend (`feat/staff-capabilities`)
