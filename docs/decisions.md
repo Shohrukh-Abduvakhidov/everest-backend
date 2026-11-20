@@ -870,6 +870,15 @@ Password login uses a generic invalid-credentials response for unknown phones an
 - **Attach on completion** goes through `updateLessonService`, so lesson rules (type, chapters, offline license revocation, old-video removal) are not duplicated; a refused attach leaves a ready asset and reports `errorCode`.
 - **No transcoding.** Recommendation for later: a separate HLS worker (ffmpeg, 2–3 renditions, segments under `courses/:id/hls/…`, `processing_status` pending→completed) on a machine other than the shared VPS; until then authors upload fast-start MP4 (H.264/AAC).
 
+## 2026-11-20 — `GET /me/staff-capabilities`
+
+- **New route, not a field in `/profile`:** the profile is shared by every user and is updated with `PATCH`; the staff rights are a separate read that needs four queries. A route under `/me` keeps the profile unchanged and fits the other own-data reads.
+- **Student: `200` with empty lists, not `403`.** The answer is about the caller only, so it discloses nothing; the frontend can call it for every signed-in user without handling an error to mean "not staff".
+- **Owner and admin: `allAccess: true`, lists not expanded.** They act on every course and group without an assignment (the `administratorSql` checks). Listing every course would repeat the admin catalog and grow without bound; the lists keep only assignments that actually exist.
+- **Teacher assignments only with the teacher role.** Test and progress scopes require the teacher role in addition to the assignment row; a user whose teacher role was removed keeps `course_teachers` rows but cannot use them there. Such rows are therefore not listed. (Lesson management checks only the assignment flag; the gap is noted, not changed here.)
+- **Raw flags, no derived screen list.** The flags are those of `course_teachers` and `group_teachers` plus the role permissions; the frontend maps them to screens (`docs/frontend-handoff.md`, "My staff rights"). Archived courses and groups are included with their status, so the client decides whether to show them.
+- **Active account required** (`403 ACCOUNT_NOT_ACTIVE`), as in the other `/me` reads.
+
 ## 2026-11-20 — Time zone check cached in process memory
 
 - **Problem:** `GET /me/home` validated the profile time zone with `SELECT … FROM pg_timezone_names`, about 90 ms per call (PostgreSQL reads the zoneinfo files every time). This was the only use of `pg_timezone_names` in the code.

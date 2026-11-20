@@ -584,6 +584,20 @@ const schemas = {
       pagination,
       serverNow: dt(),
    }, ['course', 'totals', 'modules', 'rules', 'students', 'pagination', 'serverNow']),
+   StaffCapabilities: obj({
+      roles: arr(str(), { description: 'Global role codes: owner, admin, teacher, student' }),
+      permissions: arr(str(), { description: 'Permission codes granted by the roles, for example progress.read, lessons.manage' }),
+      allAccess: bool({ description: 'true for owner and admin: every flag on every course and group, without an assignment' }),
+      isTeacher: bool(),
+      courses: arr(obj({
+         courseId: id(), title: str(), status: enumOf(['draft', 'published', 'archived']),
+         canEditCourse: bool(), canManageLessons: bool(), canManageQuestions: bool(), canManageTests: bool(), canViewResults: bool(),
+      }, ['courseId', 'title', 'status', 'canEditCourse', 'canManageLessons', 'canManageQuestions', 'canManageTests', 'canViewResults'])),
+      groups: arr(obj({
+         groupId: id(), code: str(), name: str(), status: enumOf(['active', 'archived']),
+         canPublishAnnouncements: bool(), canAssignTests: bool(), canViewResults: bool(),
+      }, ['groupId', 'code', 'name', 'status', 'canPublishAnnouncements', 'canAssignTests', 'canViewResults'])),
+   }, ['roles', 'permissions', 'allAccess', 'isTeacher', 'courses', 'groups']),
    StaffStudentAnalytics: obj({
       student: obj({ id: id(), name: nullable(str()), accountStatus: str(), lastLoginAt: nullable(dt()) }, ['id', 'name', 'accountStatus', 'lastLoginAt']),
       scope: obj({
@@ -2053,6 +2067,12 @@ const routes = [
       tag: 'Student home', summary: 'Profile figures: totals, first attempts, strong and weak topics',
       description: 'Own data only. totals and firstAttempt are all-time; topics use finished attempts of every kind submitted in the last windowDays (90) days. A topic needs minQuestions (5) questions; weak is below weakBelowPercent (60), strong from strongFromPercent (85), on the percentage rounded to hundredths; an unanswered question earns 0. At most 5 topics per list.',
       response: ref('StudentAnalytics'),
+      errors: { 400: ['INVALID_USER_ID'], 403: ['ACCOUNT_NOT_ACTIVE'] },
+   }],
+   ['get', '/me/staff-capabilities', {
+      tag: 'Student home', summary: 'My staff rights: roles, permissions and per-course and per-group flags',
+      description: 'Own data only, read-only, for the frontend to decide which staff screens to open; the server still checks every action. Owner and admin get allAccess: true (the lists hold only assignments that exist, usually none). A teacher gets every course_teachers and group_teachers assignment with its flags, archived ones included. Anyone without the owner, admin or teacher role (a student) gets 200 with empty courses and groups.',
+      response: ref('StaffCapabilities'),
       errors: { 400: ['INVALID_USER_ID'], 403: ['ACCOUNT_NOT_ACTIVE'] },
    }],
    ['get', '/trainer/catalog', {

@@ -6,6 +6,13 @@ Updated: 2026-11-19.
 
 M12 PR 3 (staff progress views) on `feat/m12-staff-progress` (awaiting review). Deployed on the temporary VPS on 2026-11-19: backend up to PR #62 (M12 PR 1 and PR 2, the question text repair applied to 2 rows, refresh resilience), frontend up to PR #47. PR #63 (deploy/env.example variables) is open.
 
+## 2026-11-20 — My staff rights for the frontend (`feat/staff-capabilities`)
+
+- **What:** `GET /api/v1/me/staff-capabilities`: roles, permissions, `allAccess` (owner/admin), `isTeacher`, and every own `course_teachers` / `group_teachers` assignment with its flags. Read-only, own data only. Student: `200` with empty lists. New repository, service and controller `staff-capabilities-*`; route in `routes/me.js`; OpenAPI schema `StaffCapabilities`. No migration, no env. Decisions: decisions.md 2026-11-20.
+- **Tests:** `tests/integration/staff-capabilities.test.js` (6 subtests): a teacher sees only their own courses and groups with exact flags (archived course included), another teacher sees only theirs; owner and admin get `allAccess` with empty lists; a student gets empty lists; assignments disappear when the teacher role is removed; blocked account `403 ACCOUNT_NOT_ACTIVE`, invalid id `400`; HTTP: `401` without a session, a `userId` query parameter is ignored, no phone/token fields, student `200`.
+- **Checked:** `npm test` (disposable database) exit 0, 520 passed, 0 failed (after merging the time zone cache from main); OpenAPI coverage test passes; `verify-database.js`: valid. Only test servers on ephemeral ports were started.
+- **Not checked:** the frontend.
+
 ## 2026-11-20 — Time zone check cache (`perf/timezone-cache`)
 
 - **What:** `GET /me/home` no longer queries `pg_timezone_names` on every call. The list of PostgreSQL time zone names is cached in process memory, loaded on first use and reloaded once a day (decisions.md 2026-11-20). Only one place used `pg_timezone_names` (`student-home-repository.isValidTimeZone`, removed). No migration, no API change.
