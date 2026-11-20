@@ -870,6 +870,18 @@ Password login uses a generic invalid-credentials response for unknown phones an
 - **Attach on completion** goes through `updateLessonService`, so lesson rules (type, chapters, offline license revocation, old-video removal) are not duplicated; a refused attach leaves a ready asset and reports `errorCode`.
 - **No transcoding.** Recommendation for later: a separate HLS worker (ffmpeg, 2–3 renditions, segments under `courses/:id/hls/…`, `processing_status` pending→completed) on a machine other than the shared VPS; until then authors upload fast-start MP4 (H.264/AAC).
 
+## 2026-11-20 — Cosmetic question text rules in `fix-question-text.js`
+
+- **Rules added** (`src/utils/question-text-audit.js`, applied by `fixContent`): collapse a run of ordinary spaces between two visible characters to one; remove spaces between a letter and `, . ; : ! ? )`. Both use the audit's own patterns, so a fixed text no longer produces the finding. They run on text blocks, verse lines and table cells; formula, chemistry and image blocks are never touched.
+   - Only after a letter: a ratio `2 : 3`, a blank `... .`, an ellipsis `бувад ...` and `Na+ ?` keep their spaces. `.` followed by `.` is an ellipsis, not a full stop.
+   - Leading/trailing spaces, tabs, line breaks and no-break spaces are left alone.
+- **Hyphen join only by list.** `слово- продолжение` → `словопродолжение`, inside a text and across verse lines (the first word of the next line moves up; question 1109 "хайру-" / "хуш карданд" → "хайрухуш" / "карданд"). The same shape is often a dash (904 "Фарзанд- меваи ширин", 956 "Бай- бай"), so it runs only for the questions in `scripts/question-text-plan.js`.
+- **The numbers in the request are question ids, not externalIds.** No question has an externalId "1898" etc.; they match the local ids printed by the audit (`#1898 nct-bio-tg-2026-matching-0088`). The lists name each question by bank code and externalId (stable across databases; the server banks were imported separately) and keep the local id for reference. 291 (bank `biologiya`) has no externalId and is named by id within its bank.
+   - Join: 1898, 1906 (bio), 2589, 2600, 2627 (physics), 1109 (Tajik).
+   - Excluded from every automatic rule, including the existing header and initial repairs: 1907, 1917, 1102, 904, 956, 291. Their findings are printed for review with `excluded: true`.
+- **Review list after the changes.** The manual-review list is now the audit of the fixed questions (what is still left), not of the originals. A listed join question that is missing or has nothing to join is printed as a warning (`joinNotApplied` in the log).
+- **Same guarantees as before:** `--dry-run` by default, `--apply` needs `--log`, the integrity snapshot (ids, keys, positions, answer keys, test links, attempts, student answers) must match before and after, guards disabled inside the transaction only, `--rollback` restores only rows that still hold the fixed value. Log entries now carry `rules` per edit; old logs still roll back.
+
 ## 2026-11-20 — `GET /me/staff-capabilities`
 
 - **New route, not a field in `/profile`:** the profile is shared by every user and is updated with `PATCH`; the staff rights are a separate read that needs four queries. A route under `/me` keeps the profile unchanged and fits the other own-data reads.
