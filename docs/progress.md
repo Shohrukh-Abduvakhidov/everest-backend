@@ -6,6 +6,11 @@ Updated: 2026-11-20.
 
 M12 is Done: PR 3 (staff progress views, #64) and the 2026-11-20 follow-ups (#65 time zone cache, #66 `GET /me/staff-capabilities`, #67 cosmetic question text rules) are merged into main. Deployed on the temporary VPS on 2026-11-19: backend up to PR #62 (M12 PR 1 and PR 2, the question text repair applied to 2 rows, refresh resilience), frontend up to PR #47. Not deployed yet: PRs #63 to #67 (no migration, no new env variable). `fix-question-text.js --apply` with the new cosmetic rules has not been run on any database. Next milestone: M13 (group ranking), which waits for the owner to approve the formula.
 
+## 2026-11-20 — Question 1109 excluded from the text fix (`fix/question-text-exclude-1109`)
+
+- **What:** 1109 moved from the hyphen-join list to the excluded list in `scripts/question-text-plan.js`; the prod dry run then expects 41 rows in 23 questions. Test updated. No migration.
+- **Checked:** `npm test` (disposable database) exit 0, 531 passed, 0 failed; `verify-database.js` valid.
+
 ## 2026-11-20 — Cosmetic question text rules (`fix/question-text-cosmetics`)
 
 - **What:** `scripts/fix-question-text.js` gained safe spacing rules (double spaces; a space between a letter and `, . ; : ! ? )`) for every question, and a hyphen-wrap join ("электро- магнитӣ" → "электромагнитӣ", also across verse lines) only for questions 1898, 1906, 2589, 2600, 2627, 1109. Questions 1907, 1917, 1102, 904, 956, 291 are never changed automatically. The lists live in `scripts/question-text-plan.js` (bank code + externalId; the numbers in the request are local question ids). Rules in `src/utils/question-text-audit.js`. No migration, no API change. Decisions: decisions.md 2026-11-20.

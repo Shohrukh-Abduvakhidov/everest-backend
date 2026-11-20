@@ -8,14 +8,13 @@ import { auditQuestion, fixContent } from '../src/utils/question-text-audit.js'
 // no externalId is named by its id within the bank.
 
 // Words cut by a line-end hyphen that were checked by hand: "электро- магнитӣ", "мар- казаш",
-// "хайру-" + "хуш". Elsewhere the same shape is often a dash ("Фарзанд- меваи ширин").
+// "хайру-" + "хуш" (1109, now excluded by the owner). Elsewhere the same shape is often a dash ("Фарзанд- меваи ширин").
 const hyphenJoinQuestions = [
    { id: '1898', bankCode: 'nct-bio-tg-2026', externalId: 'nct-bio-tg-2026-matching-0088' },
    { id: '1906', bankCode: 'nct-bio-tg-2026', externalId: 'nct-bio-tg-2026-matching-0096' },
    { id: '2589', bankCode: 'nct-fiz-tg-2026', externalId: 'nct-fiz-tg-2026-matching-0081' },
    { id: '2600', bankCode: 'nct-fiz-tg-2026', externalId: 'nct-fiz-tg-2026-matching-0092' },
    { id: '2627', bankCode: 'nct-fiz-tg-2026', externalId: 'nct-fiz-tg-2026-matching-0119' },
-   { id: '1109', bankCode: 'nct-tg-2026', externalId: 'nct-tg-2026-matching-0041' },
 ]
 
 // Never changed automatically, by any rule: stems that leaked into the headers (1907, 1917),
@@ -27,6 +26,7 @@ const excludedQuestions = [
    { id: '904', bankCode: 'nct-tg-2026', externalId: 'nct-tg-2026-single-0605' },
    { id: '956', bankCode: 'nct-tg-2026', externalId: 'nct-tg-2026-single-0657' },
    { id: '291', bankCode: 'biologiya', externalId: null },
+   { id: '1109', bankCode: 'nct-tg-2026', externalId: 'nct-tg-2026-matching-0041' },
 ]
 
 function matches(entry, question) {

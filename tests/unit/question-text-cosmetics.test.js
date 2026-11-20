@@ -159,8 +159,8 @@ test('plan: listed questions get the hyphen join, excluded questions are never c
 })
 
 test('plan: the shipped lists name the agreed questions', () => {
-   assert.deepEqual(hyphenJoinQuestions.map((entry) => entry.id), ['1898', '1906', '2589', '2600', '2627', '1109'])
-   assert.deepEqual(excludedQuestions.map((entry) => entry.id), ['1907', '1917', '1102', '904', '956', '291'])
+   assert.deepEqual(hyphenJoinQuestions.map((entry) => entry.id), ['1898', '1906', '2589', '2600', '2627'])
+   assert.deepEqual(excludedQuestions.map((entry) => entry.id), ['1907', '1917', '1102', '904', '956', '291', '1109'])
    const joinIds = new Set(hyphenJoinQuestions.map((entry) => entry.externalId))
    assert.equal(excludedQuestions.some((entry) => entry.externalId && joinIds.has(entry.externalId)), false)
 })
