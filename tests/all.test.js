@@ -21,6 +21,7 @@ import './unit/video-upload.test.js';
 import './unit/video-player.test.js';
 import './unit/trust-proxy.test.js';
 import './unit/learning-metrics.test.js';
+import './unit/time-zone-cache.test.js';
 import './integration/password-auth.test.js';
 import './integration/auth-protection.test.js';
 import './integration/account-admin.test.js';
