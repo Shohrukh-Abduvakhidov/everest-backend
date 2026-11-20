@@ -1,10 +1,10 @@
 # EVEREST backend progress
 
-Updated: 2026-11-19.
+Updated: 2026-11-20.
 
 ## Current increment
 
-M12 PR 3 (staff progress views) on `feat/m12-staff-progress` (awaiting review). Deployed on the temporary VPS on 2026-11-19: backend up to PR #62 (M12 PR 1 and PR 2, the question text repair applied to 2 rows, refresh resilience), frontend up to PR #47. PR #63 (deploy/env.example variables) is open.
+M12 is Done: PR 3 (staff progress views, #64) and the 2026-11-20 follow-ups (#65 time zone cache, #66 `GET /me/staff-capabilities`, #67 cosmetic question text rules) are merged into main. Deployed on the temporary VPS on 2026-11-19: backend up to PR #62 (M12 PR 1 and PR 2, the question text repair applied to 2 rows, refresh resilience), frontend up to PR #47. Not deployed yet: PRs #63 to #67 (no migration, no new env variable). `fix-question-text.js --apply` with the new cosmetic rules has not been run on any database. Next milestone: M13 (group ranking), which waits for the owner to approve the formula.
 
 ## 2026-11-20 — Cosmetic question text rules (`fix/question-text-cosmetics`)
 

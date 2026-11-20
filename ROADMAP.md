@@ -1,9 +1,9 @@
 ---
 project: EVEREST Backend
 roadmap_version: 1
-current_milestone: M12
-current_status: in_progress
-updated_at: 2026-11-19
+current_milestone: M13
+current_status: planned
+updated_at: 2026-11-20
 architecture: docs/architecture.md
 ---
 
@@ -335,10 +335,11 @@ This roadmap orders implementation; it does not replace the [current architectur
 
 ## M12 — Learning progress and analytics
 
-- **Status:** In progress until PR 3 is merged. Plan approved by the owner on 2026-11-14 (decisions D1–D7 in `docs/decisions.md`), delivered in three PRs:
+- **Status:** Done (all three PRs merged: #58, #59, #64). Plan approved by the owner on 2026-11-14 (decisions D1–D7 in `docs/decisions.md`), delivered in three PRs:
    1. **PR 1** (merged in PR #58, deployed): `learning_activity_events` written by the player, lesson completion by test and attempt finalization; `GET /me/home`; `GET /me/attempts`; permission `progress.read`; migration `20261116010000000`. `npm test` parts on a disposable database: 463 passed, 0 failed; `test:migrations` 41/41/40/41.
    2. **PR 2** (merged in PR #59, deployed): `GET /me/analytics` — totals, first-attempt statistics, strong and weak topics (D4, D6). No migration. Disposable-database suite: 475 passed, 0 failed. Follow-up PR #60 (merged, deployed): home readiness lists every trainable subject.
-   3. **PR 3** (branch `feat/m12-staff-progress`, awaiting review): `GET /admin/groups/:groupId/progress`, `GET /admin/courses/:courseId/progress`, `GET /admin/users/:userId/analytics` and `/attempts`, `GET /admin/tests/:testId/assignments/:assignmentId/results`; D1 scope, D5 "behind" reasons. No migration. Verification in `docs/progress.md` (2026-11-19).
+   3. **PR 3** (merged in PR #64, not deployed yet): `GET /admin/groups/:groupId/progress`, `GET /admin/courses/:courseId/progress`, `GET /admin/users/:userId/analytics` and `/attempts`, `GET /admin/tests/:testId/assignments/:assignmentId/results`; D1 scope, D5 "behind" reasons. No migration. Verification in `docs/progress.md` (2026-11-19).
+   4. **Follow-ups (2026-11-20, merged in PR #65, #66, #67):** cache of the PostgreSQL time zone list for `/me/home`; `GET /me/staff-capabilities` (own roles and per-course and per-group flags for the frontend); cosmetic rules in `scripts/fix-question-text.js` (not applied to any database). No migration. Details in `docs/progress.md`.
 - **Goal:** Produce access-controlled learning insights.
 - **Dependencies:** M07 and M11.
 - **Deliverables:** Lesson/course progress, subject readiness, test history, strong/weak topics, profile analytics, homepage summaries, and required first-attempt statistics.
