@@ -2,8 +2,8 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { isDeepStrictEqual } from 'node:util'
 
 import pool from '../src/configs/db.js'
-import { auditQuestion, fixContent } from '../src/utils/question-text-audit.js'
 import { loadIntegritySnapshot, loadQuestions } from './question-text-data.js'
+import { planChanges as planQuestionChanges } from './question-text-plan.js'
 
 // Usage:
 //   node scripts/fix-question-text.js [--dry-run] [--bank <code>] [--log <file|->]
@@ -13,7 +13,10 @@ import { loadIntegritySnapshot, loadQuestions } from './question-text-data.js'
 // Repairs damaged question text left by PDF extraction, only where the repair is certain
 // (utils/question-text-audit.js): a letter stranded between matching column headers
 // ("Тоҷикистон С | оли" -> "Тоҷикистон | Соли") and a capital cut off a short item
-// ("З анбӯруғҳо" -> "Занбӯруғҳо"). Everything else the audit finds is printed for manual review.
+// ("З анбӯруғҳо" -> "Занбӯруғҳо"). Cosmetic spacing everywhere: double spaces collapsed, no space
+// before , . ; : ! ? ). A word cut by a line-end hyphen ("электро- магнитӣ") is joined only in
+// the questions listed in question-text-plan.js; the questions excluded there are never changed.
+// Everything else the audit still finds after the changes is printed for manual review.
 //
 // --dry-run (default) prints before/after in a READ ONLY transaction and changes nothing.
 // --apply changes question, option and matching-item content in ONE transaction and writes a
@@ -64,56 +67,13 @@ function readArguments(argv) {
 
 const say = (message) => console.error(message)
 
-// One planned change per content row.
-function planChanges(questions) {
-   const changes = []
-   const review = []
-   for (const question of questions) {
-      const language = question.language
-      const rows = [
-         { kind: 'question', rowId: question.id, label: 'content', content: question.content },
-         ...question.options.map((option) => ({ kind: 'option', rowId: option.rowId, label: `option:${option.key}`, content: option.content })),
-         ...question.matching.map((item) => ({
-            kind: 'matching',
-            rowId: item.rowId,
-            label: `matching:${item.side}:${item.key}`,
-            content: item.content,
-         })),
-      ]
-      for (const row of rows) {
-         const fixed = fixContent(row.content, { language })
-         if (!fixed) continue
-         changes.push({
-            kind: row.kind,
-            table: tables[row.kind].table,
-            rowId: row.rowId,
-            questionId: question.id,
-            externalId: question.externalId,
-            bankCode: question.bankCode,
-            status: question.status,
-            attemptUses: question.attemptUses,
-            label: row.label,
-            edits: fixed.changes,
-            before: row.content,
-            after: fixed.content,
-         })
-      }
-      for (const finding of auditQuestion(question)) {
-         if (finding.fix) continue
-         review.push({
-            questionId: question.id,
-            externalId: question.externalId,
-            bankCode: question.bankCode,
-            status: question.status,
-            attemptUses: question.attemptUses,
-            type: finding.type,
-            path: finding.path,
-            sample: finding.sample,
-            ...(finding.reason ? { reason: finding.reason } : {}),
-         })
-      }
+// One planned change per content row (scripts/question-text-plan.js), with its table.
+function planChanges(questions, bankCode) {
+   const plan = planQuestionChanges(questions, { bankCode })
+   return {
+      ...plan,
+      changes: plan.changes.map((change) => ({ ...change, table: tables[change.kind].table })),
    }
-   return { changes, review }
 }
 
 function printChanges(changes, verb) {
@@ -121,9 +81,22 @@ function printChanges(changes, verb) {
    for (const change of changes) {
       say(`   #${change.questionId} ${change.externalId} (${change.bankCode}, ${change.status}, attempts: ${change.attemptUses}) ${change.label}`)
       for (const edit of change.edits) {
-         say(`      ${edit.path}`)
+         say(`      ${edit.path}${edit.rules ? ` [${edit.rules.join(', ')}]` : ''}`)
          say(`         было:  ${JSON.stringify(edit.before)}`)
          say(`         стало: ${JSON.stringify(edit.after)}`)
+      }
+   }
+}
+
+function printPlanNotes({ excluded, joinNotApplied }) {
+   say(`
+Excluded from automatic changes: ${excluded.length} questions`)
+   for (const item of excluded) say(`   #${item.questionId} ${item.externalId ?? '(no externalId)'} (${item.bankCode})`)
+   if (joinNotApplied.length) {
+      say(`
+WARNING: hyphen join listed but not applied: ${joinNotApplied.length}`)
+      for (const item of joinNotApplied) {
+         say(`   ${item.externalId} (${item.bankCode}, local id ${item.id}): ${item.loaded ? 'no hyphen wrap found' : 'question not found'}`)
       }
    }
 }
@@ -227,12 +200,14 @@ try {
       await client.query('BEGIN READ ONLY')
       const questions = await loadQuestions(client, { bankCode: options.bankCode })
       await client.query('COMMIT')
-      const { changes, review } = planChanges(questions)
+      const plan = planChanges(questions, options.bankCode)
+      const { changes, review } = plan
       printChanges(changes, 'Would change')
+      printPlanNotes(plan)
       printReview(review)
       if (options.logPath) {
          await writeLog(options.logPath, {
-            mode: 'dry-run', database, generatedAt: new Date().toISOString(), bankCode: options.bankCode, changes, review,
+            mode: 'dry-run', database, generatedAt: new Date().toISOString(), bankCode: options.bankCode, changes, review, excluded: plan.excluded, joinNotApplied: plan.joinNotApplied,
          })
       }
       say('\nDry run: nothing was changed. Run with --apply --log <file> to apply.')
@@ -240,9 +215,10 @@ try {
       await client.query('BEGIN')
       await client.query("SET LOCAL lock_timeout = '5s'")
       const questions = await loadQuestions(client, { bankCode: options.bankCode, lock: true })
-      const { changes, review } = planChanges(questions)
+      const plan = planChanges(questions, options.bankCode)
+      const { changes, review } = plan
       const log = {
-         mode: 'apply', database, appliedAt: new Date().toISOString(), bankCode: options.bankCode, committed: false, changes, review,
+         mode: 'apply', database, appliedAt: new Date().toISOString(), bankCode: options.bankCode, committed: false, changes, review, excluded: plan.excluded, joinNotApplied: plan.joinNotApplied,
       }
       if (changes.length) {
          await writeChanges(client, changes, 'apply')
@@ -253,6 +229,7 @@ try {
       log.committed = true
       await writeLog(options.logPath, log)
       printChanges(changes, 'Changed')
+      printPlanNotes(plan)
       printReview(review)
       say(`\nCommitted. Log with old values: ${options.logPath === '-' ? 'stdout' : options.logPath}`)
    }

@@ -6,6 +6,19 @@ Updated: 2026-11-19.
 
 M12 PR 3 (staff progress views) on `feat/m12-staff-progress` (awaiting review). Deployed on the temporary VPS on 2026-11-19: backend up to PR #62 (M12 PR 1 and PR 2, the question text repair applied to 2 rows, refresh resilience), frontend up to PR #47. PR #63 (deploy/env.example variables) is open.
 
+## 2026-11-20 — Cosmetic question text rules (`fix/question-text-cosmetics`)
+
+- **What:** `scripts/fix-question-text.js` gained safe spacing rules (double spaces; a space between a letter and `, . ; : ! ? )`) for every question, and a hyphen-wrap join ("электро- магнитӣ" → "электромагнитӣ", also across verse lines) only for questions 1898, 1906, 2589, 2600, 2627, 1109. Questions 1907, 1917, 1102, 904, 956, 291 are never changed automatically. The lists live in `scripts/question-text-plan.js` (bank code + externalId; the numbers in the request are local question ids). Rules in `src/utils/question-text-audit.js`. No migration, no API change. Decisions: decisions.md 2026-11-20.
+- **Dry run on local `everest_db`** (READ ONLY, nothing changed): 42 content rows in 24 questions.
+   - Hyphen join: 9 rows in the 6 listed questions (1898, 1906, 2589, 2600 ×3, 2627 ×2, 1109 verse lines).
+   - Double spaces: 23 rows in 8 physics questions (nuclear equations "¹¹₅B  → …").
+   - Space before punctuation: 10 rows (2330, 2601, 2936, 2937, 3519, 319, 1007, 1105, 1120, 1193).
+   - In attempts: 2330, 2627, 1109 (one attempt each; grading snapshots hold only keys).
+   - Excluded: the 6 listed questions. Left for manual review: 9 findings, all in excluded questions. No join-list warning.
+- **Tests:** `tests/unit/question-text-cosmetics.test.js` (each rule with positive and negative cases, fixContent with formulas untouched and idempotence, the planner with join list, exclusions, bank matching, review and warnings, the shipped lists); `tests/integration/question-text-fix.test.js` (the script on its own bank: dry run changes nothing, `--apply` without `--log` refused, apply changes only content with ids/keys/positions/answer key unchanged, audit event, guards on again, second apply changes 0, rollback restores exactly, second rollback refused).
+- **Checked:** `npm test` (disposable database) exit 0, 517 passed, 0 failed. `verify-database.js`: valid.
+- **Not done:** `--apply` on local `everest_db` and on the server (not requested).
+
 ## 2026-11-19 — M12 PR 3: staff progress views (`feat/m12-staff-progress`)
 
 - **What:** five read-only routes.

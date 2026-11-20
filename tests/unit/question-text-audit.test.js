@@ -92,6 +92,7 @@ test('the audit finds the split header and the fix keeps keys and order', () => 
    assert.deepEqual(fixed.content.blocks[0], question.content.blocks[0])
    assert.deepEqual(fixed.changes, [{
       path: 'blocks[1].rows[0]',
+      rules: ['stranded_letter'],
       before: [reserveHeaders.left, reserveHeaders.right],
       after: ['Мамнуъгоҳи Тоҷикистон', 'Соли ташкилшавӣ'],
    }])

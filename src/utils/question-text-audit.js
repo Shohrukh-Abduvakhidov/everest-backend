@@ -286,20 +286,116 @@ function auditQuestion(question) {
    return findings
 }
 
+// --- Cosmetic spacing rules --------------------------------------------------------------
+// Each returns the new text (the same text when nothing applies). They only remove or merge
+// spaces and a line-end hyphen, never letters or other punctuation, and use the audit's own
+// patterns, so a fixed text no longer produces the finding.
+
+// "буд ." -> "буд.", "Ҳс )" -> "Ҳс)". Only right after a letter: a ratio "2 : 3", a blank
+// "... ." and an ellipsis "бувад ..." keep their spaces.
+const spaceBeforePunctuationGlobal = /(\p{L}) +(?=[,;:!?)]|\.(?!\.))/gu
+
+function removeSpaceBeforePunctuation(text) {
+   return text.replace(spaceBeforePunctuationGlobal, '$1')
+}
+
+// "¹¹₅B  → ⁴₂He" -> "¹¹₅B → ⁴₂He". Only runs of ordinary spaces between two visible characters;
+// leading and trailing spaces, tabs, line breaks and no-break spaces stay.
+function collapseDoubleSpaces(text) {
+   return text.replace(/(?<=\S) {2,}(?=\S)/gu, ' ')
+}
+
+// "электро- магнитӣ" -> "электромагнитӣ": a lowercase word cut by a line-end hyphen. Not safe in
+// general (a dash after a word, "Фарзанд- меваи ширин", looks the same), so the fix script runs
+// it only for questions listed by hand.
+function joinHyphenWraps(text) {
+   return text.replace(/(\p{Ll})- +(?=\p{Ll})/gu, '$1')
+}
+
+// The same join across two verse lines: "… хайру-" + "хуш карданд." -> "… хайрухуш" + "карданд.".
+// The first word of the next line moves up; a line left empty is dropped.
+function joinHyphenWrapsAcrossLines(lines) {
+   const result = [...lines]
+   for (let index = 0; index + 1 < result.length; index += 1) {
+      const line = result[index]
+      const next = result[index + 1]
+      if (typeof line !== 'string' || typeof next !== 'string' || !/\p{Ll}-$/u.test(line)) continue
+      const match = /^(\p{Ll}+)(?:\s+|$)/u.exec(next)
+      if (!match) continue
+      result[index] = `${line.slice(0, -1)}${match[1]}`
+      const rest = next.slice(match[0].length)
+      if (rest) result[index + 1] = rest
+      else result.splice(index + 1, 1)
+   }
+   return result
+}
+
+function tidyText(text, { cosmetic, joinHyphens }) {
+   const rules = []
+   let current = text
+   const step = (name, rule) => {
+      const next = rule(current)
+      if (next !== current) {
+         rules.push(name)
+         current = next
+      }
+   }
+   if (joinHyphens) step('join_hyphen_wrap', joinHyphenWraps)
+   if (cosmetic) {
+      step('collapse_double_space', collapseDoubleSpaces)
+      step('space_before_punctuation', removeSpaceBeforePunctuation)
+   }
+   return { text: current, rules }
+}
+
 // Returns a corrected copy of a content document ({ blocks }) plus the list of changes, or
-// null when nothing is certain to fix. Only the two unambiguous repairs run: a stranded letter
-// between table header cells and a stranded capital at the start of a short text. Every other
-// finding is left for manual review.
-function fixContent(content, { language } = {}) {
+// null when nothing is certain to fix. Repairs:
+//    - always: a stranded letter between table header cells, a stranded capital at the start of
+//      a short text;
+//    - cosmetic (default true): double spaces, a space before , . ; : ! ? );
+//    - joinHyphens (default false): a word cut by a line-end hyphen, inside a text and across
+//      verse lines; the fix script asks for it only for questions listed by hand.
+// Text blocks, verse lines and table cells only; formula, chemistry and image blocks are never
+// touched. Every change lists the rules that produced it. Every other finding is left for
+// manual review.
+function fixContent(content, { language, cosmetic = true, joinHyphens = false } = {}) {
    const blocks = Array.isArray(content?.blocks) ? content.blocks : []
    const previousTextOf = previousTextLookup(content)
+   const options = { cosmetic, joinHyphens }
    const changes = []
    const nextBlocks = blocks.map((block, index) => {
       if (block?.type === 'text' && typeof block.text === 'string') {
-         const repaired = repairStrandedInitial(block.text, language)
-         if (repaired === null) return block
-         changes.push({ path: `blocks[${index}].text`, before: block.text, after: repaired })
-         return { ...block, text: repaired }
+         const rules = []
+         let text = block.text
+         const repaired = repairStrandedInitial(text, language)
+         if (repaired !== null) {
+            text = repaired
+            rules.push('stranded_initial')
+         }
+         const tidy = tidyText(text, options)
+         rules.push(...tidy.rules)
+         if (!rules.length) return block
+         changes.push({ path: `blocks[${index}].text`, rules, before: block.text, after: tidy.text })
+         return { ...block, text: tidy.text }
+      }
+      if (block?.type === 'verse' && Array.isArray(block.lines)) {
+         const rules = new Set()
+         let lines = block.lines.map((line) => {
+            if (typeof line !== 'string') return line
+            const tidy = tidyText(line, options)
+            tidy.rules.forEach((rule) => rules.add(rule))
+            return tidy.text
+         })
+         if (joinHyphens) {
+            const joined = joinHyphenWrapsAcrossLines(lines)
+            if (joined.length !== lines.length || joined.some((line, lineIndex) => line !== lines[lineIndex])) {
+               rules.add('join_hyphen_wrap_lines')
+               lines = joined
+            }
+         }
+         if (!rules.size) return block
+         changes.push({ path: `blocks[${index}].lines`, rules: [...rules], before: block.lines, after: lines })
+         return { ...block, lines }
       }
       if (block?.type !== 'table' || !Array.isArray(block.rows)) return block
       let tableChanged = false
@@ -312,6 +408,7 @@ function fixContent(content, { language } = {}) {
             if (repair.status !== 'fixed') continue
             changes.push({
                path: `blocks[${index}].rows[${rowIndex}]`,
+               rules: ['stranded_letter'],
                before: [cells[cellIndex], cells[cellIndex + 1]],
                after: [repair.left, repair.right],
             })
@@ -319,6 +416,19 @@ function fixContent(content, { language } = {}) {
             cells[cellIndex + 1] = repair.right
             tableChanged = true
          }
+         cells.forEach((cell, cellIndex) => {
+            if (typeof cell !== 'string') return
+            const tidy = tidyText(cell, options)
+            if (!tidy.rules.length) return
+            changes.push({
+               path: `blocks[${index}].rows[${rowIndex}][${cellIndex}]`,
+               rules: tidy.rules,
+               before: cell,
+               after: tidy.text,
+            })
+            cells[cellIndex] = tidy.text
+            tableChanged = true
+         })
          return cells
       })
       return tableChanged ? { ...block, rows } : block
@@ -326,4 +436,15 @@ function fixContent(content, { language } = {}) {
    return changes.length ? { content: { ...content, blocks: nextBlocks }, changes } : null
 }
 
-export { auditQuestion, contentSignature, fixContent, repairColumnHeaders, repairStrandedInitial, textUnits }
+export {
+   auditQuestion,
+   collapseDoubleSpaces,
+   contentSignature,
+   fixContent,
+   joinHyphenWraps,
+   joinHyphenWrapsAcrossLines,
+   removeSpaceBeforePunctuation,
+   repairColumnHeaders,
+   repairStrandedInitial,
+   textUnits,
+}
