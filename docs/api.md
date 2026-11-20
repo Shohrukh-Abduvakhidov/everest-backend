@@ -873,6 +873,15 @@ Full contract with examples: `docs/frontend-handoff.md` → "Staff progress". Al
    - Errors: `400 INVALID_TEST_ID` / `INVALID_ASSIGNMENT_ID` / `VALIDATION_ERROR`, `404 ASSIGNMENT_NOT_FOUND`.
 - Performance: a whole group or course is computed from a fixed number of aggregate queries (no query per student), then sorted and paged in the service. A group of 200 students with 79 000 lesson progress rows, 60 000 attempts and 110 000 activity events takes about 110 ms on a warm database (EXPLAIN in `docs/progress.md`). No new index was needed.
 
+## My staff rights (2026-11-20)
+
+- `GET /api/v1/me/staff-capabilities`: read-only, own data only (the user id comes from the session; query parameters are ignored). For the frontend to decide which staff screens to open; every staff route still checks permission and scope itself.
+   - Returns `roles[]` (role codes), `permissions[]` (codes granted by the roles), `allAccess` (owner or admin), `isTeacher`, `courses[{ courseId, title, status, canEditCourse, canManageLessons, canManageQuestions, canManageTests, canViewResults }]` (from `course_teachers`) and `groups[{ groupId, code, name, status, canPublishAnnouncements, canAssignTests, canViewResults }]` (from `group_teachers`). Archived courses and groups are included with their `status`.
+   - Owner and admin: `allAccess: true`; the lists hold only assignments that exist (usually none), not every course.
+   - Teacher: every own assignment. Assignments are listed only while the user holds the teacher role (the test and progress scopes require it).
+   - Student (no owner, admin or teacher role): `200` with empty `courses` and `groups`, not `403`, so the client can call it for every signed-in user.
+   - Errors: `401` without a session, `400 INVALID_USER_ID`, `403 ACCOUNT_NOT_ACTIVE`.
+
 ## NCT trainer
 
 Full contract with examples and error table: `docs/frontend-handoff.md` → "NCT trainer". Summary:

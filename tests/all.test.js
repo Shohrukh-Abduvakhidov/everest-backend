@@ -53,6 +53,7 @@ import './integration/nct-mock-exam.test.js';
 import './integration/student-home.test.js';
 import './integration/student-analytics.test.js';
 import './integration/staff-progress.test.js';
+import './integration/staff-capabilities.test.js';
 import './integration/trainer-digits.test.js';
 import './integration/merge-tajik-subjects.test.js';
 import './integration/m11-gaps.test.js';
