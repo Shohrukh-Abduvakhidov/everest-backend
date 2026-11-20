@@ -13,14 +13,6 @@ async function findProfileTimezone(userId, db = pool) {
    return result.rows[0]?.timezone ?? null
 }
 
-async function isValidTimeZone(name, db = pool) {
-   const result = await db.query(
-      'SELECT EXISTS (SELECT 1 FROM pg_timezone_names WHERE name = $1) AS valid',
-      [name],
-   )
-   return result.rows[0].valid
-}
-
 // The most recently touched unfinished lesson the learner can still open.
 async function findContinueLesson(userId, db = pool) {
    const result = await db.query(
@@ -143,7 +135,6 @@ export {
    findContinueLesson,
    findLatestFinishedMockExam,
    findProfileTimezone,
-   isValidTimeZone,
    listCourseActivity,
    listFinishedAttempts,
    listWeekActivity,

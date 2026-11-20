@@ -22,6 +22,7 @@ import {
 } from '../../src/services/question-bank-service.js'
 import { getStudentHomeService, listStudentAttemptsService } from '../../src/services/student-home-service.js'
 import { createSubjectService } from '../../src/services/taxonomy-service.js'
+import { isKnownTimeZoneService } from '../../src/services/timezone-service.js'
 import {
    saveAnswerService,
    startAttemptService,
@@ -325,6 +326,20 @@ test('student home, attempt history and learning activity events', async (t) => 
       const fallback = await getStudentHomeService(learner, { clock: () => new Date('2026-06-11T10:00:00Z') })
       assert.equal(fallback.week.timeZone, 'UTC')
       assert.equal(new Map(fallback.week.days.map((day) => [day.date, day])).get('2026-06-10').watchSeconds, 900)
+
+      // Names Intl accepts but PostgreSQL does not list also fall back to UTC.
+      for (const name of ['+05:00', 'asia/dushanbe']) {
+         await client.query('UPDATE user_profiles SET timezone = $2 WHERE user_id = $1', [learner, name])
+         const other = await getStudentHomeService(learner, { clock: () => new Date('2026-06-11T10:00:00Z') })
+         assert.equal(other.week.timeZone, 'UTC')
+      }
+   })
+
+   await t.test('the time zone check uses the PostgreSQL list', async () => {
+      assert.equal(await isKnownTimeZoneService('Asia/Dushanbe'), true)
+      assert.equal(await isKnownTimeZoneService('UTC'), true)
+      assert.equal(await isKnownTimeZoneService('Nowhere/Zone'), false)
+      assert.equal(await isKnownTimeZoneService('+05:00'), false)
    })
 
    await t.test('attempt history: origins, filters, paging and privacy', async () => {

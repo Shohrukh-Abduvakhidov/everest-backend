@@ -13,6 +13,7 @@ import {
    finalizeExpiredAttemptsForUserService,
    safeLearnerAssignment,
 } from './test-attempt-service.js'
+import { isKnownTimeZoneService } from './timezone-service.js'
 import { getReadinessSummaryService } from './trainer-service.js'
 
 const origins = ['authored', 'trainer', 'mock_exam']
@@ -23,13 +24,14 @@ const weekDays = 7
 const analyticsWindowDays = 90
 
 // Optional overrides for tests: the repositories, the clock and the overrides of the services
-// this one composes (courses, trainer readiness, attempt finalization).
+// this one composes (courses, trainer readiness, attempt finalization) and the time zone check.
 function dependencies(overrides = {}) {
    return {
       repository: overrides.repository || studentHomeRepository,
       analytics: overrides.analytics || studentAnalyticsRepository,
       attempts: overrides.attempts || attemptRepository,
       clock: overrides.clock || (() => new Date()),
+      isKnownTimeZone: overrides.isKnownTimeZone || isKnownTimeZoneService,
       courses: overrides.courses,
       trainer: overrides.trainer,
       attemptServices: overrides.attemptServices,
@@ -139,7 +141,7 @@ function shiftDate(date, days) {
 
 async function resolveTimeZone(deps, actorId) {
    const name = await deps.repository.findProfileTimezone(actorId)
-   return name && await deps.repository.isValidTimeZone(name) ? name : 'UTC'
+   return name && await deps.isKnownTimeZone(name) ? name : 'UTC'
 }
 
 async function buildWeek(deps, actorId, now) {
