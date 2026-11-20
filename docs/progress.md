@@ -6,6 +6,14 @@ Updated: 2026-11-19.
 
 M12 PR 3 (staff progress views) on `feat/m12-staff-progress` (awaiting review). Deployed on the temporary VPS on 2026-11-19: backend up to PR #62 (M12 PR 1 and PR 2, the question text repair applied to 2 rows, refresh resilience), frontend up to PR #47. PR #63 (deploy/env.example variables) is open.
 
+## 2026-11-20 — Time zone check cache (`perf/timezone-cache`)
+
+- **What:** `GET /me/home` no longer queries `pg_timezone_names` on every call. The list of PostgreSQL time zone names is cached in process memory, loaded on first use and reloaded once a day (decisions.md 2026-11-20). Only one place used `pg_timezone_names` (`student-home-repository.isValidTimeZone`, removed). No migration, no API change.
+- **Tests:** new `tests/unit/time-zone-cache.test.js` (valid and invalid names including `+05:00` and lowercase, one load per day, shared concurrent load, stale list kept on a failed reload, failed first load thrown). `student-home.test.js`: `+05:00` and `asia/dushanbe` fall back to UTC; `isKnownTimeZoneService` against the real PostgreSQL list.
+- **Checked:** `npm test` (disposable database) exit 0, 513 passed, 0 failed. `verify-database.js`: valid.
+- **Measured locally:** the old query 87 ms warm; the first cached lookup 93 ms (the load), every later one 0.01 ms.
+- **Not checked:** the time saved on the server.
+
 ## 2026-11-19 — M12 PR 3: staff progress views (`feat/m12-staff-progress`)
 
 - **What:** five read-only routes.
