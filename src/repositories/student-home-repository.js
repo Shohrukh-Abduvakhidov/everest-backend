@@ -68,31 +68,37 @@ const attemptFrom = `FROM test_attempts AS attempt
    LEFT JOIN courses AS course ON course.id = test.course_id`
 
 // Finished attempts only (graded, or closed by the timer). A mock exam has no single subject:
-// a subject filter matches the exams that contain it.
-const finishedSql = `attempt.user_id = $1 AND attempt.status IN ('graded', 'expired')
+// a subject filter matches the exams that contain it. courseIds (the placeholder given), when
+// not null, keeps only course-test attempts of those courses: the staff view of a teacher whose
+// scope is some courses only (decision D1).
+const finishedSql = (courseIdsParam) => `attempt.user_id = $1 AND attempt.status IN ('graded', 'expired')
    AND attempt.max_score > 0
    AND ($2::text IS NULL OR test.origin = $2)
    AND ($3::bigint IS NULL OR ${subjectOfAttempt} = $3
       OR (test.origin = 'mock_exam' AND EXISTS (
          SELECT 1 FROM mock_exam_items AS item
          JOIN subjects AS subject ON subject.code = item.subject_code
-         WHERE item.attempt_id = attempt.id AND subject.id = $3)))`
+         WHERE item.attempt_id = attempt.id AND subject.id = $3)))
+   AND (${courseIdsParam}::bigint[] IS NULL
+      OR (test.origin = 'authored' AND test.course_id = ANY(${courseIdsParam}::bigint[])))`
 
-async function listFinishedAttempts(userId, { origin, subjectId, limit, offset }, db = pool) {
+const courseIdList = (courseIds) => (courseIds ? courseIds.map(normalizeInternalId) : null)
+
+async function listFinishedAttempts(userId, { origin, subjectId, limit, offset, courseIds = null }, db = pool) {
    const result = await db.query(
       `SELECT ${attemptColumns} ${attemptFrom}
-       WHERE ${finishedSql}
+       WHERE ${finishedSql('$6')}
        ORDER BY attempt.submitted_at DESC, attempt.id DESC
        LIMIT $4 OFFSET $5`,
-      [normalizeInternalId(userId), origin ?? null, subjectId ?? null, limit, offset],
+      [normalizeInternalId(userId), origin ?? null, subjectId ?? null, limit, offset, courseIdList(courseIds)],
    )
    return result.rows
 }
 
-async function countFinishedAttempts(userId, { origin, subjectId }, db = pool) {
+async function countFinishedAttempts(userId, { origin, subjectId, courseIds = null }, db = pool) {
    const result = await db.query(
-      `SELECT count(*)::integer AS total ${attemptFrom} WHERE ${finishedSql}`,
-      [normalizeInternalId(userId), origin ?? null, subjectId ?? null],
+      `SELECT count(*)::integer AS total ${attemptFrom} WHERE ${finishedSql('$4')}`,
+      [normalizeInternalId(userId), origin ?? null, subjectId ?? null, courseIdList(courseIds)],
    )
    return result.rows[0].total
 }

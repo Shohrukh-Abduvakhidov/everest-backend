@@ -843,7 +843,35 @@ Full contract with examples: `docs/frontend-handoff.md` → "Student home". Both
 - `GET /api/v1/me/home`: `continueLesson` (or `null`), `courses[]` (the `GET /courses` shape plus `lastActivityAt`, most recently active first), `tests.open[]` and `tests.upcoming[]` (the learner assignment shape plus `courseId`, `courseTitle`, `deadlineAt`; at most 10 each), `readiness` (trainer readiness plus `lastMockExam`; `subjects` lists every trainable subject, `readinessPercent: null` for those without trainings), `recentResults[]` (last 5 finished attempts of any kind), `week` (seven local days of watch seconds, completed lessons and finished attempts) and `serverNow`.
 - `GET /api/v1/me/attempts?origin&subjectId&limit&offset`: finished attempts of every kind, newest first. `origin` is `authored`, `trainer` or `mock_exam`; `limit` 1–100 (default 20). Response `{ attempts[], pagination: { limit, offset, total, hasMore } }`. `400 VALIDATION_ERROR` for a bad filter or page.
 - `GET /api/v1/me/analytics` (PR 2): `windowDays` (90), `since`, `totals { watchSeconds, lessonsCompleted, attemptsFinished }` (all-time; watch time = merged `watched_ranges`), `firstAttempt { count, averagePercent, withPassPercent, passed, passRate }` (all-time first attempts of course tests; `passRate` only over tests with a `passPercent`, `null` without), `topics { minQuestions, weakBelowPercent, strongFromPercent, strong[], weak[] }` (finished attempts of every kind in the window; points ÷ possible points, unanswered = 0; at least 5 questions; weak < 60, strong ≥ 85; 5 per list). Formulas live in `src/utils/learning-metrics.js`.
-- Learning activity events (`lesson_completed`, `attempt_finished`, `watch_hour`) are written by the player, the attempt finalization and lesson completion by test; they have no API. The permission `progress.read` is seeded for owner, admin and teacher and is not used by a route yet (PR 3).
+- Learning activity events (`lesson_completed`, `attempt_finished`, `watch_hour`) are written by the player, the attempt finalization and lesson completion by test; they have no API. The permission `progress.read` (owner, admin, teacher) opens the staff views below.
+
+## Staff progress views (M12 PR 3, 2026-11-19)
+
+Full contract with examples: `docs/frontend-handoff.md` → "Staff progress". All five routes are read-only GETs. Scope follows decision D1: owner and admin see everything. A teacher sees a group they teach with `canViewResults` and its active members (whole student), and a course they teach with `canViewResults` and its students (that course only). Anything outside the scope answers the same `404` as a missing id. "Behind" follows D5. Formulas are in `src/utils/learning-metrics.js`, queries in `src/repositories/stats/staff-progress-repository.js`.
+
+- `GET /api/v1/admin/groups/:groupId/progress` (`progress.read`)
+   - Query: `sort=name|lastActivity|readiness|progress|behind`, `order`, `behind=true|false`, `limit`, `offset`.
+   - Returns `group`, `totals { students, behind, withoutActivity7d, averageReadinessPercent, averageProgressPercent }`, `courses[]` (courses of the members), `rules`, `students[]`, `pagination { limit, offset, total, hasMore }`, `serverNow`.
+   - One row per active member: `name`, `lastLoginAt`, `lastActivityAt`, `readiness { readinessPercent, completedTrainings }`, `progressPercent`, `courses[{ courseId, title, enrollmentActive, totalLessons, completedLessons, startedLessons, notStartedLessons, percent, lagging }]`, `recentResults[]` (last 3 finished course-test attempts), `missedAssignments { count, latest[] }`, `belowPassThreshold`, `behind { isBehind, reasons[] }`.
+   - Errors: `400 INVALID_GROUP_ID` / `VALIDATION_ERROR`, `404 GROUP_NOT_FOUND`.
+- `GET /api/v1/admin/courses/:courseId/progress` (`progress.read`)
+   - Query: `sort=name|lastActivity|progress|behind`, `order`, `behind`, `limit`, `offset`.
+   - Returns `course`, `totals { students, activeStudents, lessons, averagePercent, averageCompletedLessons, completedCourse, notStarted, behind }`, `modules[{ …, averagePercent, lessons[{ lessonId, title, position, lessonType, completed, started, notStarted, completedPercent }] }]`, `rules`, `students[]`, `pagination`, `serverNow`.
+   - Each student row has `progress` and `modules[]`; results, missed assignments and `below_pass` count only this course's tests, and there is no trainer readiness.
+   - Errors: `400 INVALID_COURSE_ID` / `VALIDATION_ERROR`, `404 COURSE_NOT_FOUND`.
+- `GET /api/v1/admin/users/:userId/analytics` (`progress.read`)
+   - Returns `student`, `scope { kind: full|courses, courseIds }`, `home` (the `/me/home` shape), `analytics` (the `/me/analytics` shape) and `attempts` (first 20 finished attempts of every kind).
+   - With `scope.kind = courses` (course teacher only): only those courses; `home.readiness`, `home.week` and `analytics` are `null`; no trainer or mock exam attempts.
+   - Read-only: expired attempts are not finalized here.
+   - Errors: `400 INVALID_USER_ID`, `404 USER_NOT_FOUND`.
+- `GET /api/v1/admin/users/:userId/attempts?origin&subjectId&limit&offset` (`progress.read`): the `/me/attempts` filters and response, inside the same scope.
+- `GET /api/v1/admin/tests/:testId/assignments/:assignmentId/results` (`tests.results.read`)
+   - Query: `sort=name|percent|attempts|status`, `order`, `status=passed|failed|finished|in_progress|not_started`, `limit`, `offset`.
+   - Returns `test { id, title, maxAttempts, resultPolicy, passPercent }`, `assignment { id, status, opensAt, closesAt, audience { type, id } }`, `totals { students, notStarted, inProgress, finished, passed, failed, attempts, averagePercent, averageScore }`, `students[{ userId, name, status, attemptsUsed, maxAttempts, result, bestPercent, lastSubmittedAt }]`, `pagination`, `serverNow`.
+   - Rows are the audience plus anyone with an attempt. `result` follows the result policy; `maxAttempts` includes extra attempts.
+   - Scope: owner, admin, a teacher of the test's course or of the assignment's group with `canViewResults`.
+   - Errors: `400 INVALID_TEST_ID` / `INVALID_ASSIGNMENT_ID` / `VALIDATION_ERROR`, `404 ASSIGNMENT_NOT_FOUND`.
+- Performance: a whole group or course is computed from a fixed number of aggregate queries (no query per student), then sorted and paged in the service. A group of 200 students with 79 000 lesson progress rows, 60 000 attempts and 110 000 activity events takes about 110 ms on a warm database (EXPLAIN in `docs/progress.md`). No new index was needed.
 
 ## NCT trainer
 

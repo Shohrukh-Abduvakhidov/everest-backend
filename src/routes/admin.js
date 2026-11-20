@@ -188,10 +188,28 @@ import {
    readTestsAuthorizationMiddleware,
    regradeTestResultsAuthorizationMiddleware,
 } from '../middleware/test-admin-middleware.js'
+import { readProgressAuthorizationMiddleware } from '../middleware/progress-admin-middleware.js'
+import {
+   getAssignmentResultsController,
+   getCourseProgressController,
+   getGroupProgressController,
+   getStaffStudentAnalyticsController,
+   listStaffStudentAttemptsController,
+} from '../controllers/staff-progress-controller.js'
 
 const adminRouter = express.Router()
 
 adminRouter.use(authMiddleware)
+// Staff progress views (M12 PR 3); scope by decision D1 in the service.
+adminRouter.get('/groups/:groupId/progress', readProgressAuthorizationMiddleware, getGroupProgressController)
+adminRouter.get('/courses/:courseId/progress', readProgressAuthorizationMiddleware, getCourseProgressController)
+adminRouter.get('/users/:userId/analytics', readProgressAuthorizationMiddleware, getStaffStudentAnalyticsController)
+adminRouter.get('/users/:userId/attempts', readProgressAuthorizationMiddleware, listStaffStudentAttemptsController)
+adminRouter.get(
+   '/tests/:testId/assignments/:assignmentId/results',
+   readTestResultsAuthorizationMiddleware,
+   getAssignmentResultsController,
+)
 adminRouter.get('/courses', readCoursesAuthorizationMiddleware, listCoursesController)
 adminRouter.get('/courses/:courseId', readCoursesAuthorizationMiddleware, getCourseController)
 adminRouter.post(

@@ -7,6 +7,7 @@ import { withTransaction } from '../repositories/transaction-repository.js'
 import AppError from '../utils/app-error.js'
 import { digitsSnapshot, scorePercent } from '../utils/attempt-grading.js'
 import { normalizeInternalId } from '../utils/internal-id.js'
+import { subjectReadiness } from '../utils/learning-metrics.js'
 import { authorizePermissionService } from './authorization-service.js'
 import { parseUserId, validateBody, validationError } from './course-service.js'
 import { getAttemptService, startAttemptInTransactionService } from './test-attempt-service.js'
@@ -400,13 +401,9 @@ function roundPercent(value) {
 }
 
 // Readiness of a subject: points over questions of its last readinessWindow finished trainings
-// (a cells question weighs its blueprint points, every other question 1 point). Overall readiness: the
-// mean of the subject values, every trained subject counting equally.
-function subjectReadiness(rows) {
-   const score = rows.reduce((sum, row) => sum + Number(row.score), 0)
-   const maxScore = rows.reduce((sum, row) => sum + Number(row.max_score), 0)
-   return roundPercent((score * 100) / maxScore)
-}
+// (a cells question weighs its blueprint points, every other question 1 point), computed by
+// subjectReadiness in utils/learning-metrics.js. Overall readiness: the mean of the subject
+// values, every trained subject counting equally.
 
 // Subject readiness and the overall figure from the last readinessWindow finished trainings of
 // each subject. Shared by the /nct overview and the student home page.

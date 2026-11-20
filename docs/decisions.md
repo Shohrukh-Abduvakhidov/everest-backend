@@ -1,5 +1,30 @@
 # Decisions
 
+## 2026-11-19 — M12 PR 3: staff progress views
+
+D1–D7 (2026-11-16) stay as approved. These are the implementation choices of PR 3, where D1 and D5 left room.
+
+- **Paths and permissions.**
+   - `GET /admin/groups/:groupId/progress`, `GET /admin/courses/:courseId/progress`, `GET /admin/users/:userId/analytics` and `GET /admin/users/:userId/attempts` need `progress.read` (D2).
+   - The assignment results `GET /admin/tests/:testId/assignments/:assignmentId/results` sit next to the existing attempt list and need `tests.results.read`, like it.
+   - A role permission alone shows nothing. The scope below is checked inside the queries, and anything outside it answers the 404 of a missing id.
+- **Scope (D1) in detail.**
+   - Group view: owner/admin, or a teacher with `group_teachers.can_view_results` on that group.
+   - Course view: owner/admin, or a teacher with `course_teachers.can_view_results` on that course. A group teacher does not get the course view; they have the group view for their students.
+   - Student view, `full`: owner/admin, or a teacher with `can_view_results` on a group where the student is an active member. Everything the student sees, including trainer and mock exams.
+   - Student view, `courses`: a teacher with only course grants, for the courses they teach with `can_view_results` that the student is enrolled in (not revoked). Trainer readiness, the week and `/me/analytics` totals span every course, so they are `null` rather than partially filtered, and trainer and mock exam attempts are left out (D1: "not the trainer").
+   - Assignment results: owner/admin, a course teacher of the test's course, or a group teacher of the assignment's group, each with `can_view_results`, the same rule as the existing attempt list.
+- **Reuse.** The student view calls the `/me/home`, `/me/analytics` and `/me/attempts` builders of `student-home-service.js` with the student's id, so the numbers are the same as the student's own. The builders take an optional course filter. The staff call never finalizes expired attempts (a GET by staff stays read-only; `worker:attempts` closes them within its interval). The lesson-level summary of M07-D (`/admin/courses/:courseId/lessons/:lessonId/progress`) stays as it is; the course view adds per-lesson counts but not watch ranges. The readiness formula moved to `utils/learning-metrics.js` and the trainer uses the same function.
+- **Course progress for staff** uses the same lessons as the student's own course card, so the teacher and the student see the same numbers. The counted lessons are the published lessons of published modules that `can_access_module` opens to the student right now. `completedLessons`, `startedLessons` and `percent` count only those lessons, so a lesson completed in a module that has since been closed no longer counts. `totalPublishedLessons` (every published lesson of the course) comes alongside, so the teacher sees when not everything is open. The percentages and the `progress_lag` median use the open lessons. An enrollment that has not begun or has ended is listed with `enrollmentActive: false`, has no open lessons and is left out of averages and medians. Changed on 2026-11-19 in review: the first version counted every published lesson for every student.
+- **D5 details.**
+   - `no_activity_7d`: the latest of a learning event, a lesson progress write or an attempt start. Events only exist since 2026-11-16, and the other two sources cover the time before. Exactly 7 days ago is still active.
+   - `missed_deadline`: an assignment to the student, or to a group they were an active member of before it closed. It must be closed (`closes_at` passed), not revoked, in a course the student is enrolled in, and have no finished attempt. A student who joined after the close is not counted. Course and lesson audiences are not counted (no route creates them).
+   - `below_pass`: take the latest finished attempt of each of the last 3 tests that have a numeric `passPercent`. The mean percent below the mean threshold sets the reason. Without such tests it is not set (`belowPassThreshold: null`).
+   - `progress_lag`: in the group view, the median is over the group's students with an active enrollment in that course. In the course view, it is over the course's students with an active enrollment (the group median does not exist there). At least 5 students in both, and "at least 25 points under" includes exactly 25.
+- **Assignment audience.** The user, the active members of the group, or the enrolled students of the course or lesson, plus anyone with an attempt on the assignment (for example a former member). The result follows the test result policy (`selectResultAttempt`). The effective limit includes extra attempts.
+- **Sorting and paging** happen in the service after the whole group or course is computed, because readiness, progress and "behind" are computed values. Every figure comes from a fixed number of aggregate statements over the list of students (`bigint[]`), never one query per student.
+- **Performance.** On a disposable database with 2200 students (200 in the measured group), 79 000 lesson progress rows, 60 000 attempts and 110 000 activity events, every statement uses existing indexes. The worst statement was the missed-assignment query (353 ms). It was rewritten as a personal and a group branch plus a hashed `NOT IN` and now takes 30 ms. The group view takes about 110 ms warm. No index or migration was added.
+
 ## 2026-11-19 — Refresh that survives a bad network and a class behind one NAT
 
 **Grace window for a replayed refresh token.** Before, any second use of a refresh token revoked the whole session (`REFRESH_TOKEN_REUSE_DETECTED`). A phone on a weak network that sends the refresh, loses the response and retries was logged out. Now a used token presented again is accepted as a lost response when **all** of these hold, checked under the existing `FOR UPDATE` lock on token, session and account:

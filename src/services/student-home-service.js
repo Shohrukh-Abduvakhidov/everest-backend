@@ -84,9 +84,19 @@ function byDeadline(left, right) {
    return a - b || new Date(left.opensAt) - new Date(right.opensAt)
 }
 
-async function buildTests(deps, actorId, now) {
-   await finalizeExpiredAttemptsForUserService(actorId, deps.attemptServices)
-   const rows = await deps.attempts.listLearnerHomeAssignments(actorId, now)
+// view: { courseIds, staff }. courseIds null = every course; a list keeps only those courses
+// (a teacher whose scope is some courses, decision D1). A staff read never finalizes expired
+// attempts (it stays read-only; worker:attempts closes them within its interval).
+const ownView = Object.freeze({ courseIds: null, staff: false })
+
+function inView(view, courseId) {
+   return view.courseIds === null || view.courseIds.includes(courseId)
+}
+
+async function buildTests(deps, actorId, now, view = ownView) {
+   if (!view.staff) await finalizeExpiredAttemptsForUserService(actorId, deps.attemptServices)
+   const rows = (await deps.attempts.listLearnerHomeAssignments(actorId, now))
+      .filter((row) => inView(view, row.course_id))
    const ids = rows.map((row) => row.id)
    const [attempts, extra] = await Promise.all([
       deps.attempts.listUserAttempts(actorId, ids),
@@ -191,28 +201,28 @@ function buildContinueLesson(row) {
    }
 }
 
-// GET /me/home: everything the student home page shows, in one response. Own data only.
-async function getStudentHomeService(userId, overrides) {
-   const deps = dependencies(overrides)
-   const actorId = parseUserId(userId)
-   await requireActiveAccount(deps, actorId)
-   const now = deps.clock()
+// The home page of one student. In a course-limited view the trainer readiness and the week
+// (both span every course) are null, and every list keeps only the courses in view.
+async function buildStudentHome(deps, studentId, now, view = ownView) {
+   const wholeStudent = view.courseIds === null
    const [continueLesson, courseList, activity, tests, readiness, recent, week] = await Promise.all([
-      deps.repository.findContinueLesson(actorId),
-      listLearnerCoursesService(actorId, deps.courses),
-      deps.repository.listCourseActivity(actorId),
-      buildTests(deps, actorId, now),
-      buildReadiness(deps, actorId),
-      deps.repository.listFinishedAttempts(actorId, {
+      deps.repository.findContinueLesson(studentId),
+      listLearnerCoursesService(studentId, deps.courses),
+      deps.repository.listCourseActivity(studentId),
+      buildTests(deps, studentId, now, view),
+      wholeStudent ? buildReadiness(deps, studentId) : null,
+      deps.repository.listFinishedAttempts(studentId, {
          origin: null,
          subjectId: null,
          limit: recentResultsLimit,
          offset: 0,
+         courseIds: view.courseIds,
       }),
-      buildWeek(deps, actorId, now),
+      wholeStudent ? buildWeek(deps, studentId, now) : null,
    ])
    const lastActivity = new Map(activity.map((row) => [row.course_id, iso(row.last_activity_at)]))
    const courses = courseList.courses
+      .filter((course) => inView(view, course.id))
       .map((course) => ({ ...course, lastActivityAt: lastActivity.get(course.id) ?? null }))
       .sort((left, right) => {
          const a = left.lastActivityAt === null ? 0 : new Date(left.lastActivityAt).getTime()
@@ -220,7 +230,9 @@ async function getStudentHomeService(userId, overrides) {
          return b - a
       })
    return {
-      continueLesson: buildContinueLesson(continueLesson),
+      continueLesson: continueLesson && inView(view, continueLesson.course_id)
+         ? buildContinueLesson(continueLesson)
+         : null,
       courses,
       tests,
       readiness,
@@ -228,6 +240,14 @@ async function getStudentHomeService(userId, overrides) {
       week,
       serverNow: now.toISOString(),
    }
+}
+
+// GET /me/home: everything the student home page shows, in one response. Own data only.
+async function getStudentHomeService(userId, overrides) {
+   const deps = dependencies(overrides)
+   const actorId = parseUserId(userId)
+   await requireActiveAccount(deps, actorId)
+   return buildStudentHome(deps, actorId, deps.clock())
 }
 
 function parseAttemptsQuery(query) {
@@ -254,15 +274,10 @@ function parseAttemptsQuery(query) {
    }
 }
 
-// GET /me/attempts: finished attempts of every kind (course tests, trainer, mock exam), newest first.
-async function listStudentAttemptsService(userId, query = {}, overrides) {
-   const deps = dependencies(overrides)
-   const actorId = parseUserId(userId)
-   const filters = parseAttemptsQuery(query)
-   await requireActiveAccount(deps, actorId)
+async function buildFinishedAttempts(deps, studentId, filters) {
    const [rows, total] = await Promise.all([
-      deps.repository.listFinishedAttempts(actorId, filters),
-      deps.repository.countFinishedAttempts(actorId, filters),
+      deps.repository.listFinishedAttempts(studentId, filters),
+      deps.repository.countFinishedAttempts(studentId, filters),
    ])
    return {
       attempts: rows.map(safeFinishedAttempt),
@@ -275,18 +290,23 @@ async function listStudentAttemptsService(userId, query = {}, overrides) {
    }
 }
 
-// GET /me/analytics: profile figures. Totals and first attempts are all-time; topics use the
-// last analyticsWindowDays days, measured from the attempt's submit (or expiry) time.
-async function getStudentAnalyticsService(userId, overrides) {
+// GET /me/attempts: finished attempts of every kind (course tests, trainer, mock exam), newest first.
+async function listStudentAttemptsService(userId, query = {}, overrides) {
    const deps = dependencies(overrides)
    const actorId = parseUserId(userId)
+   const filters = parseAttemptsQuery(query)
    await requireActiveAccount(deps, actorId)
-   const now = deps.clock()
+   return buildFinishedAttempts(deps, actorId, filters)
+}
+
+// Totals and first attempts are all-time; topics use the last analyticsWindowDays days,
+// measured from the attempt's submit (or expiry) time.
+async function buildStudentAnalytics(deps, studentId, now) {
    const since = new Date(now.getTime() - analyticsWindowDays * 86400000)
    const [totals, firstAttempts, topicRows] = await Promise.all([
-      deps.analytics.findLearningTotals(actorId),
-      deps.analytics.listFirstAttempts(actorId),
-      deps.analytics.listTopicTotals(actorId, since),
+      deps.analytics.findLearningTotals(studentId),
+      deps.analytics.listFirstAttempts(studentId),
+      deps.analytics.listTopicTotals(studentId, since),
    ])
    return {
       windowDays: analyticsWindowDays,
@@ -306,4 +326,22 @@ async function getStudentAnalyticsService(userId, overrides) {
    }
 }
 
-export { getStudentAnalyticsService, getStudentHomeService, listStudentAttemptsService, safeFinishedAttempt }
+// GET /me/analytics: profile figures of the signed-in student.
+async function getStudentAnalyticsService(userId, overrides) {
+   const deps = dependencies(overrides)
+   const actorId = parseUserId(userId)
+   await requireActiveAccount(deps, actorId)
+   return buildStudentAnalytics(deps, actorId, deps.clock())
+}
+
+export {
+   buildFinishedAttempts,
+   buildStudentAnalytics,
+   buildStudentHome,
+   dependencies as studentHomeDependencies,
+   getStudentAnalyticsService,
+   getStudentHomeService,
+   listStudentAttemptsService,
+   parseAttemptsQuery,
+   safeFinishedAttempt,
+}

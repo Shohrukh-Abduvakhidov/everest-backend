@@ -2,14 +2,21 @@
 project: EVEREST Backend
 current_milestone: M12
 status: in_progress
-branch: feat/refresh-resilience
-base_commit: 5a6df55
+branch: feat/m12-staff-progress
+base_commit: 141ee10
 updated_at: 2026-11-19
 ---
 
 # Current handoff
 
-## Refresh resilience (branch `feat/refresh-resilience`, awaiting review)
+## M12 PR 3: staff progress views (branch `feat/m12-staff-progress`, awaiting review)
+
+- **Built:** `GET /admin/groups/:groupId/progress`, `GET /admin/courses/:courseId/progress`, `GET /admin/users/:userId/analytics`, `GET /admin/users/:userId/attempts` (`progress.read`) and `GET /admin/tests/:testId/assignments/:assignmentId/results` (`tests.results.read`); D1 scope with 404 outside it; D5 reasons. No migration. Contract: `docs/frontend-handoff.md` → "Staff progress"; decisions 2026-11-19.
+- **Verified:** see `docs/progress.md` (2026-11-19, M12 PR 3).
+- **Not verified:** the screens in the frontend; the server (not deployed).
+- **After merge:** deploy the backend (no migration, no new env); the frontend can build the teacher screens from the handoff contract. M12 is Done once this PR is merged.
+
+## Refresh resilience (merged in PR #62, deployed 2026-11-19)
 
 - **Built:** 30 s grace window for a replayed refresh token (new pair in the same session, original refresh expiry, audit `auth.refresh.grace_reissued`); per-session refresh limit (`refresh.session`, 20) and separate per-IP limits for refresh (2000) and password login (1000); refresh cookies cleared only on 401. New env: `AUTH_REFRESH_REUSE_GRACE_SECONDS`, `AUTH_REFRESH_SESSION_RATE_LIMIT`, `AUTH_REFRESH_IP_RATE_LIMIT`, `AUTH_LOGIN_IP_RATE_LIMIT`. No migration. Details: `docs/progress.md`, `docs/decisions.md` (2026-11-19), `docs/api.md`.
 - **Verified:** disposable-database suite 491/491 (twice); `verify-database.js` valid.
