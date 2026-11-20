@@ -1147,6 +1147,46 @@ The thresholds come back in `rules` (`inactiveDays`, `belowPassTests`, `progress
 - `result` follows the test's `resultPolicy` (first, best or last finished attempt). `maxAttempts` includes extra attempts and is `null` when unlimited. Averages are over `result`.
 - The attempt list with answers stays at `GET /admin/tests/:testId/attempts?assignmentId=`.
 
+### My staff rights (2026-11-20)
+
+`GET /me/staff-capabilities` tells the signed-in user what they may do as staff. Call it once after login (and after a role change, which revokes the session anyway) to decide which staff screens and buttons to show. It is a hint for the UI: the server still checks every action, and a stale answer only leads to a `403`/`404` on the real route.
+
+```json
+{
+  "data": {
+    "roles": ["teacher"],
+    "permissions": ["courses.read", "lessons.manage", "lessons.read", "progress.read", "tests.results.read", "…"],
+    "allAccess": false,
+    "isTeacher": true,
+    "courses": [
+      { "courseId": "12", "title": "Algebra", "status": "published",
+        "canEditCourse": false, "canManageLessons": true, "canManageQuestions": false,
+        "canManageTests": false, "canViewResults": true }
+    ],
+    "groups": [
+      { "groupId": "5", "code": "G-0005", "name": "10A", "status": "active",
+        "canPublishAnnouncements": false, "canAssignTests": true, "canViewResults": true }
+    ]
+  }
+}
+```
+
+- **Owner / admin:** `allAccess: true` means every flag on every course and group. The lists are not filled with all courses; use the normal admin lists.
+- **Student:** `200` with `allAccess: false` and empty lists (not `403`).
+- **Inactive account:** `403 ACCOUNT_NOT_ACTIVE`.
+
+Which flag opens which screen (`allAccess` opens all of them):
+
+| Screen | Condition |
+|---|---|
+| Lesson editor and lesson video upload of course X | `courses[X].canManageLessons` |
+| Course settings of course X | `courses[X].canEditCourse` |
+| Course progress `GET /admin/courses/:id/progress` | `permissions` has `progress.read` and `courses[X].canViewResults` |
+| Group progress `GET /admin/groups/:id/progress` | `permissions` has `progress.read` and `groups[G].canViewResults` |
+| Assignment results | `canViewResults` on the test's course or on the assignment's group |
+| Tests of course X | `courses[X].canManageTests`; assigning to a group also needs `groups[G].canAssignTests` |
+| Group announcements | `groups[G].canPublishAnnouncements` |
+
 ### Admin: tests (M10)
 
 | Method | Path | Permission | Purpose |
@@ -1206,6 +1246,7 @@ Notes:
    - groups: assigned groups, and announcements only when the assignment allows publishing;
    - question banks: the teacher's own banks for writes; own and staff-visible banks for reads;
    - tests: courses with `canManageTests`; a group assignment also needs `canAssignTests` on the group.
+- **Own rights for the UI:** `GET /me/staff-capabilities` returns the roles, permissions and the per-course and per-group flags above (see "My staff rights").
 - **Missing permission:** most routes return `403 ACTION_FORBIDDEN`; account-administration routes return `403 ADMIN_ROLE_REQUIRED`. A missing scope (resource not visible to the actor) returns the resource's `404`.
 
 ### 3.2 Account actions: who may act on whom

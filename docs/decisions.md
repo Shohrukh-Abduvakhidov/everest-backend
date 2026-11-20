@@ -881,3 +881,19 @@ Password login uses a generic invalid-credentials response for unknown phones an
    - Excluded from every automatic rule, including the existing header and initial repairs: 1907, 1917, 1102, 904, 956, 291. Their findings are printed for review with `excluded: true`.
 - **Review list after the changes.** The manual-review list is now the audit of the fixed questions (what is still left), not of the originals. A listed join question that is missing or has nothing to join is printed as a warning (`joinNotApplied` in the log).
 - **Same guarantees as before:** `--dry-run` by default, `--apply` needs `--log`, the integrity snapshot (ids, keys, positions, answer keys, test links, attempts, student answers) must match before and after, guards disabled inside the transaction only, `--rollback` restores only rows that still hold the fixed value. Log entries now carry `rules` per edit; old logs still roll back.
+
+## 2026-11-20 — `GET /me/staff-capabilities`
+
+- **New route, not a field in `/profile`:** the profile is shared by every user and is updated with `PATCH`; the staff rights are a separate read that needs four queries. A route under `/me` keeps the profile unchanged and fits the other own-data reads.
+- **Student: `200` with empty lists, not `403`.** The answer is about the caller only, so it discloses nothing; the frontend can call it for every signed-in user without handling an error to mean "not staff".
+- **Owner and admin: `allAccess: true`, lists not expanded.** They act on every course and group without an assignment (the `administratorSql` checks). Listing every course would repeat the admin catalog and grow without bound; the lists keep only assignments that actually exist.
+- **Teacher assignments only with the teacher role.** Test and progress scopes require the teacher role in addition to the assignment row; a user whose teacher role was removed keeps `course_teachers` rows but cannot use them there. Such rows are therefore not listed. (Lesson management checks only the assignment flag; the gap is noted, not changed here.)
+- **Raw flags, no derived screen list.** The flags are those of `course_teachers` and `group_teachers` plus the role permissions; the frontend maps them to screens (`docs/frontend-handoff.md`, "My staff rights"). Archived courses and groups are included with their status, so the client decides whether to show them.
+- **Active account required** (`403 ACCOUNT_NOT_ACTIVE`), as in the other `/me` reads.
+
+## 2026-11-20 — Time zone check cached in process memory
+
+- **Problem:** `GET /me/home` validated the profile time zone with `SELECT … FROM pg_timezone_names`, about 90 ms per call (PostgreSQL reads the zoneinfo files every time). This was the only use of `pg_timezone_names` in the code.
+- **Choice: cache the PostgreSQL list, not Intl.** Node's `Intl.DateTimeFormat` accepts names PostgreSQL does not list, for example `+05:00` and `asia/dushanbe`. `+05:00` is worse than unknown: `AT TIME ZONE '+05:00'` is read as a POSIX zone with the opposite sign, so the week would shift by ten hours. The home week must use exactly the names `AT TIME ZONE` accepts, so the list comes from `pg_timezone_names`.
+- **Cache:** `src/utils/time-zone-cache.js`, used by `src/services/timezone-service.js` (`isKnownTimeZoneService`); the query moved to `src/repositories/timezone-repository.js`. Loaded on the first lookup, reloaded when older than 24 hours; concurrent lookups share one load. A failed reload keeps serving the old list and retries on the next lookup; a failed first load throws (as the query did before). One copy per process (API and each worker), about 600 names.
+- **Unchanged:** profile updates still validate with Intl (`profile-service.js`). A name Intl accepts but PostgreSQL does not list keeps falling back to UTC on the home week, as before.
