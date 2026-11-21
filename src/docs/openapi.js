@@ -133,13 +133,24 @@ const schemas = {
    }),
    Notification: obj({
       id: id(),
-      eventCode: enumOf(['test.assigned', 'group.announcement', 'test.extra_attempts', 'account.approved', 'account.unblocked', 'course.enrolled', 'module.opened']),
+      eventCode: enumOf(['test.assigned', 'group.announcement', 'test.extra_attempts', 'account.approved', 'account.unblocked', 'course.enrolled', 'module.opened', 'telegram.disconnected']),
       title: str({ description: 'Rendered once on creation in the profile language (ru, tj, en)' }),
       body: str(),
       targetPath: nullable(str({ description: 'Path inside the student app, e.g. /courses/12 or /' })),
       createdAt: dt(),
       readAt: nullable(dt()),
    }, ['id', 'eventCode', 'title', 'body', 'targetPath', 'createdAt', 'readAt']),
+   NotificationSettings: obj({
+      telegramEnabled: bool({ description: 'Master switch for Telegram copies; in-app notifications cannot be turned off' }),
+      quietHours: nullable(obj({ start: str({ description: 'HH:MM' }), end: str({ description: 'HH:MM; earlier than start crosses midnight' }) }, ['start', 'end'])),
+      timeZone: str({ description: 'Profile time zone in which the quiet hours apply' }),
+      messagingConnected: bool({ description: 'Telegram linked and the bot can message the user' }),
+      events: {
+         type: 'object',
+         description: 'Per event code { telegram: boolean } (default true); in-app-only events are not listed',
+         additionalProperties: obj({ telegram: bool() }, ['telegram']),
+      },
+   }, ['telegramEnabled', 'quietHours', 'timeZone', 'messagingConnected', 'events']),
    PendingUser: obj({
       id: id(),
       status: str(),
@@ -2113,6 +2124,23 @@ const routes = [
       description: 'A notification that is already read keeps its first readAt. Another user\'s notification answers 404.',
       response: ref('Notification'),
       errors: { 400: ['INVALID_NOTIFICATION_ID'], 403: ['ACCOUNT_NOT_ACTIVE'], 404: ['NOTIFICATION_NOT_FOUND'] },
+   }],
+   ['get', '/me/notification-settings', {
+      tag: 'Notifications', summary: 'My notification settings: Telegram switches and quiet hours',
+      description: 'In-app notifications are always on. Without saved settings: Telegram on for every event, quiet hours 22:00–08:00 in the profile time zone. Telegram copies are sent only while messagingConnected is true.',
+      response: ref('NotificationSettings'),
+      errors: { 403: ['ACCOUNT_NOT_ACTIVE'], 404: ['PROFILE_NOT_FOUND'] },
+   }],
+   ['put', '/me/notification-settings', {
+      tag: 'Notifications', summary: 'Change my notification settings (partial)',
+      description: 'Send any of telegramEnabled, quietHours ({ start, end } as HH:MM, different; null turns quiet hours off) and events ({ "<eventCode>": { "telegram": boolean } }, only events listed in GET). Messages already queued follow the new switches: the sender checks them right before sending. Returns the full settings.',
+      body: obj({
+         telegramEnabled: bool(),
+         quietHours: nullable(obj({ start: str(), end: str() }, ['start', 'end'])),
+         events: { type: 'object', additionalProperties: obj({ telegram: bool() }, ['telegram']) },
+      }),
+      response: ref('NotificationSettings'),
+      errors: { 403: ['ACCOUNT_NOT_ACTIVE'], 404: ['PROFILE_NOT_FOUND'] },
    }],
    ['post', '/me/notifications/read-all', {
       tag: 'Notifications', summary: 'Mark my notifications read up to an id',

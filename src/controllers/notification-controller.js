@@ -4,6 +4,10 @@ import {
    markAllNotificationsReadService,
    markNotificationReadService,
 } from '../services/notification-service.js'
+import {
+   getNotificationSettingsService,
+   updateNotificationSettingsService,
+} from '../services/notification-settings-service.js'
 
 function overrides(req) {
    return req.app.locals.serviceDependencies.notifications
@@ -49,7 +53,27 @@ async function markAllNotificationsReadController(req, res, next) {
    }
 }
 
+async function getNotificationSettingsController(req, res, next) {
+   try {
+      const data = await getNotificationSettingsService(req.auth.userId, overrides(req))
+      res.json({ data })
+   } catch (error) {
+      next(error)
+   }
+}
+
+async function updateNotificationSettingsController(req, res, next) {
+   try {
+      const data = await updateNotificationSettingsService(req.auth.userId, req.body, overrides(req))
+      res.json({ data })
+   } catch (error) {
+      next(error)
+   }
+}
+
 export {
+   getNotificationSettingsController,
+   updateNotificationSettingsController,
    countUnreadNotificationsController,
    listNotificationsController,
    markAllNotificationsReadController,

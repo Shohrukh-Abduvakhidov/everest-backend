@@ -267,6 +267,11 @@ test('Telegram start/callback/link/replay/validation/unlink integration', async 
         [first.userId]
       );
       assert.equal(blockedConnection.rows[0].status, 'blocked');
+      const disconnected = await client.query(
+        "SELECT target_path FROM notifications WHERE user_id = $1 AND event_code = 'telegram.disconnected'",
+        [first.userId]
+      );
+      assert.deepEqual(disconnected.rows, [{ target_path: '/profile' }]);
       botProvider.failUnavailable = false;
 
       const duplicateStart = await request(port, '/api/v1/auth/telegram/link', {
@@ -539,6 +544,12 @@ test('Telegram start/callback/link/replay/validation/unlink integration', async 
     await new Promise((resolve) => server.close(resolve));
     if (fixtureUserIds.length) {
       await client.query('DELETE FROM audit_events WHERE actor_user_id = ANY($1::bigint[])', [fixtureUserIds]);
+      await client.query(
+        `DELETE FROM notification_deliveries WHERE telegram_connection_id IN (
+           SELECT id FROM telegram_connections WHERE user_id = ANY($1::bigint[]))`,
+        [fixtureUserIds]
+      );
+      await client.query('DELETE FROM notifications WHERE user_id = ANY($1::bigint[])', [fixtureUserIds]);
       await client.query('DELETE FROM telegram_connections WHERE user_id = ANY($1::bigint[])', [fixtureUserIds]);
       await client.query('DELETE FROM auth_identities WHERE user_id = ANY($1::bigint[])', [fixtureUserIds]);
       await client.query('DELETE FROM telegram_oidc_states WHERE state_hash = ANY($1::text[])', [fixtureStateHashes]);

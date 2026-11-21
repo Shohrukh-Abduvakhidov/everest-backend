@@ -130,12 +130,14 @@ async function findModuleGrantSource(grantId, db = pool) {
 // ---------------------------------------------------------------- writes
 
 // One statement per batch; UNIQUE (user_id, dedupe_key) makes a repeated event a no-op.
+// Returns only the rows written now (id, user_id), so channels are added for new ones only.
 async function insertNotifications(rows, client) {
-   if (!rows.length) return 0
+   if (!rows.length) return []
    const result = await client.query(
       `INSERT INTO notifications (user_id, event_code, title, body, target_path, dedupe_key)
        SELECT * FROM unnest($1::bigint[], $2::text[], $3::text[], $4::text[], $5::text[], $6::text[])
-       ON CONFLICT (user_id, dedupe_key) DO NOTHING`,
+       ON CONFLICT (user_id, dedupe_key) DO NOTHING
+       RETURNING id, user_id`,
       [
          rows.map((row) => normalizeInternalId(String(row.userId))),
          rows.map((row) => row.eventCode),
@@ -145,7 +147,7 @@ async function insertNotifications(rows, client) {
          rows.map((row) => row.dedupeKey),
       ],
    )
-   return result.rowCount
+   return result.rows
 }
 
 // ---------------------------------------------------------------- inbox

@@ -1,5 +1,6 @@
 import env from '../configs/env.js'
 import * as authRepository from '../repositories/auth-repository.js'
+import * as telegramDeliveryRepository from '../repositories/telegram-delivery-repository.js'
 import { withTransaction } from '../repositories/transaction-repository.js'
 import * as sessionRepository from '../repositories/session-repository.js'
 import AppError from '../utils/app-error.js'
@@ -13,6 +14,7 @@ import {
 import { TelegramBotProvider } from './auth/telegram-bot-provider.js'
 import { expectedIssuer, TelegramOidcProvider } from './auth/telegram-oidc-provider.js'
 import { issueSessionService } from './auth/session-service.js'
+import { blockTelegramConnectionService } from './telegram-delivery-service.js'
 import { verifyAccessToken } from './auth/session-token-service.js'
 
 function requireConfiguration(config) {
@@ -108,6 +110,8 @@ function dependencies(overrides = {}) {
       transaction: overrides.transaction || withTransaction,
       oidcProvider: overrides.oidcProvider || new TelegramOidcProvider(config.telegram),
       botProvider: overrides.botProvider || new TelegramBotProvider(config.telegram),
+      deliveries: overrides.deliveries || telegramDeliveryRepository,
+      blockConnection: overrides.blockConnection || blockTelegramConnectionService,
       logger: overrides.logger || console,
       now,
       sessions: overrides.sessions || {
@@ -378,7 +382,7 @@ async function authenticateService(token, overrides) {
 }
 
 async function unlinkTelegramService(userId, overrides) {
-   const { config, repository, transaction } = dependencies(overrides)
+   const { config, repository, deliveries, transaction } = dependencies(overrides)
    requireConfiguration(config)
    return transaction(async (client) => {
       const identity = await repository.findUserTelegramIdentityForUpdate(
@@ -392,6 +396,13 @@ async function unlinkTelegramService(userId, overrides) {
          throw new AppError(409, 'LAST_LOGIN_METHOD', 'Cannot remove the last login method')
       }
       await repository.disconnectTelegramConnection(userId, config.telegram.clientId, client)
+      // Queued notifications must not reach a chat the user disconnected (decisions.md 2026-11-21).
+      const cancelledDeliveries = await deliveries.cancelPendingForUser(
+         userId,
+         config.telegram.clientId,
+         'TELEGRAM_UNLINKED',
+         client,
+      )
       await repository.deleteTelegramIdentity(identity.id, client)
       await repository.appendAuditEvent(
          {
@@ -400,7 +411,7 @@ async function unlinkTelegramService(userId, overrides) {
             code: 'auth.telegram.unlinked',
             entityType: 'auth_identity',
             entityId: identity.id,
-            metadata: {},
+            metadata: { cancelledDeliveries },
          },
          client,
       )
@@ -409,7 +420,7 @@ async function unlinkTelegramService(userId, overrides) {
 }
 
 async function sendTelegramTestMessageService(userId, overrides) {
-   const { config, repository, botProvider } = dependencies(overrides)
+   const { config, repository, botProvider, blockConnection } = dependencies(overrides)
    requireConfiguration(config)
    const connection = await repository.findActiveTelegramConnection(
       userId,
@@ -425,9 +436,9 @@ async function sendTelegramTestMessageService(userId, overrides) {
       await botProvider.sendTestMessage(connection.chat_id)
       return { status: 'sent' }
    } catch (error) {
-      if (error.telegramAccessUnavailable) {
-         await repository.markTelegramConnectionBlocked(connection.id)
-      }
+      // Same handling as a failed notification (D6): blocked, pending deliveries cancelled,
+      // one in-app notice.
+      if (error.telegramAccessUnavailable) await blockConnection(connection.id)
       throw error
    }
 }

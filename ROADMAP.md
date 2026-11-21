@@ -360,8 +360,8 @@ This roadmap orders implementation; it does not replace the [current architectur
 ## M14 — Notifications
 
 - **Status:** In progress. Plan approved by the owner on 2026-11-21 (D1–D8 and additions in `docs/decisions.md`), in three PRs:
-   1. **PR 1** (open, branch `feat/m14-notifications-queue-inbox`): `worker:jobs` on `background_jobs` (leases, retries, dead letter, outbox), in-app notifications for `test.assigned` (also on joining a group), `group.announcement`, `test.extra_attempts`, `account.approved`, `account.unblocked`, `course.enrolled`, `module.opened`; inbox API `/me/notifications`. Migration `20261121010000000`. `npm test` on a disposable database: 573 passed, 0 failed.
-   2. **PR 2** (planned): Telegram delivery (20/s per bot, 1/s per chat, 429 pause, at most once), settings and quiet hours, blocked bot and unlink cancel pending deliveries.
+   1. **PR 1** (merged in PR #71, not deployed): `worker:jobs` on `background_jobs` (leases, retries, dead letter, outbox), in-app notifications for `test.assigned` (also on joining a group), `group.announcement`, `test.extra_attempts`, `account.approved`, `account.unblocked`, `course.enrolled`, `module.opened`; inbox API `/me/notifications`. Migration `20261121010000000`. `npm test` on a disposable database: 573 passed, 0 failed.
+   2. **PR 2** (open, branch `feat/m14-telegram-delivery`): Telegram delivery (20/s per bot, 1/s per chat, 429 pause, at most once), settings and quiet hours, blocked bot and unlink cancel pending deliveries. No migration. `npm test` on a disposable database: 592 passed, 0 failed.
    3. **PR 3** (planned): `test.closing_24h`, `test.answers_available`, `test.result_updated`, `attempt.expired`, 180-day retention.
 - **Goal:** Deliver reliable user-controlled notifications.
 - **Dependencies:** M02F, M03, M19.
@@ -421,8 +421,8 @@ This roadmap orders implementation; it does not replace the [current architectur
 - **Status:** In progress (partial). Two dedicated workers exist and run as separate containers on the server:
    - `worker:attempts`: finalizes expired attempts and mock exams (row locks, idempotent) and, with storage configured, expires abandoned uploads and aborts them in storage (PR #54, compose fix PR #56).
    - `worker:imports`: processes question packages uploaded over HTTP (PR #33).
-   - `worker:jobs` (M14 PR 1, open): the general queue on `background_jobs` with leases, retries, dead letter (`failed`) and a two-worker competition test.
-- **Missing:** notification delivery to Telegram (M14 PR 2); analytics refresh.
+   - `worker:jobs` (M14 PR 1, merged in #71): the general queue on `background_jobs` with leases, retries, dead letter (`failed`) and a two-worker competition test. M14 PR 2 (open) adds the Telegram sender to it.
+- **Missing:** analytics refresh.
 - **Goal:** Process durable asynchronous work safely across PM2 processes.
 - **Dependencies:** M01; introduced when the first domain needs it.
 - **Deliverables:** PostgreSQL queue, leases, retries, idempotency, attempt expiry, notification delivery, analytics refresh, and multi-process safety.

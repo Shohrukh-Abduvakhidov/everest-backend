@@ -1,5 +1,49 @@
 # Decisions
 
+## 2026-11-21 — M14 PR 2: Telegram delivery (implementation choices)
+
+Made without the owner, within the approved D1–D8, while the owner was away. Each can be changed in review.
+
+1. **No migration.** PR 1 already added the lease and `updated_at` to `notification_deliveries` and the `notification_settings` table; `delivery_pending_idx` serves the claim. The destination key is `telegram:<connectionId>`.
+2. **When a Telegram copy is queued.** In the fan-out transaction, only for notifications written now (a repeated event queues nothing). All of these must hold:
+   - the bot is configured (`TELEGRAM_CLIENT_ID` and `TELEGRAM_BOT_TOKEN`);
+   - the event has a Telegram copy (every PR 1 event; not `telegram.disconnected`);
+   - the account is active, a Telegram identity is linked and the connection to this bot is `active`;
+   - the master switch and the event switch are on (both default on).
+3. **Quiet hours** are applied when the delivery is queued (`next_attempt_at` = end of the window) and checked again before the send. A postponement does not use an attempt. The window is minute-exact in the profile zone; around a DST change it can be off by the shift. `QUIET_EXPIRED` (cancel a message that loses its meaning) is left to PR 3, where `test.closing_24h` needs it.
+4. **Checked again right before each send:**
+   - account not active → `cancelled ACCOUNT_NOT_ACTIVE`;
+   - connection blocked → `BOT_BLOCKED`, disconnected → `TELEGRAM_UNLINKED`;
+   - master switch off → `TELEGRAM_DISABLED`, event switch off → `TELEGRAM_EVENT_DISABLED`.
+
+   So turning a switch off also stops messages already queued.
+5. **Rate limits (D8 + owner's addition)** are kept in the `worker:jobs` process (`TelegramRateLimiter`):
+   - sends are spaced 50 ms apart, with no burst: at most 20 per second;
+   - one chat gets at most one message per second.
+
+   Consequence: **run exactly one `worker-jobs` replica**; two would double the rate. The claim uses SKIP LOCKED, so two replicas would not send twice, only too fast.
+6. **Batches** of 20 deliveries with lease `JOB_LEASE_SECONDS` (60 s). The worst case inside a batch is 20 messages to one chat, about 19 s, well inside the lease.
+7. **429.** The whole sender pauses for `retry_after`. This delivery and the rest of the claimed batch go back to `pending` at the resume time without using an attempt, so no lease expires during the pause.
+8. **403, "blocked", "deactivated", "chat not found" (400)** — D6:
+   - this delivery is `failed BOT_BLOCKED`, and the connection becomes `blocked`;
+   - every other pending delivery of the connection is `cancelled BOT_BLOCKED`; rows already claimed in the same batch are cancelled without a send;
+   - one in-app `telegram.disconnected` (target `/profile`) is written per connection episode (key `telegram.disconnected:<connectionId>:<connected_at>`; a relink starts a new episode);
+   - the test-message route uses the same path.
+9. **No response** (network error, timeout after 10 s) → `unknown TELEGRAM_NO_RESPONSE`, never resent: the message may have arrived ("at most once").
+   - A delivery still `sending` after its lease → `unknown LEASE_EXPIRED`.
+   - 5xx → retried after 30 s · 2^(n−1), at most 5 attempts, then `failed TELEGRAM_UNAVAILABLE`.
+   - Other 4xx → `failed TELEGRAM_REJECTED`.
+10. **Unlink** cancels the user's pending deliveries in the unlink transaction (`TELEGRAM_UNLINKED`). The audit `auth.telegram.unlinked` records `cancelledDeliveries`.
+11. **Message text.** Plain text, no `parse_mode`: title, blank line, body, blank line, `APP_URL + targetPath`, at most 4000 characters.
+   - Without `APP_URL`, or for a path that does not start with `/`, there is no link.
+   - The sender logs only ids, counts and codes, never the token, chat id or text.
+12. **Settings API** `GET`/`PUT /me/notification-settings`:
+   - returns `{ telegramEnabled, quietHours: { start, end } | null, timeZone, messagingConnected, events: { <code>: { telegram } } }`;
+   - `PUT` is partial; `quietHours: null` turns quiet hours off; start and end are `HH:MM` and must differ;
+   - only events with a Telegram copy can be switched; in-app cannot be turned off;
+   - every change writes the audit event `notification.settings_updated`.
+13. **The sender starts only when the bot is configured.** The worker logs at start whether `APP_URL` is set (`set`/`missing`), not its value.
+
 ## 2026-11-21 — M14 notifications and the M19 job queue (approved plan)
 
 Approved by the owner on 2026-11-21: D1–D8 of the plan, "at most once" for Telegram, a separate `worker:jobs`, three PRs. Web Push is out of scope.

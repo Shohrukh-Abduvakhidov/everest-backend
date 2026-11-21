@@ -1,10 +1,43 @@
 # EVEREST backend progress
 
-Updated: 2026-11-21. Current: M14 PR 1 (job queue and in-app notifications) open for review.
+Updated: 2026-11-21. Current: M14 PR 2 (Telegram delivery) open for review; PR 1 merged (#71), not deployed.
 
 ## Current increment
 
 M12 is Done: PR 3 (staff progress views, #64) and the 2026-11-20 follow-ups (#65 time zone cache, #66 `GET /me/staff-capabilities`, #67 cosmetic question text rules) are merged into main. Deployed on the temporary VPS on 2026-11-19: backend up to PR #62 (M12 PR 1 and PR 2, the question text repair applied to 2 rows, refresh resilience), frontend up to PR #47. Not deployed yet: PRs #63 to #67 (no migration, no new env variable). `fix-question-text.js --apply` with the new cosmetic rules has not been run on any database. Next milestone: M13 (group ranking), which waits for the owner to approve the formula.
+
+## 2026-11-21 — M14 PR 2: Telegram delivery, settings, quiet hours (`feat/m14-telegram-delivery`)
+
+- **What:**
+   - The fan-out queues one Telegram delivery per new notification when the bot is configured and the user is connected with both switches on. Quiet hours are applied when it is queued.
+   - Sender `telegram-delivery-service.js` in `worker:jobs`:
+      - pacing by `TelegramRateLimiter` (20/s overall, 1/s per chat);
+      - 429 pauses everything for `retry_after` without using attempts;
+      - 403 / blocked / chat not found blocks the connection, cancels the rest (`BOT_BLOCKED`) and writes one in-app `telegram.disconnected`;
+      - no response, or a stale `sending`, becomes `unknown` and is never resent;
+      - 5xx retries with backoff, other 4xx fail;
+      - switches, account state and quiet hours are checked again before each send.
+   - Unlink cancels pending deliveries (`TELEGRAM_UNLINKED`).
+   - `GET`/`PUT /me/notification-settings`.
+   - `TelegramBotProvider.sendMessage` returns the message id and reports `retryAfter`, `telegramStatus` and `networkError`.
+   - No migration, no new env variable (`APP_URL` from PR 1 is now used). Decisions: decisions.md 2026-11-21 (M14 PR 2).
+- **Tests:**
+   - `tests/unit/telegram-delivery.test.js` (7): limiter 20/s on 200 chats, 1/s per chat, pause; quiet hours across midnight and in zones; message text with and without `APP_URL`; provider with a fake `fetch` (plain text, message id, 429, 403, chat not found, 5xx, no response); settings validation.
+   - `tests/integration/telegram-delivery.test.js` (11):
+      - who gets a copy;
+      - 200 with the link and message id;
+      - 200 recipients on a fake clock (≥ 9.95 s, never 21 in one second, 1 s per chat);
+      - 429;
+      - 403 with one notice;
+      - 5xx, 400 and no response;
+      - stale sending;
+      - quiet hours at queue and send time, and the default window;
+      - switches, blocked account and unlink;
+      - settings API;
+      - no token, chat id or text in logs.
+   - `telegram-auth.test.js` checks the in-app notice after a blocked test message.
+- **Checked:** `npm test` (disposable database) exit 0, 592 passed, 0 failed. It took two runs: the first failed 12 subtests of the new integration file on a parameter type in the test's own fixture insert (`42P08`); after the fix all passed.
+- **Not checked:** real Telegram, the server, local `everest_db` (not touched). Not done: PR 3 (reminders, `QUIET_EXPIRED`, retention), deploy.
 
 ## 2026-11-21 — M14 PR 1: job queue and in-app notifications (`feat/m14-notifications-queue-inbox`)
 
