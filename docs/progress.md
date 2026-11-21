@@ -1,10 +1,18 @@
 # EVEREST backend progress
 
-Updated: 2026-11-20.
+Updated: 2026-11-21.
 
 ## Current increment
 
 M12 is Done: PR 3 (staff progress views, #64) and the 2026-11-20 follow-ups (#65 time zone cache, #66 `GET /me/staff-capabilities`, #67 cosmetic question text rules) are merged into main. Deployed on the temporary VPS on 2026-11-19: backend up to PR #62 (M12 PR 1 and PR 2, the question text repair applied to 2 rows, refresh resilience), frontend up to PR #47. Not deployed yet: PRs #63 to #67 (no migration, no new env variable). `fix-question-text.js --apply` with the new cosmetic rules has not been run on any database. Next milestone: M13 (group ranking), which waits for the owner to approve the formula.
+
+## 2026-11-21 — Telegram messaging connection fix (`fix/telegram-messaging-connection`)
+
+- **Why:** on prod `POST /auth/telegram/test-message` answered `409 TELEGRAM_CONNECTION_UNAVAILABLE` after a successful link; `telegram_connections` was empty and every link audit had `messagingConnected: false`.
+- **What:** `telegram-auth-service.js`: value-free grant diagnostics in a log line and the link audit; chat ID falls back to a numeric `sub`; when `scope` does not list `telegram:bot_access`, a confirmation message decides (`200` → active, `403` → not connected, no error). `messagingConnected` in callback, `POST /auth/telegram/link` and `/profile`. `TelegramBotProvider.sendConnectionConfirmation` and a 10 s send timeout. OpenAPI updated. No migration, no new env variable. Decisions: decisions.md 2026-11-21.
+- **Tests:** `tests/integration/telegram-auth.test.js` gained 12 subtests with Telegram doubles: scope with/without bot_access and missing, `id` present (number/string) or absent, numeric/non-numeric `sub`, `sub` equal to or different from `id`, `sendMessage` 200/403/5xx, `/profile` and link start, login confirming once then reusing the connection, and no token/phone/name/identifier in logs or audits.
+- **Checked:** `npm test` (disposable database) exit 0, 543 passed, 0 failed.
+- **Not done:** deploy, the frontend, webhook and deep link.
 
 ## 2026-11-20 — Question 1109 excluded from the text fix (`fix/question-text-exclude-1109`)
 

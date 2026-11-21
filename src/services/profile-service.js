@@ -1,3 +1,4 @@
+import env from '../configs/env.js'
 import * as authRepository from '../repositories/auth-repository.js'
 import * as profileRepository from '../repositories/profile-repository.js'
 import { withTransaction } from '../repositories/transaction-repository.js'
@@ -9,10 +10,12 @@ const languageToDatabase = { en: 'en', ru: 'ru', tj: 'tg' }
 const languageToApi = { en: 'en', ru: 'ru', tg: 'tj' }
 
 function dependencies(overrides = {}) {
+   const config = overrides.config || env
    return {
       auth: overrides.auth || authRepository,
       repository: overrides.repository || profileRepository,
       transaction: overrides.transaction || withTransaction,
+      telegramBotId: config.telegram?.clientId || null,
    }
 }
 
@@ -105,6 +108,7 @@ function safeProfile(row) {
       displayName: names.length ? names.join(' ') : null,
       phone: row.phone_e164,
       telegramLinked: row.telegram_linked,
+      messagingConnected: row.messaging_connected === true,
       avatarAssetId: row.avatar_asset_id,
       status: row.status,
       roles: row.roles,
@@ -122,13 +126,15 @@ function requireProfile(row) {
 }
 
 async function getOwnProfileService(userId, overrides) {
-   const { repository } = dependencies(overrides)
-   const row = requireProfile(await repository.findOwnProfile(normalizeInternalId(userId)))
+   const { repository, telegramBotId } = dependencies(overrides)
+   const row = requireProfile(
+      await repository.findOwnProfile(normalizeInternalId(userId), undefined, telegramBotId),
+   )
    return safeProfile(row)
 }
 
 async function updateProfile(userId, body, eventCode, overrides) {
-   const { auth, repository, transaction } = dependencies(overrides)
+   const { auth, repository, transaction, telegramBotId } = dependencies(overrides)
    const normalizedUserId = normalizeInternalId(userId)
    const changes = parseProfileChanges(body)
    return transaction(async (client) => {
@@ -145,7 +151,9 @@ async function updateProfile(userId, body, eventCode, overrides) {
          },
          client,
       )
-      return safeProfile(requireProfile(await repository.findOwnProfile(normalizedUserId, client)))
+      return safeProfile(
+         requireProfile(await repository.findOwnProfile(normalizedUserId, client, telegramBotId)),
+      )
    })
 }
 

@@ -15,6 +15,7 @@ class TelegramBotProvider {
                method: 'POST',
                headers: { 'content-type': 'application/json' },
                body: JSON.stringify({ chat_id: chatId, text }),
+               signal: AbortSignal.timeout(this.config.messageTimeoutMs || 10000),
             },
          )
       } catch {
@@ -41,6 +42,10 @@ class TelegramBotProvider {
 
    async sendRecoveryCode(chatId, code) {
       return this.sendMessage(chatId, `EVEREST password recovery code: ${code}`)
+   }
+
+   async sendConnectionConfirmation(chatId) {
+      return this.sendMessage(chatId, 'Telegram подключён к EVEREST')
    }
 
    async sendTestMessage(chatId) {

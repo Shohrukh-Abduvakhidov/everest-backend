@@ -1,7 +1,7 @@
 import pool from '../configs/db.js'
 import { normalizeInternalId } from '../utils/internal-id.js'
 
-async function findOwnProfile(userId, db = pool) {
+async function findOwnProfile(userId, db = pool, telegramBotId = null) {
    const result = await db.query(
       `SELECT account.id, account.status, account.onboarding_completed_at,
          account.created_at, GREATEST(account.updated_at, profile.updated_at) AS updated_at,
@@ -11,6 +11,18 @@ async function findOwnProfile(userId, db = pool) {
             SELECT 1 FROM auth_identities AS identity
             WHERE identity.user_id = account.id AND identity.provider = 'telegram'
          ) AS telegram_linked,
+         (
+            $2::text IS NOT NULL
+            AND EXISTS (
+               SELECT 1 FROM auth_identities AS identity
+               WHERE identity.user_id = account.id AND identity.provider = 'telegram'
+            )
+            AND EXISTS (
+               SELECT 1 FROM telegram_connections AS connection
+               WHERE connection.user_id = account.id AND connection.bot_id = $2::text
+                 AND connection.status = 'active'
+            )
+         ) AS messaging_connected,
          COALESCE(
             array_agg(DISTINCT role.code ORDER BY role.code)
                FILTER (WHERE role.code IS NOT NULL),
@@ -29,7 +41,7 @@ async function findOwnProfile(userId, db = pool) {
        LEFT JOIN roles AS role ON role.id = membership.role_id
        WHERE account.id = $1
        GROUP BY account.id, profile.user_id, phone.phone_e164`,
-      [normalizeInternalId(userId)],
+      [normalizeInternalId(userId), telegramBotId || null],
    )
    return result.rows[0] || null
 }
