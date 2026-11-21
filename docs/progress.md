@@ -1,10 +1,42 @@
 # EVEREST backend progress
 
-Updated: 2026-11-21. Current: M14 PR 2 (Telegram delivery) open for review; PR 1 merged (#71), not deployed.
+Updated: 2026-11-21. M14 is Done: PR 1 (#71) and PR 2 (#72) merged and deployed on 2026-11-21; PR 3 (#73) open for review, not deployed. Next: M13 (waits for the ranking formula).
 
 ## Current increment
 
 M12 is Done: PR 3 (staff progress views, #64) and the 2026-11-20 follow-ups (#65 time zone cache, #66 `GET /me/staff-capabilities`, #67 cosmetic question text rules) are merged into main. Deployed on the temporary VPS on 2026-11-19: backend up to PR #62 (M12 PR 1 and PR 2, the question text repair applied to 2 rows, refresh resilience), frontend up to PR #47. Not deployed yet: PRs #63 to #67 (no migration, no new env variable). `fix-question-text.js --apply` with the new cosmetic rules has not been run on any database. Next milestone: M13 (group ranking), which waits for the owner to approve the formula.
+
+## 2026-11-21 — M14 PR 3: scheduled notifications and retention (`feat/m14-scheduled-notifications`)
+
+- **What:**
+   - New events:
+      - `test.closing_24h`: at close − 24 h; no finished attempt and attempts left, extra attempts counted; not when less than 24 h ahead;
+      - `test.answers_available`: at the close, `after_window` only;
+      - `test.result_updated`: regrade with a changed score, in-app only;
+      - `attempt.expired`: in-app only.
+   - Moving `closes_at` schedules new jobs; the old ones find another close time and do nothing.
+   - `QUIET_EXPIRED` at queue and send time; `NOTIFICATION_EXPIRED` for a reminder after its close.
+   - Daily `notification.retention` (180 days, deliveries first, batches of 1000).
+   - The sender claims only deliveries of the configured bot.
+   - Texts ru/tg/en.
+   - No migration, no env variable.
+   - Decisions: decisions.md 2026-11-21 (M14 PR 3), including Web Push and campaigns moved to after the launch. ROADMAP: M14 Done.
+- **Tests:**
+   - `tests/integration/scheduled-notifications.test.js` (9):
+      - reminder recipients (finished, no attempts left, extra attempt, left the group, blocked, Tajik text);
+      - `closes_at` moved;
+      - revoked;
+      - boundaries (exactly 24 h, 23 h);
+      - answers only for `after_window` and only after the close;
+      - regrade with unchanged and changed score;
+      - expiry by the timer;
+      - `QUIET_EXPIRED` and `NOTIFICATION_EXPIRED`;
+      - retention and the once-a-day key.
+   - `tests/unit/notification-texts.test.js`: the new texts, `tg`/`tj`, expiry from the key.
+- **Checked:** `npm test` (disposable database) exit 0, 603 passed, 0 failed. It took two runs. The first failed 2 subtests of the new file:
+   - one on a table check in the test's own fixture update;
+   - one because the sender also took a due delivery of another bot left by the PR 2 test. That is a real gap, fixed: the claim is now filtered by bot.
+- **Not checked:** the server, real Telegram, local `everest_db` (not touched).
 
 ## 2026-11-21 — M14 PR 2: Telegram delivery, settings, quiet hours (`feat/m14-telegram-delivery`)
 

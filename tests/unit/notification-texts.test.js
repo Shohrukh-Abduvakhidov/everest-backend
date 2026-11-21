@@ -37,6 +37,25 @@ test('every event has a title and a body in ru, tg and en', () => {
    assert.ok(notificationEventCodes.includes('module.opened'))
 })
 
+test('PR 3 events: texts, Tajik for tg and tj, Telegram only for the reminder and the answers', async () => {
+   const { telegramEventCodes, notificationExpiresAt } = await import('../../src/utils/notification-texts.js')
+   assert.equal(renderNotification('test.closing_24h', { test: 'Q' }, { languageCode: 'tj' }).body, 'То пӯшидани санҷиши «Q» 24 соат монд.')
+   assert.equal(renderNotification('test.closing_24h', { test: 'Q' }, { languageCode: 'tg' }).title, 'Санҷиш ба наздикӣ пӯшида мешавад')
+   assert.equal(renderNotification('test.answers_available', { test: 'Q' }, { languageCode: 'ru' }).body, 'Открыты ответы теста «Q».')
+   assert.equal(renderNotification('test.result_updated', { test: 'Q' }, { languageCode: 'en' }).body, 'Your result for “Q” was updated.')
+   assert.equal(renderNotification('attempt.expired', { test: 'Q' }, { languageCode: 'tg' }).body, 'Вақт тамом шуд, кӯшиш дар санҷиши «Q» анҷом ёфт.')
+   assert.ok(telegramEventCodes.includes('test.closing_24h'))
+   assert.ok(telegramEventCodes.includes('test.answers_available'))
+   assert.equal(telegramEventCodes.includes('test.result_updated'), false)
+   assert.equal(telegramEventCodes.includes('attempt.expired'), false)
+   assert.equal(
+      notificationExpiresAt('test.closing_24h', 'test.closing_24h:12:2030-01-15T10:00:00.000Z').toISOString(),
+      '2030-01-15T10:00:00.000Z',
+   )
+   assert.equal(notificationExpiresAt('test.assigned', 'test.assigned:12'), null)
+   assert.equal(notificationExpiresAt('test.closing_24h', 'test.closing_24h:12:not-a-date'), null)
+})
+
 test('module.opened texts', () => {
    const params = { module: 'Дроби', course: 'Алгебра' }
    assert.equal(renderNotification('module.opened', params, { languageCode: 'ru' }).body, 'Вам открыт модуль «Дроби» курса «Алгебра».')

@@ -65,6 +65,40 @@ const templates = {
          en: (p) => `Module “${p.module}” of “${p.course}” is now open to you.`,
       },
    },
+   'test.closing_24h': {
+      title: { ru: 'Скоро закрытие теста', tg: 'Санҷиш ба наздикӣ пӯшида мешавад', en: 'Test closing soon' },
+      body: {
+         ru: (p) => `До закрытия теста «${p.test}» осталось 24 часа.`,
+         tg: (p) => `То пӯшидани санҷиши «${p.test}» 24 соат монд.`,
+         en: (p) => `“${p.test}” closes in 24 hours.`,
+      },
+   },
+   'test.answers_available': {
+      title: { ru: 'Ответы открыты', tg: 'Ҷавобҳо кушода шуданд', en: 'Answers available' },
+      body: {
+         ru: (p) => `Открыты ответы теста «${p.test}».`,
+         tg: (p) => `Ҷавобҳои санҷиши «${p.test}» кушода шуданд.`,
+         en: (p) => `Answers for “${p.test}” are now available.`,
+      },
+   },
+   'test.result_updated': {
+      telegram: false,
+      title: { ru: 'Результат обновлён', tg: 'Натиҷа нав шуд', en: 'Result updated' },
+      body: {
+         ru: (p) => `Результат теста «${p.test}» обновлён.`,
+         tg: (p) => `Натиҷаи санҷиши «${p.test}» нав карда шуд.`,
+         en: (p) => `Your result for “${p.test}” was updated.`,
+      },
+   },
+   'attempt.expired': {
+      telegram: false,
+      title: { ru: 'Время вышло', tg: 'Вақт тамом шуд', en: 'Time is up' },
+      body: {
+         ru: (p) => `Время вышло, попытка в тесте «${p.test}» завершена.`,
+         tg: (p) => `Вақт тамом шуд, кӯшиш дар санҷиши «${p.test}» анҷом ёфт.`,
+         en: (p) => `Time is up: your attempt at “${p.test}” was submitted.`,
+      },
+   },
    'telegram.disconnected': {
       telegram: false,
       title: { ru: 'Telegram отключён', tg: 'Telegram ҷудо шуд', en: 'Telegram disconnected' },
@@ -126,6 +160,16 @@ function renderNotification(eventCode, params, { languageCode, timeZone } = {}) 
    return { title: template.title[language], body: template.body[language](values) }
 }
 
+// The moment after which a Telegram copy no longer makes sense (D5, QUIET_EXPIRED), or null.
+// Only the 24-hour reminder has one: the close time, kept as the last part of its key
+// (test.closing_24h:<assignmentId>:<closesAt ISO>), so no extra column is needed.
+function notificationExpiresAt(eventCode, dedupeKey) {
+   if (eventCode !== 'test.closing_24h' || typeof dedupeKey !== 'string') return null
+   const match = /^test\.closing_24h:\d+:(.+)$/.exec(dedupeKey)
+   const value = match ? new Date(match[1]) : null
+   return value && !Number.isNaN(value.getTime()) ? value : null
+}
+
 const telegramTextLimit = 4000
 
 // Plain text for Telegram (no parse_mode): title, body and, when APP_URL is set, the link.
@@ -138,6 +182,7 @@ function telegramMessageText({ title, body, targetPath }, appUrl) {
 export {
    formatDateTime,
    notificationEventCodes,
+   notificationExpiresAt,
    renderNotification,
    resolveLanguage,
    telegramEventCodes,

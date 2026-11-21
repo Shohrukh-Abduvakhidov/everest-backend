@@ -36,19 +36,25 @@ async function findTelegramTargets(userIds, botId, eventCode, db = pool) {
    return result.rows
 }
 
+// A row may be written already cancelled (status + error code), e.g. QUIET_EXPIRED, so the
+// skipped Telegram copy stays visible next to the in-app notification.
 async function insertTelegramDeliveries(rows, client) {
    if (!rows.length) return 0
    const result = await client.query(
       `INSERT INTO notification_deliveries
-          (notification_id, channel, telegram_connection_id, destination_key, next_attempt_at)
-       SELECT notification_id, 'telegram', connection_id, 'telegram:' || connection_id, next_attempt_at
-       FROM unnest($1::bigint[], $2::bigint[], $3::timestamptz[])
-          AS input(notification_id, connection_id, next_attempt_at)
+          (notification_id, channel, telegram_connection_id, destination_key, next_attempt_at,
+           status, last_error_code)
+       SELECT notification_id, 'telegram', connection_id, 'telegram:' || connection_id, next_attempt_at,
+          status, error_code
+       FROM unnest($1::bigint[], $2::bigint[], $3::timestamptz[], $4::text[], $5::text[])
+          AS input(notification_id, connection_id, next_attempt_at, status, error_code)
        ON CONFLICT (notification_id, channel, destination_key) DO NOTHING`,
       [
          rows.map((row) => normalizeInternalId(row.notificationId)),
          rows.map((row) => normalizeInternalId(row.connectionId)),
          rows.map((row) => row.nextAttemptAt),
+         rows.map((row) => row.status || 'pending'),
+         rows.map((row) => row.errorCode || null),
       ],
    )
    return result.rowCount
@@ -68,8 +74,9 @@ async function markStaleSendingUnknown(db = pool) {
    return result.rowCount
 }
 
-// Claims due deliveries (SKIP LOCKED) and returns everything the sender re-checks before sending.
-async function claimTelegramDeliveries({ limit, leaseSeconds }, db = pool) {
+// Claims due deliveries of the configured bot (SKIP LOCKED) and returns everything the sender
+// re-checks before sending. Rows of another bot id (an old bot) are never sent with this token.
+async function claimTelegramDeliveries({ limit, leaseSeconds, botId }, db = pool) {
    const result = await db.query(
       `WITH claimed AS (
           UPDATE notification_deliveries AS delivery
@@ -77,11 +84,12 @@ async function claimTelegramDeliveries({ limit, leaseSeconds }, db = pool) {
               lease_expires_at = CURRENT_TIMESTAMP + make_interval(secs => $2),
               updated_at = CURRENT_TIMESTAMP
           WHERE delivery.id IN (
-             SELECT id FROM notification_deliveries
-             WHERE channel = 'telegram' AND status = 'pending'
-               AND next_attempt_at <= CURRENT_TIMESTAMP
-             ORDER BY next_attempt_at, id
-             FOR UPDATE SKIP LOCKED
+             SELECT pending.id FROM notification_deliveries AS pending
+             JOIN telegram_connections AS owner ON owner.id = pending.telegram_connection_id
+             WHERE pending.channel = 'telegram' AND pending.status = 'pending'
+               AND pending.next_attempt_at <= CURRENT_TIMESTAMP AND owner.bot_id = $3
+             ORDER BY pending.next_attempt_at, pending.id
+             FOR UPDATE OF pending SKIP LOCKED
              LIMIT $1
           )
           RETURNING delivery.id, delivery.notification_id, delivery.telegram_connection_id,
@@ -90,7 +98,7 @@ async function claimTelegramDeliveries({ limit, leaseSeconds }, db = pool) {
        SELECT claimed.id, claimed.attempt_count, claimed.telegram_connection_id AS connection_id,
           connection.chat_id, connection.status AS connection_status, connection.connected_at,
           notification.user_id, notification.event_code, notification.title, notification.body,
-          notification.target_path, account.status AS account_status, ${settingsColumns},
+          notification.target_path, notification.dedupe_key, account.status AS account_status, ${settingsColumns},
           COALESCE(preference.enabled, TRUE) AS event_enabled
        FROM claimed
        JOIN telegram_connections AS connection ON connection.id = claimed.telegram_connection_id
@@ -102,7 +110,7 @@ async function claimTelegramDeliveries({ limit, leaseSeconds }, db = pool) {
          ON preference.user_id = account.id AND preference.event_code = notification.event_code
          AND preference.channel = 'telegram'
        ORDER BY claimed.next_attempt_at, claimed.id`,
-      [limit, leaseSeconds],
+      [limit, leaseSeconds, botId],
    )
    return result.rows
 }

@@ -69,5 +69,6 @@ import './integration/real-storage.test.js';
 import './integration/job-queue.test.js';
 import './integration/notifications.test.js';
 import './integration/telegram-delivery.test.js';
+import './integration/scheduled-notifications.test.js';
 // Last: it ends the shared pool.
 import './integration/telegram-auth.test.js';

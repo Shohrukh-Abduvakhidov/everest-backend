@@ -5,7 +5,11 @@ import * as telegramDeliveryRepository from '../repositories/telegram-delivery-r
 import { withTransaction } from '../repositories/transaction-repository.js'
 import AppError from '../utils/app-error.js'
 import { normalizeInternalId } from '../utils/internal-id.js'
-import { renderNotification, telegramEventCodes } from '../utils/notification-texts.js'
+import {
+   notificationExpiresAt,
+   renderNotification,
+   telegramEventCodes,
+} from '../utils/notification-texts.js'
 import { quietUntil } from '../utils/quiet-hours.js'
 
 // M14 (decisions.md 2026-11-21). Domain services call enqueue* inside their own transaction, so
@@ -43,15 +47,23 @@ async function queueTelegramCopies(entry, inserted, context, client) {
    const notificationByUser = new Map(inserted.map((row) => [String(row.user_id), row.id]))
    const targets = await deliveries.findTelegramTargets([...notificationByUser.keys()], botId, entry.eventCode, client)
    const current = now()
+   const expiresAt = notificationExpiresAt(entry.eventCode, entry.dedupeKey)
    const rows = targets
       .filter((target) => target.telegram_enabled && target.event_enabled)
-      .map((target) => ({
-         notificationId: notificationByUser.get(String(target.user_id)),
-         connectionId: target.connection_id,
-         nextAttemptAt: quietUntil(current, {
+      .map((target) => {
+         const quietEnd = quietUntil(current, {
             start: target.quiet_start, end: target.quiet_end, timeZone: target.timezone,
-         }) || current,
-      }))
+         })
+         const nextAttemptAt = quietEnd || current
+         // D5: a reminder that would wait past its moment is not sent; the in-app copy stays.
+         const expired = expiresAt && quietEnd && nextAttemptAt >= expiresAt
+         return {
+            notificationId: notificationByUser.get(String(target.user_id)),
+            connectionId: target.connection_id,
+            nextAttemptAt,
+            ...(expired ? { status: 'cancelled', errorCode: 'QUIET_EXPIRED' } : {}),
+         }
+      })
    return deliveries.insertTelegramDeliveries(rows, client)
 }
 
@@ -61,6 +73,13 @@ function id(value) {
 
 function coursePath(courseId) {
    return courseId ? `/courses/${courseId}` : '/'
+}
+
+// Result pages of the student app for each kind of attempt.
+function attemptResultPath(attempt) {
+   if (attempt.origin === 'trainer') return `/nct/attempts/${attempt.id}/result`
+   if (attempt.origin === 'mock_exam') return `/nct/exam/${attempt.id}/result`
+   return `/tests/attempts/${attempt.id}/result`
 }
 
 // ---------------------------------------------------------------- enqueue (inside the caller's transaction)
@@ -128,6 +147,55 @@ function enqueueCourseEnrolled(client, { enrollmentId, auditId, beginsAt }, over
       payload: { enrollmentId: id(enrollmentId), auditId: id(auditId) },
       dedupeKey: `course.enrolled:${id(enrollmentId)}:${id(auditId)}`,
       availableAt: beginsAt,
+   }, overrides)
+}
+
+const dayMs = 24 * 3600 * 1000
+
+// Close-time events of an assignment (M14 PR 3). Job and notification keys include the close
+// time, so moving closes_at schedules new jobs and the old ones find a different close time and
+// write nothing.
+// - test.closing_24h at closes_at − 24 h, only when that moment is not in the past now (an
+//   assignment created, or moved to close, less than 24 h ahead gets no reminder);
+// - test.answers_available at closes_at, only for answer_reveal_policy after_window.
+async function enqueueAssignmentCloseEvents(client, { assignmentId, closesAt, answerRevealPolicy, now = new Date() }, overrides) {
+   if (!closesAt) return
+   const closes = new Date(closesAt)
+   const closesIso = closes.toISOString()
+   const remindAt = new Date(closes.getTime() - dayMs)
+   if (remindAt.getTime() >= now.getTime()) {
+      await enqueueFanout(client, {
+         event: 'test.closing_24h',
+         payload: { assignmentId: id(assignmentId), closesAt: closesIso },
+         dedupeKey: `test.closing_24h:${id(assignmentId)}:${closesIso}`,
+         availableAt: remindAt,
+      }, overrides)
+   }
+   if (answerRevealPolicy === 'after_window') {
+      await enqueueFanout(client, {
+         event: 'test.answers_available',
+         payload: { assignmentId: id(assignmentId), closesAt: closesIso },
+         dedupeKey: `test.answers_available:${id(assignmentId)}:${closesIso}`,
+         availableAt: closes,
+      }, overrides)
+   }
+}
+
+// After a regrade that changed the score; the audit id makes every such regrade its own event.
+function enqueueResultUpdated(client, { attemptId, auditId }, overrides) {
+   return enqueueFanout(client, {
+      event: 'test.result_updated',
+      payload: { attemptId: id(attemptId), auditId: id(auditId) },
+      dedupeKey: `test.result_updated:${id(attemptId)}:${id(auditId)}`,
+   }, overrides)
+}
+
+// The timer closed the attempt (sweep, lazy expiry or a submit after the deadline).
+function enqueueAttemptExpired(client, { attemptId }, overrides) {
+   return enqueueFanout(client, {
+      event: 'attempt.expired',
+      payload: { attemptId: id(attemptId) },
+      dedupeKey: `attempt.expired:${id(attemptId)}`,
    }, overrides)
 }
 
@@ -227,6 +295,61 @@ const resolvers = {
       }]
    },
 
+   async 'test.closing_24h'(repository, payload, db) {
+      const assignment = await repository.findAssignmentWindowSource(payload.assignmentId, db)
+      if (!assignment || assignment.status !== 'active' || assignment.test_status !== 'published'
+         || !assignment.closes_at || assignment.is_closed
+         || new Date(assignment.closes_at).toISOString() !== payload.closesAt) return []
+      const audience = assignment.user_id
+         ? [assignment.user_id]
+         : await repository.listActiveGroupMemberIds(assignment.group_id, db)
+      return [{
+         eventCode: 'test.closing_24h',
+         userIds: await repository.filterUsersToRemind(assignment.id, assignment.max_attempts, audience, db),
+         params: { test: assignment.test_title, closesAt: assignment.closes_at },
+         targetPath: coursePath(assignment.course_id),
+         dedupeKey: `test.closing_24h:${assignment.id}:${payload.closesAt}`,
+      }]
+   },
+
+   async 'test.answers_available'(repository, payload, db) {
+      const assignment = await repository.findAssignmentWindowSource(payload.assignmentId, db)
+      if (!assignment || assignment.status === 'revoked' || assignment.answer_reveal_policy !== 'after_window'
+         || !assignment.closes_at || !assignment.is_closed
+         || new Date(assignment.closes_at).toISOString() !== payload.closesAt) return []
+      return [{
+         eventCode: 'test.answers_available',
+         userIds: await repository.listFinishedAttemptUserIds(assignment.id, db),
+         params: { test: assignment.test_title },
+         targetPath: coursePath(assignment.course_id),
+         dedupeKey: `test.answers_available:${assignment.id}:${payload.closesAt}`,
+      }]
+   },
+
+   async 'test.result_updated'(repository, payload, db) {
+      const attempt = await repository.findAttemptSource(payload.attemptId, db)
+      if (!attempt || !['graded', 'expired'].includes(attempt.status)) return []
+      return [{
+         eventCode: 'test.result_updated',
+         userIds: [attempt.user_id],
+         params: { test: attempt.test_title },
+         targetPath: attemptResultPath(attempt),
+         dedupeKey: `test.result_updated:${attempt.id}:${payload.auditId}`,
+      }]
+   },
+
+   async 'attempt.expired'(repository, payload, db) {
+      const attempt = await repository.findAttemptSource(payload.attemptId, db)
+      if (!attempt || attempt.status !== 'expired') return []
+      return [{
+         eventCode: 'attempt.expired',
+         userIds: [attempt.user_id],
+         params: { test: attempt.test_title },
+         targetPath: attemptResultPath(attempt),
+         dedupeKey: `attempt.expired:${attempt.id}`,
+      }]
+   },
+
    async 'module.opened'(repository, payload, db) {
       const grant = await repository.findModuleGrantSource(payload.grantId, db)
       if (!grant || !grant.is_current || grant.module_status !== 'published') return []
@@ -279,9 +402,40 @@ async function runNotificationFanoutService(payload, overrides) {
    })
 }
 
+// ---------------------------------------------------------------- retention (D3: 180 days)
+
+const retentionJobType = 'notification.retention'
+const retentionDays = 180
+const retentionBatchSize = 1000
+
+// Enqueued by worker:jobs at start and every hour; the date in the key makes it once a day.
+async function scheduleNotificationRetentionService(overrides) {
+   const { jobs, transaction, now } = dependencies(overrides)
+   const day = now().toISOString().slice(0, 10)
+   return transaction((client) => jobs.enqueueJob({
+      jobType: retentionJobType,
+      payload: { days: retentionDays },
+      dedupeKey: `${retentionJobType}:${day}`,
+   }, client))
+}
+
+// Deletes read and unread notifications older than the retention, with their deliveries, in
+// batches (one transaction each, so a large backlog never holds long locks).
+async function runNotificationRetentionService(payload, overrides) {
+   const { repository, transaction } = dependencies(overrides)
+   const days = Number.isSafeInteger(payload?.days) && payload.days >= 30 ? payload.days : retentionDays
+   let deleted = 0
+   for (;;) {
+      const batch = await transaction((client) => repository.deleteOldNotifications(days, retentionBatchSize, client))
+      deleted += batch
+      if (batch < retentionBatchSize) return { deleted }
+   }
+}
+
 function createNotificationJobHandlers(overrides) {
    return Object.freeze({
       [fanoutJobType]: (payload) => runNotificationFanoutService(payload, overrides),
+      [retentionJobType]: (payload) => runNotificationRetentionService(payload, overrides),
    })
 }
 
@@ -393,6 +547,12 @@ export {
    createNotificationJobHandlers,
    countUnreadNotificationsService,
    enqueueAccountEvent,
+   enqueueAssignmentCloseEvents,
+   enqueueAttemptExpired,
+   enqueueResultUpdated,
+   retentionDays,
+   runNotificationRetentionService,
+   scheduleNotificationRetentionService,
    enqueueCourseEnrolled,
    enqueueExtraAttempts,
    enqueueGroupAnnouncement,

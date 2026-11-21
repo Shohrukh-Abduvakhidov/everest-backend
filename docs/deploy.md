@@ -134,6 +134,38 @@ Backend variables are validated in `src/configs/env.js`; the full list with defa
 
 `API_ORIGIN` for the frontend is fixed to `http://backend:4100` in compose and does not depend on the host.
 
+## Notifications (M14)
+
+`worker-jobs` runs the whole notification pipeline. The backend only queues jobs in the same transaction as the action.
+
+| Part | Where | Notes |
+|---|---|---|
+| Fan-out | `background_jobs`, type `notification.fanout` | Writes in-app `notifications` and queues Telegram `notification_deliveries`. Reminders wait in the table until `available_at` (`test.closing_24h` at close − 24 h, `test.answers_available` at the close) |
+| Telegram sender | `notification_deliveries` | Needs `TELEGRAM_CLIENT_ID` and `TELEGRAM_BOT_TOKEN`; sends only for connections of that bot. 20 messages/s, 1/s per chat. Plain text with the link `APP_URL + path` |
+| Retention | `background_jobs`, type `notification.retention` | Once a day: deletes notifications older than 180 days and their deliveries |
+
+- **Exactly one `worker-jobs` replica.** The Telegram rate limit is kept in the process.
+- **When the worker is stopped**, nothing is lost: jobs and deliveries wait. On start, due reminders go out unless their moment passed:
+   - a 24-hour reminder after the close is cancelled (`NOTIFICATION_EXPIRED`);
+   - an in-app notice is still written while the assignment is open.
+- **Start line:** `Job worker started { workerId, telegramSender: true|false, appUrl: 'set'|'missing' }`. With `telegramSender: false`, only in-app notifications are written.
+- **Checks** (read-only SQL inside `db`):
+   - queue: `SELECT job_type, status, count(*) FROM background_jobs GROUP BY 1, 2`;
+   - dead letter: `SELECT id, job_type, last_error_code, attempts FROM background_jobs WHERE status = 'failed' ORDER BY id DESC LIMIT 20`;
+   - Telegram: `SELECT status, last_error_code, count(*) FROM notification_deliveries GROUP BY 1, 2`.
+
+  `unknown` means no outcome (timeout or worker stopped mid-send). It is never resent.
+- **Error codes on deliveries:**
+   - `BOT_BLOCKED`: the user blocked the bot; they get an in-app notice and must link Telegram again;
+   - `TELEGRAM_UNLINKED`, `TELEGRAM_DISABLED`, `TELEGRAM_EVENT_DISABLED`, `ACCOUNT_NOT_ACTIVE`: cancelled by the user's state;
+   - `QUIET_EXPIRED` and `NOTIFICATION_EXPIRED`: the reminder lost its meaning;
+   - `TELEGRAM_RATE_LIMITED`: waiting for a 429 `retry_after`;
+   - `TELEGRAM_UNAVAILABLE`: 5xx, retried up to 5 times;
+   - `TELEGRAM_REJECTED`: other 4xx.
+- **Logs** hold ids, counts and codes only: no token, chat id or message text.
+- **Changing the bot:** a new `TELEGRAM_CLIENT_ID` stops deliveries to connections of the old bot. Users link Telegram again.
+- **Not in M14:** Web Push and broadcast campaigns (after the launch).
+
 ## Moving to the final domain
 
 Cookies have no `Domain` attribute, so they belong to the host that set them: after a host change every

@@ -22,6 +22,7 @@ import {
 import { normalizeInternalId } from '../utils/internal-id.js'
 import { parseCourseId, parseUserId, validateBody, validationError } from './course-service.js'
 import { completeTestLessonsService } from './lesson-completion-service.js'
+import { enqueueAttemptExpired } from './notification-service.js'
 import { issueQuestionImageUrls, withImageUrls } from './question-image-service.js'
 
 function shuffled(values) {
@@ -267,6 +268,8 @@ async function finalizeAttempt(deps, client, attempt, { status, submittedAt, act
       entityId: attempt.id,
       metadata: { testId: attempt.test_id, assignmentId: attempt.assignment_id },
    }, client)
+   // In-app notice that the timer closed the attempt (D1); keyed by attempt, so once.
+   if (status === 'expired') await enqueueAttemptExpired(client, { attemptId: attempt.id })
 }
 
 function expiredFinish(attempt, now) {

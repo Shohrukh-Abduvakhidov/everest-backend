@@ -4,7 +4,7 @@ import { withTransaction } from '../repositories/transaction-repository.js'
 import AppError from '../utils/app-error.js'
 import { normalizeInternalId } from '../utils/internal-id.js'
 import { parsePagination, parseText, validateBody, validationError } from './course-service.js'
-import { enqueueTestAssigned } from './notification-service.js'
+import { enqueueAssignmentCloseEvents, enqueueTestAssigned } from './notification-service.js'
 
 const testStatuses = ['draft', 'published', 'archived']
 const assignmentStatuses = ['active', 'revoked', 'closed']
@@ -639,6 +639,9 @@ async function createAssignmentService(userId, testIdValue, body, overrides) {
          groupId: audience.groupId,
       }, audience.userId)
       await enqueueTestAssigned(client, { assignmentId, opensAt })
+      await enqueueAssignmentCloseEvents(client, {
+         assignmentId, closesAt, answerRevealPolicy: test.answer_reveal_policy, now,
+      })
       return safeAssignment(await repository.findAssignment(testId, assignmentId, client))
    })
 }
@@ -674,6 +677,12 @@ async function updateAssignmentService(userId, testIdValue, assignmentIdValue, b
       }, assignment.user_id)
       // A moved opening time gets its own job; the notification key stays per assignment.
       if (body.opensAt !== undefined) await enqueueTestAssigned(client, { assignmentId, opensAt })
+      // A moved close time gets new close-time jobs; the old ones see another closes_at and stop.
+      if (body.closesAt !== undefined) {
+         await enqueueAssignmentCloseEvents(client, {
+            assignmentId, closesAt, answerRevealPolicy: test.answer_reveal_policy,
+         })
+      }
       return safeAssignment(await repository.findAssignment(testId, assignmentId, client))
    })
 }

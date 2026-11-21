@@ -530,7 +530,7 @@ Session-bound licenses (POST without `deviceId`) still work as before (no key, `
 - **PendingUser**: { id?: Id, status?: string, firstName?: string?, lastName?: string?, phone?: string?, createdAt?: string, onboardingCompletedAt?: string? }
 - **PreviewModule**: { id?: Id, title?: string, description?: string?, position?: integer, status?: string, lessonsCount?: integer, testsCount?: integer }
 - **NotificationSettings**: { telegramEnabled: boolean, quietHours: { start: string, end: string }?, timeZone: string, messagingConnected: boolean, events: { [eventCode]: { telegram: boolean } } }
-- **Notification**: { id: Id, eventCode: test.assigned/group.announcement/test.extra_attempts/account.approved/account.unblocked/course.enrolled/module.opened/telegram.disconnected, title: string, body: string, targetPath: string?, createdAt: string, readAt: string? }
+- **Notification**: { id: Id, eventCode: test.assigned/group.announcement/test.extra_attempts/account.approved/account.unblocked/course.enrolled/module.opened/test.closing_24h/test.answers_available/test.result_updated/attempt.expired/telegram.disconnected, title: string, body: string, targetPath: string?, createdAt: string, readAt: string? }
 - **Profile**: { id?: Id, firstName?: string?, lastName?: string?, displayName?: string?, phone?: string?, telegramLinked?: boolean, messagingConnected?: boolean, avatarAssetId?: Id or null, status?: string, roles?: string[], preferredLanguage?: ru/tj/en, timezone?: string?, onboarding?: Onboarding, createdAt?: string, updatedAt?: string }
 - **Progress**: { status?: string, playbackSeconds?: integer, watchedSeconds?: integer, completedAt?: string?, revision?: integer, updatedAt?: string }
 - **QuestionBank**: { id?: Id, code?: string, title?: string, subjectId?: Id, ownerId?: Id, visibility?: private/staff, sourceMetadata?: SourceMetadata, questionCount?: integer, permissions?: { manage?: boolean }, createdAt?: string }
@@ -1217,7 +1217,9 @@ POST routes need CSRF (`X-CSRF-Token` + `Origin`) with the cookie session, like 
 
 - `title` and `body` are ready to show: rendered once in the user's profile language (`ru`, `tj`, `en`) and time zone when the notification is created. Changing the language later does not rewrite old notifications.
 - `targetPath` is a path inside the student app (`/courses/:courseId` or `/`). Open it on click; it can be `null`.
-- `eventCode`: `test.assigned`, `group.announcement`, `test.extra_attempts`, `account.approved`, `account.unblocked`, `course.enrolled`, `module.opened`, `telegram.disconnected`. Use it for an icon; do not parse `body`.
+- `eventCode`: `test.assigned`, `group.announcement`, `test.extra_attempts`, `account.approved`, `account.unblocked`, `course.enrolled`, `module.opened`, `test.closing_24h`, `test.answers_available`, `test.result_updated`, `attempt.expired`, `telegram.disconnected`. Use it for an icon; do not parse `body`.
+- `test.result_updated` and `attempt.expired` link to the attempt result page (`/tests/attempts/:id/result`, `/nct/attempts/:id/result`, `/nct/exam/:id/result`). They are in-app only and do not appear in `/me/notification-settings` events.
+- Notifications older than 180 days are deleted by the server; the inbox never shows older items.
 - `telegram.disconnected` (target `/profile`) means the bot can no longer write to the user (they blocked it). The profile then shows `messagingConnected: false`; linking Telegram again reconnects.
 - Errors: `400 VALIDATION_ERROR` (bad `limit`, `before`, `unread`, `upToId`, unknown query field), `400 INVALID_NOTIFICATION_ID`, `401`, `403 ACCOUNT_NOT_ACTIVE`, `404 NOTIFICATION_NOT_FOUND`.
 
