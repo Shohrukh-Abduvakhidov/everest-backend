@@ -100,7 +100,7 @@ deploy_backend() {
       restore_previous everest-backend
       exit 1
    fi
-   "${compose[@]}" up -d --no-deps backend worker-attempts worker-imports
+   "${compose[@]}" up -d --no-deps backend worker-attempts worker-jobs worker-imports
    if wait_for http://127.0.0.1:4100/api/v1/health && wait_for http://127.0.0.1:4100/api/v1/ready; then
       log "backend deployed"
       return 0
@@ -108,7 +108,7 @@ deploy_backend() {
    log "backend unhealthy; rolling back"
    "${compose[@]}" logs --tail=80 backend || true
    restore_previous everest-backend
-   "${compose[@]}" up -d --no-deps backend worker-attempts worker-imports
+   "${compose[@]}" up -d --no-deps backend worker-attempts worker-jobs worker-imports
    wait_for http://127.0.0.1:4100/api/v1/ready || true
    exit 1
 }

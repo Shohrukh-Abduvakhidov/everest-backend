@@ -5,7 +5,7 @@ Single-host deployment with Docker Compose behind the host's nginx. Files:
 | Path | Purpose |
 |---|---|
 | `Dockerfile`, `.dockerignore` | Backend image (API, workers, migrations, storage setup share it) |
-| `deploy/docker-compose.prod.yml` | Stack: `db`, `backend`, `worker-attempts`, `worker-imports`, `s3`, `frontend`; one-off `migrate`, `storage-configure` (profile `ops`) |
+| `deploy/docker-compose.prod.yml` | Stack: `db`, `backend`, `worker-attempts`, `worker-jobs`, `worker-imports`, `s3`, `frontend`; one-off `migrate`, `storage-configure` (profile `ops`) |
 | `deploy/env.example` | Template for `deploy/.env` on the server |
 | `deploy/seaweedfs/s3.example.json` | Template for `deploy/seaweedfs/s3.json` (S3 credentials) |
 | `deploy/backup.env.example` | Template for `/etc/everest/backup.env` |
@@ -23,14 +23,14 @@ browser ─► host nginx :443
             ├─ <app host>   /api/v1/* ─► 127.0.0.1:4100 backend
             │               /*        ─► 127.0.0.1:3100 frontend
             └─ <files host>           ─► 127.0.0.1:8333 SeaweedFS S3 (presigned URLs)
-compose project "everest": db · backend · worker-attempts · worker-imports · s3 · frontend
+compose project "everest": db · backend · worker-attempts · worker-jobs · worker-imports · s3 · frontend
 ```
 
 - Only loopback ports are published; the database and SeaweedFS master/volume/filer/admin are internal.
 - Every command addresses the project explicitly: `docker compose -p everest -f docker-compose.prod.yml …`.
   Never run `docker system prune`, `docker image prune` or anything with `--volumes` on a shared host;
   `docker builder prune` is the only cleanup.
-- Containers have memory and CPU limits (see the compose header, about 2.3 GB total) and `json-file`
+- Containers have memory and CPU limits (see the compose header, about 2.5 GB total) and `json-file`
   log rotation (10 MB × 3).
 
 ## Services
@@ -39,6 +39,7 @@ compose project "everest": db · backend · worker-attempts · worker-imports ·
 |---|---|---|
 | `backend` | `node src/server.js` | Health `/api/v1/health`, readiness `/api/v1/ready` |
 | `worker-attempts` | `npm run worker:attempts` | **Required.** Finalizes attempts whose time expired |
+| `worker-jobs` | `npm run worker:jobs` | **Required for notifications.** Runs `background_jobs` (notification fan-out). 192 MB limit, heap 128 MB, 0.25 CPU. If it is stopped, jobs wait in the table and run when it starts again |
 | `worker-imports` | `npm run worker:imports` | Processes admin-uploaded question packages (`/admin/question-imports`). Cheap when idle; stop it if web imports are not used |
 | `s3` | `weed server -s3` | Pinned image tag; data in volume `everest_s3-data` |
 | `migrate` (ops) | `npm run migrate:up` | Run before a new backend version starts |
@@ -100,7 +101,7 @@ Use `--platform linux/amd64` when building on an ARM machine. Tag the old image 
 
 ```bash
 docker tag everest-backend:prev everest-backend:current
-docker compose -p everest -f deploy/docker-compose.prod.yml up -d --no-deps backend worker-attempts worker-imports
+docker compose -p everest -f deploy/docker-compose.prod.yml up -d --no-deps backend worker-attempts worker-jobs worker-imports
 ```
 
 Migrations are not rolled back (`migrate:down` is never run against production). If a migration must be
@@ -128,6 +129,8 @@ Backend variables are validated in `src/configs/env.js`; the full list with defa
 | `APP_URL_STUDENT` | Frontend build time: absolute student URL used in links |
 | `APP_URL_MARKETING` | Frontend build time: landing URL used in links (the app URL while there is no landing) |
 | `TELEGRAM_*` | Telegram login; empty keeps it disabled |
+| `APP_URL` | Backend: student app root used for links in Telegram notifications (`https://app.<host>`, no trailing slash). Validated at start: an invalid value stops the backend and the workers |
+| `JOB_WORKER_INTERVAL_MS`, `JOB_LEASE_SECONDS` | `worker:jobs` idle poll (5000) and job lease (60 s, renewed while a job runs) |
 
 `API_ORIGIN` for the frontend is fixed to `http://backend:4100` in compose and does not depend on the host.
 
@@ -145,12 +148,13 @@ user signs in again. Presigned URLs live 15 minutes and the database stores obje
 | `TELEGRAM_REDIRECT_URI` | New callback URL; also update the domain in BotFather |
 | `STUDENT_HOSTS` | `app.<domain>` (runtime; recreate `frontend`) |
 | `APP_URL_STUDENT` | `https://app.<domain>` (build time; `deploy.sh frontend`) |
+| `APP_URL` | `https://app.<domain>` (backend runtime; links in Telegram notifications, for example `https://app.everestlc.tj`). Recreate `backend` and `worker-jobs` |
 | `APP_URL_MARKETING` | `https://<domain>` once the landing exists (build time) |
 | `API_ORIGIN` | No change (`http://backend:4100`) |
 | nginx | New `server_name` in `everest-app` and `everest-files`; optional 301 from the old hosts |
 | Certificates | `sudo certbot --nginx -d app.<domain> -d files.<domain>` |
 
-Then recreate the services: `up -d backend worker-attempts worker-imports frontend`.
+Then recreate the services: `up -d backend worker-attempts worker-jobs worker-imports frontend`.
 
 ## Moving to a separate server
 

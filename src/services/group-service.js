@@ -5,6 +5,7 @@ import * as authRepository from '../repositories/auth-repository.js'
 import { withTransaction } from '../repositories/transaction-repository.js'
 import AppError from '../utils/app-error.js'
 import { normalizeInternalId } from '../utils/internal-id.js'
+import { enqueueGroupAnnouncement, enqueueGroupMemberJoined } from './notification-service.js'
 
 function dependencies(overrides = {}) {
    return {
@@ -240,7 +241,7 @@ function requireAnnouncementScope(scope) {
 }
 
 async function audit(auth, client, actorUserId, code, entityType, entityId, metadata) {
-   await auth.appendAuditEvent({
+   return auth.appendAuditEvent({
       actorUserId,
       subjectUserId: null,
       code,
@@ -420,10 +421,11 @@ async function addGroupMemberService(userId, groupIdValue, body, overrides) {
          actorId,
          isRepresentative,
       }, client)
-      await audit(auth, client, actorId, 'group.member.added', 'group', groupId, {
+      const auditEvent = await audit(auth, client, actorId, 'group.member.added', 'group', groupId, {
          userId: targetUserId,
          reactivated: Boolean(current),
       })
+      await enqueueGroupMemberJoined(client, { groupId, userId: targetUserId, auditId: auditEvent.id })
       return {
          userId: membership.user_id,
          status: membership.status,
@@ -591,6 +593,9 @@ async function createGroupAnnouncementService(userId, groupIdValue, body, overri
       await audit(auth, client, actorId, 'group.announcement.created', 'group_announcement', created.id, {
          groupId,
       })
+      if (created.status === 'published') {
+         await enqueueGroupAnnouncement(client, { announcementId: created.id })
+      }
       return safeAnnouncement(created)
    })
 }
@@ -603,12 +608,18 @@ async function updateGroupAnnouncementService(userId, groupIdValue, announcement
    const changes = parseAnnouncementBody(body, true)
    return transaction(async (client) => {
       requireAnnouncementScope(await repository.findAnnouncementManagerScope(actorId, groupId, client))
-      requireAnnouncement(await repository.findAnnouncementForUpdate(groupId, announcementId, client))
+      const before = requireAnnouncement(
+         await repository.findAnnouncementForUpdate(groupId, announcementId, client),
+      )
       const updated = await repository.updateAnnouncement(announcementId, changes, client)
       await audit(auth, client, actorId, 'group.announcement.updated', 'group_announcement', announcementId, {
          groupId,
          fields: Object.keys(body),
       })
+      // Only the first publication notifies (the job key is per announcement); edits do not.
+      if (before.status !== 'published' && updated.status === 'published') {
+         await enqueueGroupAnnouncement(client, { announcementId })
+      }
       return safeAnnouncement(updated)
    })
 }

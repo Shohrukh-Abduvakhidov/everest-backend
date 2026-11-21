@@ -3,6 +3,7 @@ import * as courseAccessRepository from '../repositories/course-access-repositor
 import * as offlineLicenseRepository from '../repositories/offline-license-repository.js'
 import { withTransaction } from '../repositories/transaction-repository.js'
 import AppError from '../utils/app-error.js'
+import { enqueueCourseEnrolled, enqueueModuleOpened } from './notification-service.js'
 import {
    parseCourseId,
    parseId,
@@ -191,7 +192,7 @@ async function grantCourseEnrollmentService(userId, courseIdValue, body, overrid
       if (!written) {
          throw conflict('ENROLLMENT_ALREADY_EXISTS', 'User already has a course enrollment')
       }
-      await auth.appendAuditEvent({
+      const auditEvent = await auth.appendAuditEvent({
          actorUserId: actorId,
          subjectUserId: targetId,
          code: existing ? 'course.enrollment.regranted' : 'course.enrollment.granted',
@@ -199,6 +200,11 @@ async function grantCourseEnrollmentService(userId, courseIdValue, body, overrid
          entityId: written.id,
          metadata: { courseId, ...window },
       }, client)
+      await enqueueCourseEnrolled(client, {
+         enrollmentId: written.id,
+         auditId: auditEvent.id,
+         beginsAt: window.beginsAt,
+      })
       return safeEnrollment(await repository.findEnrollmentForUpdate(courseId, targetId, client))
    })
 }
@@ -319,7 +325,7 @@ async function grantModuleAccessService(userId, courseIdValue, targetValue, body
       if (!written) {
          throw conflict('MODULE_ACCESS_ALREADY_EXISTS', 'User already has a grant for this module')
       }
-      await auth.appendAuditEvent({
+      const auditEvent = await auth.appendAuditEvent({
          actorUserId: actorId,
          subjectUserId: targetId,
          code: existing ? 'course.module_access.regranted' : 'course.module_access.granted',
@@ -327,6 +333,11 @@ async function grantModuleAccessService(userId, courseIdValue, targetValue, body
          entityId: written.id,
          metadata: { courseId, moduleId, ...window },
       }, client)
+      await enqueueModuleOpened(client, {
+         grantId: written.id,
+         auditId: auditEvent.id,
+         beginsAt: window.beginsAt,
+      })
       return safeModuleGrant(
          await repository.findModuleGrantForUpdate(targetId, moduleId, courseId, client),
       )

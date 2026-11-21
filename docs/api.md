@@ -894,6 +894,29 @@ Full contract with examples: `docs/frontend-handoff.md` → "Staff progress". Al
    - Student (no owner, admin or teacher role): `200` with empty `courses` and `groups`, not `403`, so the client can call it for every signed-in user.
    - Errors: `401` without a session, `400 INVALID_USER_ID`, `403 ACCOUNT_NOT_ACTIVE`.
 
+## Notifications inbox (M14 PR 1, 2026-11-21)
+
+Own notifications only; the user id comes from the session. Full contract with an example: `docs/frontend-handoff.md` → "Notifications inbox".
+
+- `GET /api/v1/me/notifications?limit&before&unread`: newest first by id, `limit` 1–50 (default 20), cursor `before` (= `pagination.nextBefore`), `unread=true|false`. Returns `notifications[{ id, eventCode, title, body, targetPath, createdAt, readAt }]` and `pagination { limit, hasMore, nextBefore }`.
+- `GET /api/v1/me/notifications/unread-count`: `{ count }`.
+- `POST /api/v1/me/notifications/:notificationId/read`: idempotent, keeps the first `readAt`; another user's notification is `404 NOTIFICATION_NOT_FOUND`.
+- `POST /api/v1/me/notifications/read-all` `{ upToId }`: marks unread notifications with `id <= upToId`; returns `{ updated }`.
+- Errors: `400 VALIDATION_ERROR` / `INVALID_NOTIFICATION_ID`, `401`, `403 ACCOUNT_NOT_ACTIVE` (and CSRF errors for cookie POSTs).
+
+**Events and recipients** (written by `worker:jobs`, see decisions.md 2026-11-21):
+
+| eventCode | Recipient | When | targetPath |
+|---|---|---|---|
+| `test.assigned` | the assigned user, or active members of the group; a student added to a group later gets it for each open assignment of that group | at `opensAt` (immediately when already open); not for a revoked or closed assignment | `/courses/:courseId` |
+| `group.announcement` | active group members except the author | first publication only (create as published, or draft → published) | `/` |
+| `test.extra_attempts` | the student | extra attempts granted on an active assignment | `/courses/:courseId` |
+| `account.approved`, `account.unblocked` | the account | approve, unblock | `/` |
+| `course.enrolled` | the student | grant or re-grant, at `beginsAt`; skipped if revoked or expired by then | `/courses/:courseId` |
+| `module.opened` | the student | module grant or re-grant, at `beginsAt`; skipped if revoked by then | `/courses/:courseId` |
+
+Only active accounts receive notifications. The text is rendered in `user_profiles.language_code` (`tg` in the database is `tj` in the API) and the profile time zone (dates as `DD.MM.YYYY HH:mm`).
+
 ## NCT trainer
 
 Full contract with examples and error table: `docs/frontend-handoff.md` → "NCT trainer". Summary:

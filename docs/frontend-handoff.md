@@ -529,6 +529,7 @@ Session-bound licenses (POST without `deviceId`) still work as before (no key, `
 - **Pagination**: { limit: integer, offset: integer, hasMore: boolean, total?: integer }
 - **PendingUser**: { id?: Id, status?: string, firstName?: string?, lastName?: string?, phone?: string?, createdAt?: string, onboardingCompletedAt?: string? }
 - **PreviewModule**: { id?: Id, title?: string, description?: string?, position?: integer, status?: string, lessonsCount?: integer, testsCount?: integer }
+- **Notification**: { id: Id, eventCode: test.assigned/group.announcement/test.extra_attempts/account.approved/account.unblocked/course.enrolled/module.opened, title: string, body: string, targetPath: string?, createdAt: string, readAt: string? }
 - **Profile**: { id?: Id, firstName?: string?, lastName?: string?, displayName?: string?, phone?: string?, telegramLinked?: boolean, messagingConnected?: boolean, avatarAssetId?: Id or null, status?: string, roles?: string[], preferredLanguage?: ru/tj/en, timezone?: string?, onboarding?: Onboarding, createdAt?: string, updatedAt?: string }
 - **Progress**: { status?: string, playbackSeconds?: integer, watchedSeconds?: integer, completedAt?: string?, revision?: integer, updatedAt?: string }
 - **QuestionBank**: { id?: Id, code?: string, title?: string, subjectId?: Id, ownerId?: Id, visibility?: private/staff, sourceMetadata?: SourceMetadata, questionCount?: integer, permissions?: { manage?: boolean }, createdAt?: string }
@@ -1186,6 +1187,38 @@ Which flag opens which screen (`allAccess` opens all of them):
 | Assignment results | `canViewResults` on the test's course or on the assignment's group |
 | Tests of course X | `courses[X].canManageTests`; assigning to a group also needs `groups[G].canAssignTests` |
 | Group announcements | `groups[G].canPublishAnnouncements` |
+
+### Notifications inbox (M14, 2026-11-21)
+
+In-app notifications of the signed-in user. They are written by `worker:jobs` a few seconds after the event (not inside the request that caused it), so poll the count (for example every 60 s and on window focus) instead of expecting it right after an action.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/me/notifications?limit=20&before=<id>&unread=true` | Newest first. `limit` 1–50 (20). For the next page pass `pagination.nextBefore` as `before` |
+| GET | `/me/notifications/unread-count` | `{ count }` for the bell badge |
+| POST | `/me/notifications/:notificationId/read` | Mark one read; idempotent, keeps the first `readAt`. Another user's id → `404 NOTIFICATION_NOT_FOUND` |
+| POST | `/me/notifications/read-all` `{ upToId }` | Mark read everything up to `upToId` (the newest id the UI has shown). A notification that arrives meanwhile stays unread. Returns `{ updated }` |
+
+POST routes need CSRF (`X-CSRF-Token` + `Origin`) with the cookie session, like other mutations.
+
+```json
+{
+  "data": {
+    "notifications": [
+      { "id": "41", "eventCode": "test.assigned", "title": "Новый тест",
+        "body": "Новый тест «Дроби 1». Доступен до 15.01.2030 15:00.",
+        "targetPath": "/courses/12", "createdAt": "2026-11-21T10:00:03.120Z", "readAt": null }
+    ],
+    "pagination": { "limit": 20, "hasMore": false, "nextBefore": null }
+  }
+}
+```
+
+- `title` and `body` are ready to show: rendered once in the user's profile language (`ru`, `tj`, `en`) and time zone when the notification is created. Changing the language later does not rewrite old notifications.
+- `targetPath` is a path inside the student app (`/courses/:courseId` or `/`). Open it on click; it can be `null`.
+- `eventCode`: `test.assigned`, `group.announcement`, `test.extra_attempts`, `account.approved`, `account.unblocked`, `course.enrolled`, `module.opened`. Use it for an icon; do not parse `body`.
+- Errors: `400 VALIDATION_ERROR` (bad `limit`, `before`, `unread`, `upToId`, unknown query field), `400 INVALID_NOTIFICATION_ID`, `401`, `403 ACCOUNT_NOT_ACTIVE`, `404 NOTIFICATION_NOT_FOUND`.
+- Telegram copies and notification settings come in M14 PR 2; nothing changes in these routes.
 
 ### Admin: tests (M10)
 

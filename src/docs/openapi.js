@@ -131,6 +131,15 @@ const schemas = {
       createdAt: dt(),
       updatedAt: dt(),
    }),
+   Notification: obj({
+      id: id(),
+      eventCode: enumOf(['test.assigned', 'group.announcement', 'test.extra_attempts', 'account.approved', 'account.unblocked', 'course.enrolled', 'module.opened']),
+      title: str({ description: 'Rendered once on creation in the profile language (ru, tj, en)' }),
+      body: str(),
+      targetPath: nullable(str({ description: 'Path inside the student app, e.g. /courses/12 or /' })),
+      createdAt: dt(),
+      readAt: nullable(dt()),
+   }, ['id', 'eventCode', 'title', 'body', 'targetPath', 'createdAt', 'readAt']),
    PendingUser: obj({
       id: id(),
       status: str(),
@@ -2079,6 +2088,38 @@ const routes = [
       description: 'Own data only, read-only, for the frontend to decide which staff screens to open; the server still checks every action. Owner and admin get allAccess: true (the lists hold only assignments that exist, usually none). A teacher gets every course_teachers and group_teachers assignment with its flags, archived ones included. Anyone without the owner, admin or teacher role (a student) gets 200 with empty courses and groups.',
       response: ref('StaffCapabilities'),
       errors: { 400: ['INVALID_USER_ID'], 403: ['ACCOUNT_NOT_ACTIVE'] },
+   }],
+   ['get', '/me/notifications', {
+      tag: 'Notifications', summary: 'My in-app notifications, newest first',
+      description: 'Own notifications only. Cursor paging: pass pagination.nextBefore as before for the next page. unread=true lists only unread ones. Notifications are written by worker:jobs a few seconds after the event.',
+      query: [
+         { name: 'limit', schema: int({ minimum: 1, maximum: 50, default: 20 }) },
+         { name: 'before', schema: id() },
+         { name: 'unread', schema: enumOf(['true', 'false']) },
+      ],
+      response: obj({
+         notifications: arr(ref('Notification')),
+         pagination: obj({ limit: int(), hasMore: bool(), nextBefore: nullable(id()) }, ['limit', 'hasMore', 'nextBefore']),
+      }, ['notifications', 'pagination']),
+      errors: { 403: ['ACCOUNT_NOT_ACTIVE'] },
+   }],
+   ['get', '/me/notifications/unread-count', {
+      tag: 'Notifications', summary: 'Number of my unread notifications',
+      response: obj({ count: int() }, ['count']),
+      errors: { 403: ['ACCOUNT_NOT_ACTIVE'] },
+   }],
+   ['post', '/me/notifications/:notificationId/read', {
+      tag: 'Notifications', summary: 'Mark one notification read (idempotent)',
+      description: 'A notification that is already read keeps its first readAt. Another user\'s notification answers 404.',
+      response: ref('Notification'),
+      errors: { 400: ['INVALID_NOTIFICATION_ID'], 403: ['ACCOUNT_NOT_ACTIVE'], 404: ['NOTIFICATION_NOT_FOUND'] },
+   }],
+   ['post', '/me/notifications/read-all', {
+      tag: 'Notifications', summary: 'Mark my notifications read up to an id',
+      description: 'upToId is the newest notification the client has shown; a notification that arrives during the request stays unread.',
+      body: obj({ upToId: id() }, ['upToId']),
+      response: obj({ updated: int() }, ['updated']),
+      errors: { 403: ['ACCOUNT_NOT_ACTIVE'] },
    }],
    ['get', '/trainer/catalog', {
       tag: 'NCT trainer', summary: 'Subjects with trainable NCT questions, counts per language and difficulty',

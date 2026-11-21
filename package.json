@@ -24,6 +24,7 @@
     "publish:questions": "node scripts/publish-questions.js",
     "worker:imports": "node scripts/question-import-worker.js",
     "worker:attempts": "node scripts/attempt-sweep-worker.js",
+    "worker:jobs": "node scripts/job-worker.js",
     "test:sources": "node scripts/verify-migration-sources.js",
     "test:integrity": "node scripts/test-schema-integrity.js",
     "test:server": "node scripts/test-server.js",
