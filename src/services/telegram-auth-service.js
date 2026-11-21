@@ -42,17 +42,60 @@ function safeProfile(claims) {
    )
 }
 
-function verifiedChatId(claims) {
-   if (typeof claims.id === 'string' && /^-?[1-9][0-9]*$/.test(claims.id)) return claims.id
-   if (Number.isSafeInteger(claims.id)) return String(claims.id)
+const botAccessScope = 'telegram:bot_access'
+const safeScopePattern = /^[A-Za-z0-9_.:-]{1,64}$/
+const safeClaimNamePattern = /^[A-Za-z0-9_.:-]{1,64}$/
+
+function numericTelegramId(value) {
+   if (typeof value === 'string' && /^[1-9][0-9]{0,18}$/.test(value)) return value
+   if (Number.isSafeInteger(value) && value > 0) return String(value)
    return null
 }
 
-function botAccessGranted(tokenSet) {
-   return (
-      typeof tokenSet.scope === 'string' &&
-      tokenSet.scope.split(/\s+/).includes('telegram:bot_access')
-   )
+function claimType(value) {
+   if (value === undefined) return 'absent'
+   if (value === null) return 'null'
+   if (Array.isArray(value)) return 'array'
+   return typeof value
+}
+
+function grantedScopes(tokenSet) {
+   if (typeof tokenSet.scope !== 'string') return null
+   return tokenSet.scope.split(/\s+/).filter(Boolean)
+}
+
+// Describes the grant without values: no tokens, phones, names or identifiers.
+function inspectTelegramGrant(claims, tokenSet) {
+   const scopes = grantedScopes(tokenSet)
+   const numericId = numericTelegramId(claims.id)
+   const numericSub = numericTelegramId(claims.sub)
+   const chatId = numericId || numericSub
+   return {
+      chatId,
+      botAccessInScope: Boolean(scopes && scopes.includes(botAccessScope)),
+      diagnostics: {
+         scopePresent: scopes !== null,
+         scopes: (scopes || []).filter((scope) => safeScopePattern.test(scope)).slice(0, 20),
+         claimNames: Object.keys(claims)
+            .filter((name) => safeClaimNamePattern.test(name))
+            .sort()
+            .slice(0, 50),
+         idPresent: claims.id !== undefined && claims.id !== null,
+         idType: claimType(claims.id),
+         idNumeric: numericId !== null,
+         subNumeric: numericSub !== null,
+         subMatchesId: numericId !== null && numericSub !== null ? numericId === numericSub : null,
+         chatIdSource: numericId ? 'id' : numericSub ? 'sub' : null,
+      },
+   }
+}
+
+function logTelegramGrant(context, fields) {
+   try {
+      context.logger.info(JSON.stringify({ event: 'auth.telegram.messaging_grant', ...fields }))
+   } catch {
+      // Logging must never break authentication.
+   }
 }
 
 function dependencies(overrides = {}) {
@@ -65,6 +108,7 @@ function dependencies(overrides = {}) {
       transaction: overrides.transaction || withTransaction,
       oidcProvider: overrides.oidcProvider || new TelegramOidcProvider(config.telegram),
       botProvider: overrides.botProvider || new TelegramBotProvider(config.telegram),
+      logger: overrides.logger || console,
       now,
       sessions: overrides.sessions || {
          issueSession: (input) =>
@@ -102,22 +146,40 @@ async function beginTelegramAuthorizationService({ intent, userId = null }, over
       nonce,
       codeChallenge: challenge,
    })
-   return { authorizationUrl, expiresAt }
+   if (intent !== 'link') return { authorizationUrl, expiresAt }
+   const connection = await repository.findActiveTelegramConnection(
+      userId,
+      config.telegram.clientId,
+   )
+   return { authorizationUrl, expiresAt, messagingConnected: Boolean(connection) }
 }
 
-async function saveConnectionIfGrantedService({ userId, claims, tokenSet, client }, context) {
-   const { config, repository } = context
-   const chatId = verifiedChatId(claims)
-   if (!botAccessGranted(tokenSet) || !chatId) return false
-   await repository.upsertTelegramConnection(
-      {
-         userId,
-         botId: config.telegram.clientId,
-         chatId,
-      },
-      client,
-   )
-   return true
+// Bot access is confirmed by the token scope, or, when the scope does not list it,
+// by a confirmation message: 2xx connects, 403 (or blocked/not found) leaves it disconnected.
+async function connectMessagingService({ userId, grant, client }, context) {
+   const { config, repository, botProvider } = context
+   if (!grant.chatId) return { connected: false, method: 'no_chat_id' }
+   const botId = config.telegram.clientId
+   const save = () =>
+      repository.upsertTelegramConnection({ userId, botId, chatId: grant.chatId }, client)
+   if (grant.botAccessInScope) {
+      await save()
+      return { connected: true, method: 'scope' }
+   }
+   const existing = await repository.findActiveTelegramConnection(userId, botId, client)
+   if (existing && String(existing.chat_id) === grant.chatId) {
+      return { connected: true, method: 'existing' }
+   }
+   try {
+      await botProvider.sendConnectionConfirmation(grant.chatId)
+   } catch (error) {
+      return {
+         connected: false,
+         method: error.telegramAccessUnavailable ? 'probe_forbidden' : 'probe_failed',
+      }
+   }
+   await save()
+   return { connected: true, method: 'probe' }
 }
 
 async function completeLinkService(stateRow, claims, tokenSet, context) {
@@ -162,15 +224,21 @@ async function completeLinkService(stateRow, claims, tokenSet, context) {
                client,
             ))
          await repository.touchTelegramIdentity(identity.id, safeProfile(claims), client)
-         const messagingConnected = await saveConnectionIfGrantedService(
-            {
-               userId: stateRow.initiating_user_id,
-               claims,
-               tokenSet,
-               client,
-            },
+         const grant = inspectTelegramGrant(claims, tokenSet)
+         const messaging = await connectMessagingService(
+            { userId: stateRow.initiating_user_id, grant, client },
             context,
          )
+         const grantSummary = {
+            messagingConnected: messaging.connected,
+            messagingMethod: messaging.method,
+            ...grant.diagnostics,
+         }
+         logTelegramGrant(context, {
+            flow: 'link',
+            userId: String(stateRow.initiating_user_id),
+            ...grantSummary,
+         })
          await repository.appendAuditEvent(
             {
                actorUserId: stateRow.initiating_user_id,
@@ -178,11 +246,11 @@ async function completeLinkService(stateRow, claims, tokenSet, context) {
                code: 'auth.telegram.linked',
                entityType: 'auth_identity',
                entityId: identity.id,
-               metadata: { messagingConnected },
+               metadata: grantSummary,
             },
             client,
          )
-         return { status: 'linked', messagingConnected }
+         return { status: 'linked', messagingConnected: messaging.connected }
       })
    } catch (error) {
       if (error.code === '23505') {
@@ -209,20 +277,33 @@ async function completeLoginService(claims, tokenSet, requestContext, context) {
          claims.sub,
          client,
       )
-      if (!identity) return { status: 'linking_required' }
+      const grant = inspectTelegramGrant(claims, tokenSet)
+      if (!identity) {
+         logTelegramGrant(context, {
+            flow: 'login',
+            userId: null,
+            messagingConnected: false,
+            messagingMethod: 'linking_required',
+            ...grant.diagnostics,
+         })
+         return { status: 'linking_required', messagingConnected: false }
+      }
       if (identity.status !== 'active') {
          throw new AppError(403, 'ACCOUNT_NOT_ACTIVE', 'Account is not active')
       }
       await repository.touchTelegramIdentity(identity.id, safeProfile(claims), client)
-      const messagingConnected = await saveConnectionIfGrantedService(
-         {
-            userId: identity.user_id,
-            claims,
-            tokenSet,
-            client,
-         },
+      const messaging = await connectMessagingService(
+         { userId: identity.user_id, grant, client },
          context,
       )
+      const messagingConnected = messaging.connected
+      logTelegramGrant(context, {
+         flow: 'login',
+         userId: String(identity.user_id),
+         messagingConnected,
+         messagingMethod: messaging.method,
+         ...grant.diagnostics,
+      })
       const session = await sessions.issueSession({
          userId: identity.user_id,
          requestContext,

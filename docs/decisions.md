@@ -1,5 +1,15 @@
 # Decisions
 
+## 2026-11-21 — Telegram messaging when the token response omits bot_access
+
+On prod, linking succeeded but `telegram_connections` stayed empty (`messagingConnected: false` in every `auth.telegram.linked` audit). The old rule needed both `telegram:bot_access` in the token response's `scope` and a numeric `id` claim, and logged nothing. Telegram documents no claims for that scope and does not promise to echo it.
+
+- **Chat ID:** the numeric `id` claim; if it is absent and `sub` is numeric, `sub`. An `id` that differs from a numeric `sub` wins.
+- **Bot access:** listed in `scope` → active connection, as before. Not listed (field missing or other scopes only) → not assumed. The server sends "Telegram подключён к EVEREST"; delivered → `active`; `403`, blocked or chat not found → no connection, not an error; other failures → no connection, not an error. The send happens inside the link/login transaction after the identity conflict checks, so the audit records the final result; `sendMessage` now has a 10 s timeout so the transaction cannot hang. On login the send is skipped when an active connection with the same chat exists.
+- **Diagnostics** (log line `auth.telegram.messaging_grant` on link and login, the same fields in the `auth.telegram.linked` audit metadata): `scopePresent`, `scopes`, `claimNames`, `idPresent`, `idType`, `idNumeric`, `subNumeric`, `subMatchesId`, `chatIdSource`, `messagingMethod` (`scope`, `probe`, `existing`, `probe_forbidden`, `probe_failed`, `no_chat_id`, `linking_required`). No token, phone, name, `sub`, `id` or chat ID values.
+- **API:** `messagingConnected` is always present in the callback response (also `false` for `linking_required`), in `POST /auth/telegram/link` (state before linking) and in `GET`/`PATCH /profile` (identity linked and an active connection for the configured bot).
+- **Not done:** bot webhook and `/start` deep link. They are only needed if diagnostics show that neither `id` nor a numeric `sub` arrives, or that the confirmation gets `403` although the user allowed messages.
+
 ## 2026-11-19 — M12 PR 3: staff progress views
 
 D1–D7 (2026-11-16) stay as approved. These are the implementation choices of PR 3, where D1 and D5 left room.

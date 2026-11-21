@@ -121,6 +121,7 @@ const schemas = {
       displayName: nullable(str()),
       phone: nullable(str()),
       telegramLinked: bool(),
+      messagingConnected: bool({ description: 'true when the Telegram bot can message this user (active connection); false means login may be linked but messages are not connected' }),
       avatarAssetId: nullable(id()),
       status: str(),
       roles: arr(str()),
@@ -1272,13 +1273,17 @@ const routes = [
          status: enumOf(['authenticated', 'linking_required', 'linked']),
          expiresAt: dt(),
          user: obj({ id: id() }),
-         messagingConnected: bool(),
-      }),
+         messagingConnected: bool({ description: 'Always present. true when bot messaging is active after this callback: granted by the telegram:bot_access scope, or confirmed by a delivered "Telegram подключён к EVEREST" message when the token response does not list that scope. A 403 from Telegram yields false without failing the login or link.' }),
+      }, ['status', 'messagingConnected']),
       errors: { 400: ['VALIDATION_ERROR', 'TELEGRAM_CALLBACK_INVALID'], 401: ['TELEGRAM_STATE_INVALID', 'TELEGRAM_AUTHORIZATION_DENIED', 'TELEGRAM_CODE_EXCHANGE_FAILED', 'TELEGRAM_ID_TOKEN_INVALID'], 409: ['TELEGRAM_IDENTITY_ALREADY_LINKED', 'TELEGRAM_IDENTITY_CONFLICT'] },
    }],
    ['post', '/auth/telegram/link', {
       tag: 'Auth', summary: 'Start linking Telegram to the current account',
-      response: obj({ authorizationUrl: str({ format: 'uri' }), expiresAt: dt() }),
+      response: obj({
+         authorizationUrl: str({ format: 'uri' }),
+         expiresAt: dt(),
+         messagingConnected: bool({ description: 'Current state before linking: whether bot messaging is already active' }),
+      }, ['authorizationUrl', 'expiresAt', 'messagingConnected']),
    }],
    ['delete', '/auth/telegram/link', {
       tag: 'Auth', summary: 'Unlink Telegram (another login method must remain)',

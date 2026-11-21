@@ -505,7 +505,7 @@ All mutations require live authentication, database-backed permission checks, co
 
 All profile routes require a valid active-account session. Identity comes only from the authenticated session; request bodies cannot select another user.
 
-- `GET /api/v1/profile` returns the authenticated user's decimal-string ID, names, derived display name, phone, `telegramLinked` (boolean: a Telegram identity is linked; no Telegram identifiers are exposed), read-only avatar asset reference, status, roles, preferred language, timezone, onboarding state, and timestamps. `PATCH` responses include the same field.
+- `GET /api/v1/profile` returns the authenticated user's decimal-string ID, names, derived display name, phone, `telegramLinked` (boolean: a Telegram identity is linked; no Telegram identifiers are exposed), `messagingConnected` (boolean: Telegram is linked and the bot has an active connection to message the user), read-only avatar asset reference, status, roles, preferred language, timezone, onboarding state, and timestamps. `PATCH` responses include the same field.
 - `PATCH /api/v1/profile` partially updates `firstName`, `lastName`, `preferredLanguage`, and `timezone`. Names may be explicitly cleared with `null`; omitted fields remain unchanged. Phone, status, roles, permissions, identifiers, and avatar are read-only.
 - `GET /api/v1/profile/onboarding` returns `state`, `completedSteps`, `missingRequiredFields`, `canComplete`, and `completedAt`.
 - `PATCH /api/v1/profile/onboarding` updates the same supported profile fields without completing onboarding.
@@ -793,12 +793,24 @@ For an already-linked identity, response `200` sets the EVEREST session in an `H
 An unknown verified identity is not matched by phone or username:
 
 ```json
-{"data":{"status":"linking_required"}}
+{"data":{"status":"linking_required","messagingConnected":false}}
 ```
+
+`messagingConnected` is always present in the callback response. It says whether the bot can message the user after this callback; it does not affect whether login or linking succeeded:
+
+- The chat ID is the numeric `id` claim of the ID token. If `id` is absent and `sub` is numeric, `sub` is used. With neither, messaging stays disconnected.
+- If the token response's `scope` lists `telegram:bot_access`, the connection becomes `active`.
+- Otherwise (the `scope` field is missing, or lists other scopes only), the server checks by sending "Telegram подключён к EVEREST" to the chat. Delivered: the connection becomes `active`. Telegram `403` (or blocked / chat not found): no connection, `messagingConnected: false`, the link still succeeds. Any other failure behaves the same way. On login the check is skipped when an active connection with the same chat already exists, so the message is not sent on every login.
+
+The frontend should show "login linked, messages not connected" when `status` is `linked` or `authenticated` and `messagingConnected` is `false`.
 
 ### `POST /api/v1/auth/telegram/link`
 
-Requires an active EVEREST session through the session cookie or `Authorization: Bearer <token>`. Cross-origin browser clients using the cookie must send credentials. Returns an authorization URL in the same shape as `/telegram/start`, bound to the authenticated user. The callback performs the actual link using verified claims only.
+Requires an active EVEREST session through the session cookie or `Authorization: Bearer <token>`. Cross-origin browser clients using the cookie must send credentials. Returns an authorization URL in the same shape as `/telegram/start`, bound to the authenticated user, plus `messagingConnected`: the current state before linking. The callback performs the actual link using verified claims only.
+
+```json
+{"data":{"authorizationUrl":"https://oauth.telegram.org/auth?...","expiresAt":"2026-10-24T12:10:00.000Z","messagingConnected":false}}
+```
 
 Successful callback response:
 
