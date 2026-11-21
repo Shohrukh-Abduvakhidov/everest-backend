@@ -364,12 +364,12 @@ The initial permission set exactly preserves account administration: `accounts.p
 | Question bank | banks/imports/errors/questions/options/matching/keys/topics/assets/duplicates | None | Planned (schema + immutability guards) |
 | Tests/attempts | tests/questions/assignments/attempts/attempt questions/answers/revisions | None | Planned (schema + constraints/guards) |
 | Analytics/ranking | activity events; attempt/progress source data | None; no ranking table/formula | Planned/decision required |
-| Notifications | preferences/campaigns/notifications/deliveries | Telegram test message only, not notification pipeline | Partial |
+| Notifications | settings/preferences/campaigns/notifications/deliveries | In-app notifications for 7 events and the `/me/notifications` inbox (M14 PR 1); Telegram delivery, settings and reminders pending | Partial |
 | Telegram | identities, OIDC states, connections | Five routes, service/repository/providers | Done |
 | Web Push | `push_subscriptions`, deliveries | None; VAPID key unused | Planned |
 | AI | conversations/messages/policies/budgets/usage/requests/reservations/ledger/analyses | None; AI key unused | Planned (schema only) |
 | Bonuses/achievements | accounts/rules/transactions/offers/redemptions/credits/achievements | None | Planned (schema + append-only guard) |
-| Background jobs | `background_jobs` | No worker/job code | Planned (schema only) |
+| Background jobs | `background_jobs` | `worker:jobs` with leases, retries and dead letter; first job type `notification.fanout` | Partial |
 | Idempotency | `idempotency_keys` plus domain unique keys | No generic service | Planned (schema support only) |
 | Platform settings | `platform_settings` | None | Planned (schema only) |
 
@@ -746,6 +746,10 @@ Detailed column-level schema remains in `../schema_tables.md`; implemented endpo
 ## Background jobs
 
 `src/jobs/question-import-worker.js` runs confirmed package uploads. It is started only by `npm run worker:imports`, never by importing the app. Claims use `SKIP LOCKED` with a renewed lease, so several processes are safe, but packages wait on local disk, so workers and the API must share a host.
+
+`src/jobs/job-worker.js` (`npm run worker:jobs`, compose `worker-jobs`) is the general runner for `background_jobs` (M14/M19, decisions.md 2026-11-21). `job-repository.js` enqueues inside the caller's transaction (outbox, `ON CONFLICT (dedupe_key) DO NOTHING`), claims a due pending job or a running job whose lease expired with `FOR UPDATE SKIP LOCKED`, renews the lease while the handler runs, and on failure reschedules with backoff (30 s · 2^(n−1), max 1 h) until `max_attempts`, then leaves the job `failed` (dead letter). A late worker cannot complete a job another worker took over (`locked_by` check). Handlers are registered by job type; the first is `notification.fanout`.
+
+Notifications (M14 PR 1): domain services (`account-admin`, `group`, `test`, `test-results`, `course-access`) call `notification-service.enqueue*` inside their transaction. The fan-out handler re-reads the source through `notification-repository`, resolves active recipients with their profile language and time zone, renders texts with `utils/notification-texts.js` and inserts `notifications` in batches (`UNIQUE (user_id, dedupe_key)`). `routes/me.js` serves the inbox (`/me/notifications…`) through `notification-controller`.
 
 ## Student home and learning activity (M12 PR 1, 2026-11-16)
 

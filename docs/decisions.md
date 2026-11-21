@@ -1,5 +1,30 @@
 # Decisions
 
+## 2026-11-21 — M14 notifications and the M19 job queue (approved plan)
+
+Approved by the owner on 2026-11-21: D1–D8 of the plan, "at most once" for Telegram, a separate `worker:jobs`, three PRs. Web Push is out of scope.
+
+- **D1 Events.** `test.assigned`, `test.closing_24h`, `test.answers_available` (only `after_window`), `test.result_updated` (in-app only), `group.announcement`, `test.extra_attempts`, `account.approved`, `account.unblocked`, `course.enrolled`, `module.opened`, `attempt.expired` (in-app only), `telegram.disconnected` (in-app only). Only active accounts receive them. Password recovery codes never go through the queue.
+   - Added by the owner: a student added to a group gets `test.assigned` for every open assignment of that group, with the same notification key as the group-wide event (`test.assigned:<assignmentId>`), so nobody gets it twice.
+   - Added by the owner: `module.opened` when module access is granted or re-granted (in-app + Telegram).
+- **D2 Texts.** Rendered once on creation in the profile language and time zone, stored in `title`/`body`. Dates `DD.MM.YYYY HH:mm` in every language. The database stores Tajik as `tg`, the API as `tj`; the renderer accepts both and falls back to Russian (checked by a unit test). User content in texts is cut to 120 characters. Tajik texts still need a native speaker's review.
+- **D3 Inbox.** `GET /me/notifications` (cursor by id), `GET /me/notifications/unread-count`, `POST /me/notifications/:id/read` (idempotent), `POST /me/notifications/read-all { upToId }`. Retention 180 days (PR 3).
+- **D4/D5 Settings and quiet hours** (PR 2): `notification_settings` (Telegram switch, quiet hours, default 22:00–08:00 in the profile zone); in-app is always on.
+- **D6 Blocked bot** (PR 2): 403 / blocked / chat not found marks the connection `blocked`, cancels pending Telegram deliveries (`BOT_BLOCKED`), one in-app `telegram.disconnected`.
+   - Added by the owner: when the user unlinks Telegram, their pending Telegram deliveries are cancelled with `TELEGRAM_UNLINKED`.
+- **D7 Queue.** `background_jobs` holds jobs, `notification_deliveries` will be the Telegram send queue (PR 2).
+   - Outbox: the domain service inserts the job in its own transaction; a rollback leaves no job.
+   - Claim with `FOR UPDATE SKIP LOCKED` (pending first, then a running job whose lease expired), lease `JOB_LEASE_SECONDS` (60) renewed every third of it while the handler runs.
+   - Retry after 30 s · 2^(n−1), at most one hour, up to `max_attempts` (5); then `failed`, which is the dead letter. A handler error marked permanent fails at once. Only error codes are stored and logged.
+   - Job keys: `notify:<event>:…`. `test.assigned` includes `opens_at` in the job key, so moving the opening time schedules a new job; the notification key stays per assignment. Grants use the audit event id, so a re-grant notifies again.
+   - The fan-out re-reads the current state when it runs (revoked, closed, unpublished or not yet begun → nothing), inserts notifications in batches of 500 with `ON CONFLICT (user_id, dedupe_key) DO NOTHING`.
+   - "At most once" for Telegram (PR 2): a delivery left in `sending` after its lease is marked `unknown`, never resent.
+   - `worker:jobs` is its own container (192 MB, heap 128 MB, 0.25 CPU); `worker:attempts` is unchanged.
+- **D8 Telegram limits** (PR 2): at most 20 messages per second for the bot; on 429 all sending pauses for `retry_after` without using an attempt.
+   - Added by the owner: also at most 1 message per second to one chat.
+- **Links.** Telegram messages link to `APP_URL + targetPath`. `APP_URL` is new in `env.js` (optional, validated http(s) URL, no trailing slash) and in `deploy/env.example`; it changes with the domain (`deploy.md`, "Moving to the final domain"). It was not in `env.js` before: only the frontend build variable `APP_URL_STUDENT` existed.
+- **Target paths** in the student app: `/courses/:courseId` for test, course and module events, `/` for the rest (the student app has no group or announcement page yet).
+
 ## 2026-11-21 — Telegram messaging when the token response omits bot_access
 
 On prod, linking succeeded but `telegram_connections` stayed empty (`messagingConnected: false` in every `auth.telegram.linked` audit). The old rule needed both `telegram:bot_access` in the token response's `scope` and a numeric `id` claim, and logged nothing. Telegram documents no claims for that scope and does not promise to echo it.

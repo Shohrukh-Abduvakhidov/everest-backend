@@ -4,6 +4,7 @@ import { withTransaction } from '../repositories/transaction-repository.js'
 import AppError from '../utils/app-error.js'
 import { normalizePhone } from '../utils/auth-input.js'
 import { normalizeInternalId } from '../utils/internal-id.js'
+import { enqueueAccountEvent } from './notification-service.js'
 
 const accountTransitions = {
    approve: { from: 'pending', to: 'active', event: 'admin.account.approved' },
@@ -320,7 +321,7 @@ async function changeAccountStateService(action, actorValue, targetValue, overri
          await repository.revokeUserRefreshTokens(userId, client)
       }
 
-      await auth.appendAuditEvent(
+      const auditEvent = await auth.appendAuditEvent(
          {
             actorUserId,
             subjectUserId: userId,
@@ -335,6 +336,10 @@ async function changeAccountStateService(action, actorValue, targetValue, overri
          },
          client,
       )
+      const notificationEvent = { approve: 'account.approved', unblock: 'account.unblocked' }[action]
+      if (notificationEvent) {
+         await enqueueAccountEvent(client, { event: notificationEvent, userId, auditId: auditEvent.id })
+      }
 
       return {
          action,

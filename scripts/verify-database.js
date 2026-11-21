@@ -5,16 +5,16 @@ import env from '../src/configs/env.js';
 const { Client } = pg;
 const client = new Client(env.database);
 
-// Catalog after migration 20261116010000000 (41 migrations). Update together with every migration.
+// Catalog after migration 20261121010000000 (42 migrations). Update together with every migration.
 const expected = {
-  tables: 94,
-  columns: 774,
-  foreignKeys: 180,
-  indexes: 350,
+  tables: 95,
+  columns: 781,
+  foreignKeys: 181,
+  indexes: 354,
   functions: 7,
   triggers: 11,
   roles: 4,
-  migrations: 41,
+  migrations: 42,
   identityColumns: 73,
 };
 

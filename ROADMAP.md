@@ -1,9 +1,9 @@
 ---
 project: EVEREST Backend
 roadmap_version: 1
-current_milestone: M13
-current_status: planned
-updated_at: 2026-11-20
+current_milestone: M14
+current_status: in_progress
+updated_at: 2026-11-21
 architecture: docs/architecture.md
 ---
 
@@ -359,7 +359,10 @@ This roadmap orders implementation; it does not replace the [current architectur
 
 ## M14 — Notifications
 
-- **Status:** Planned
+- **Status:** In progress. Plan approved by the owner on 2026-11-21 (D1–D8 and additions in `docs/decisions.md`), in three PRs:
+   1. **PR 1** (open, branch `feat/m14-notifications-queue-inbox`): `worker:jobs` on `background_jobs` (leases, retries, dead letter, outbox), in-app notifications for `test.assigned` (also on joining a group), `group.announcement`, `test.extra_attempts`, `account.approved`, `account.unblocked`, `course.enrolled`, `module.opened`; inbox API `/me/notifications`. Migration `20261121010000000`. `npm test` on a disposable database: 573 passed, 0 failed.
+   2. **PR 2** (planned): Telegram delivery (20/s per bot, 1/s per chat, 429 pause, at most once), settings and quiet hours, blocked bot and unlink cancel pending deliveries.
+   3. **PR 3** (planned): `test.closing_24h`, `test.answers_available`, `test.result_updated`, `attempt.expired`, 180-day retention.
 - **Goal:** Deliver reliable user-controlled notifications.
 - **Dependencies:** M02F, M03, M19.
 - **Deliverables:** In-app inbox, preferences, Telegram, Web Push, campaigns, attempts/retries, invalid-destination handling, and delivery jobs.
@@ -418,7 +421,8 @@ This roadmap orders implementation; it does not replace the [current architectur
 - **Status:** In progress (partial). Two dedicated workers exist and run as separate containers on the server:
    - `worker:attempts`: finalizes expired attempts and mock exams (row locks, idempotent) and, with storage configured, expires abandoned uploads and aborts them in storage (PR #54, compose fix PR #56).
    - `worker:imports`: processes question packages uploaded over HTTP (PR #33).
-- **Missing:** the general PostgreSQL queue on `background_jobs` with leases, retries and dead letters; notification delivery; analytics refresh; a multi-process lease-competition test.
+   - `worker:jobs` (M14 PR 1, open): the general queue on `background_jobs` with leases, retries, dead letter (`failed`) and a two-worker competition test.
+- **Missing:** notification delivery to Telegram (M14 PR 2); analytics refresh.
 - **Goal:** Process durable asynchronous work safely across PM2 processes.
 - **Dependencies:** M01; introduced when the first domain needs it.
 - **Deliverables:** PostgreSQL queue, leases, retries, idempotency, attempt expiry, notification delivery, analytics refresh, and multi-process safety.

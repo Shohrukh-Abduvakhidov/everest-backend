@@ -10,7 +10,8 @@
 # Deploys and rollbacks: scripts/deploy.sh (see docs/deploy.md).
 #
 # Memory budget (host has 3.7 GB shared with another project, which uses about 1 GB with the OS):
-#   db 640m + backend 384m + worker-attempts 192m + worker-imports 384m + frontend 512m + s3 256m = 2.3 GB.
+#   db 640m + backend 384m + worker-attempts 192m + worker-jobs 192m + worker-imports 384m
+#   + frontend 512m + s3 256m = 2.5 GB.
 # Node heaps are capped below each container limit so V8 collects garbage before the cgroup kills it.
 # Building the frontend needs up to 1.5 GB more; deploy.sh builds one image at a time and warns when memory is low.
 
@@ -126,6 +127,20 @@ services:
     environment:
       DB_HOST: db
       S3_ENDPOINT: http://s3:8333
+      NODE_OPTIONS: --max-old-space-size=128
+    mem_limit: 192m
+    cpus: 0.25
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # Runs background_jobs: notification fan-out (M14). Without it notifications stay queued
+  # (nothing is lost; they are written when the worker starts again).
+  worker-jobs:
+    <<: *backend-service
+    command: ["npm", "run", "worker:jobs"]
+    environment:
+      DB_HOST: db
       NODE_OPTIONS: --max-old-space-size=128
     mem_limit: 192m
     cpus: 0.25

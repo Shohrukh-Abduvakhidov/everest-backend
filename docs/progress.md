@@ -1,10 +1,40 @@
 # EVEREST backend progress
 
-Updated: 2026-11-21.
+Updated: 2026-11-21. Current: M14 PR 1 (job queue and in-app notifications) open for review.
 
 ## Current increment
 
 M12 is Done: PR 3 (staff progress views, #64) and the 2026-11-20 follow-ups (#65 time zone cache, #66 `GET /me/staff-capabilities`, #67 cosmetic question text rules) are merged into main. Deployed on the temporary VPS on 2026-11-19: backend up to PR #62 (M12 PR 1 and PR 2, the question text repair applied to 2 rows, refresh resilience), frontend up to PR #47. Not deployed yet: PRs #63 to #67 (no migration, no new env variable). `fix-question-text.js --apply` with the new cosmetic rules has not been run on any database. Next milestone: M13 (group ranking), which waits for the owner to approve the formula.
+
+## 2026-11-21 — M14 PR 1: job queue and in-app notifications (`feat/m14-notifications-queue-inbox`)
+
+- **What:**
+   - Migration `20261121010000000_add-notification-queue`: `notification_settings`, lease and `updated_at` on `notification_deliveries`, inbox indexes.
+   - `worker:jobs` (`src/jobs/job-worker.js`, `scripts/job-worker.js`, `job-repository.js`): SKIP LOCKED claims, renewed lease, backoff, `failed` as dead letter.
+   - `notification-service.js`: enqueue in the domain transaction, fan-out; texts in `utils/notification-texts.js`.
+   - Events written (in-app): `test.assigned` (also for a student added to a group), `group.announcement`, `test.extra_attempts`, `account.approved`, `account.unblocked`, `course.enrolled`, `module.opened`.
+   - Inbox API under `/me/notifications`.
+   - Compose service `worker-jobs` (192 MB), `deploy.sh` restarts it; new env `APP_URL`, `JOB_WORKER_INTERVAL_MS`, `JOB_LEASE_SECONDS`.
+   - Decisions: decisions.md 2026-11-21 (M14).
+- **Tests:**
+   - `tests/integration/job-queue.test.js` (10 subtests): backoff values; dedupe; outbox rollback; two workers on 6 jobs (each once); lease takeover and a late worker rejected; heartbeat; retry then `failed`; permanent error and unsafe code; exhausted lease; deferred job.
+   - `tests/integration/notifications.test.js` (13 subtests):
+      - every event;
+      - language `tg` and time zones;
+      - scheduled enrollment and revoked before the run;
+      - opening time moved;
+      - group join with open, future and revoked assignments, without duplicates;
+      - announcement only on first publication, not to the author;
+      - rollback;
+      - unknown event;
+      - 200 members by one job;
+      - inbox API (cursor, filters, idempotent read, other user's 404, read-all race).
+   - `tests/unit/notification-texts.test.js` (5).
+- **Checked:**
+   - `npm test` (disposable database) exit 0, 573 passed, 0 failed.
+   - `test:migrations` 42/42/41/42.
+   - `verify-database.js` on a disposable migrated database: valid (95 tables, 781 columns, 181 FKs, 354 indexes).
+- **Not done:** Telegram delivery, settings and quiet hours (PR 2); scheduled reminders and retention (PR 3); deploy; the frontend.
 
 ## 2026-11-21 — Telegram messaging connection fix (`fix/telegram-messaging-connection`)
 

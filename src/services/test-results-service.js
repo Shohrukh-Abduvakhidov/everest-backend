@@ -13,6 +13,7 @@ import {
 import { normalizeInternalId } from '../utils/internal-id.js'
 import { parsePagination, parseText, validateBody, validationError } from './course-service.js'
 import { completeTestLessonsService } from './lesson-completion-service.js'
+import { enqueueExtraAttempts } from './notification-service.js'
 import { safeAttempt, safeQuestionBase } from './test-attempt-service.js'
 
 const attemptStatuses = ['in_progress', 'graded', 'expired', 'cancelled']
@@ -359,6 +360,7 @@ async function grantExtraAttemptsService(
          entityId: assignmentId,
          metadata: { testId, grantId: inserted.id, extraAttempts: count },
       }, client)
+      await enqueueExtraAttempts(client, { grantId: inserted.id })
       return readExtraAttempts(repository, assignment, studentId, client)
    })
 }

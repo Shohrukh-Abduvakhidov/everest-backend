@@ -41,6 +41,22 @@ function readBoolean(name, fallback = false) {
   return raw === 'true';
 }
 
+// Optional absolute http(s) origin with an optional path, stored without a trailing slash.
+function readBaseUrl(name) {
+  const raw = readString(name);
+  if (raw === undefined) return null;
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error(`Invalid URL environment variable: ${name}`);
+  }
+  if (!['http:', 'https:'].includes(url.protocol) || url.search || url.hash || url.username) {
+    throw new Error(`Invalid URL environment variable: ${name}`);
+  }
+  return `${url.origin}${url.pathname}`.replace(/\/+$/, '');
+}
+
 function readIntegerList(name, fallback, { min = 1, max = 1000 } = {}) {
   const values = readString(name, fallback).split(',').map((value) => Number(value.trim()));
   if (!values.length || values.some((value) => !Number.isSafeInteger(value) || value < min || value > max)) {
@@ -133,6 +149,11 @@ const env = Object.freeze({
   questionImportUploadTtlHours: readInteger('QUESTION_IMPORT_UPLOAD_TTL_HOURS', 24, { max: 720 }),
   questionImportWorkerIntervalMs: readInteger('QUESTION_IMPORT_WORKER_INTERVAL_MS', 5000),
   attemptSweepIntervalMs: readInteger('ATTEMPT_SWEEP_INTERVAL_MS', 30000),
+  // worker:jobs (background_jobs): idle poll interval and job lease (renewed while a job runs).
+  jobWorkerIntervalMs: readInteger('JOB_WORKER_INTERVAL_MS', 5000, { min: 100, max: 600000 }),
+  jobLeaseSeconds: readInteger('JOB_LEASE_SECONDS', 60, { min: 5, max: 3600 }),
+  // Student app root used to build links in Telegram messages (M14). Change with the domain.
+  appUrl: readBaseUrl('APP_URL'),
   trainer: readTrainerConfig(),
   progressMinIntervalSeconds: readInteger('PROGRESS_MIN_INTERVAL_SECONDS', 10, { max: 60 }),
   offline: Object.freeze({
