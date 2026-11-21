@@ -1,6 +1,6 @@
 # EVEREST backend progress
 
-Updated: 2026-11-21. M14 is Done: PR 1 (#71) and PR 2 (#72) merged and deployed on 2026-11-21; PR 3 open for review, not deployed. Next: M13 (waits for the ranking formula).
+Updated: 2026-11-21. M14 is Done: PR 1 (#71) and PR 2 (#72) merged and deployed on 2026-11-21; PR 3 (#73) open for review, not deployed. Next: M13 (waits for the ranking formula).
 
 ## Current increment
 
