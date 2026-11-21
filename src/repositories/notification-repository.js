@@ -127,6 +127,87 @@ async function findModuleGrantSource(grantId, db = pool) {
    return result.rows[0] || null
 }
 
+// Close-time events (M14 PR 3): the assignment as it is now.
+async function findAssignmentWindowSource(assignmentId, db = pool) {
+   const result = await db.query(
+      `SELECT assignment.id, assignment.status, assignment.closes_at, assignment.group_id,
+          assignment.user_id, test.title AS test_title, test.course_id, test.status AS test_status,
+          test.max_attempts, test.answer_reveal_policy,
+          (assignment.closes_at IS NOT NULL AND assignment.closes_at <= CURRENT_TIMESTAMP) AS is_closed
+       FROM test_assignments AS assignment
+       JOIN tests AS test ON test.id = assignment.test_id
+       WHERE assignment.id = $1`,
+      [normalizeInternalId(String(assignmentId))],
+   )
+   return result.rows[0] || null
+}
+
+// Candidates still to remind: no finished attempt (graded or expired) and attempts left, where
+// the limit is the test's max_attempts plus the extra attempts granted on this assignment and
+// every attempt except a cancelled one counts. maxAttempts null means unlimited.
+async function filterUsersToRemind(assignmentId, maxAttempts, userIds, db = pool) {
+   if (!userIds.length) return []
+   const result = await db.query(
+      `SELECT candidate.id AS user_id
+       FROM unnest($2::bigint[]) AS candidate(id)
+       WHERE NOT EXISTS (
+          SELECT 1 FROM test_attempts AS attempt
+          WHERE attempt.assignment_id = $1 AND attempt.user_id = candidate.id
+            AND attempt.status IN ('graded', 'expired')
+       )
+       AND (
+          $3::integer IS NULL
+          OR (SELECT count(*) FROM test_attempts AS attempt
+              WHERE attempt.assignment_id = $1 AND attempt.user_id = candidate.id
+                AND attempt.status <> 'cancelled')
+             < $3::integer + COALESCE((SELECT sum(grant_record.extra_attempts) FROM test_attempt_grants AS grant_record
+                                       WHERE grant_record.assignment_id = $1 AND grant_record.user_id = candidate.id), 0)
+       )
+       ORDER BY candidate.id`,
+      [normalizeInternalId(String(assignmentId)), userIds.map((userId) => normalizeInternalId(String(userId))), maxAttempts],
+   )
+   return result.rows.map((row) => row.user_id)
+}
+
+async function listFinishedAttemptUserIds(assignmentId, db = pool) {
+   const result = await db.query(
+      `SELECT DISTINCT user_id FROM test_attempts
+       WHERE assignment_id = $1 AND status IN ('graded', 'expired') ORDER BY user_id`,
+      [normalizeInternalId(String(assignmentId))],
+   )
+   return result.rows.map((row) => row.user_id)
+}
+
+async function findAttemptSource(attemptId, db = pool) {
+   const result = await db.query(
+      `SELECT attempt.id, attempt.user_id, attempt.status, test.title AS test_title, test.origin
+       FROM test_attempts AS attempt
+       JOIN tests AS test ON test.id = attempt.test_id
+       WHERE attempt.id = $1`,
+      [normalizeInternalId(String(attemptId))],
+   )
+   return result.rows[0] || null
+}
+
+// ---------------------------------------------------------------- retention
+
+// One batch: notifications older than `days` and their deliveries (RESTRICT foreign key, so
+// deliveries first). Returns how many notifications were deleted.
+async function deleteOldNotifications(days, batchSize, client) {
+   const old = await client.query(
+      `SELECT id FROM notifications
+       WHERE created_at < CURRENT_TIMESTAMP - make_interval(days => $1)
+       ORDER BY id LIMIT $2
+       FOR UPDATE SKIP LOCKED`,
+      [days, batchSize],
+   )
+   const ids = old.rows.map((row) => row.id)
+   if (!ids.length) return 0
+   await client.query('DELETE FROM notification_deliveries WHERE notification_id = ANY($1::bigint[])', [ids])
+   const deleted = await client.query('DELETE FROM notifications WHERE id = ANY($1::bigint[])', [ids])
+   return deleted.rowCount
+}
+
 // ---------------------------------------------------------------- writes
 
 // One statement per batch; UNIQUE (user_id, dedupe_key) makes a repeated event a no-op.
@@ -206,8 +287,13 @@ async function isActiveAccount(userId, db = pool) {
 
 export {
    countUnread,
+   deleteOldNotifications,
+   filterUsersToRemind,
    findAnnouncementSource,
    findAssignmentSource,
+   findAssignmentWindowSource,
+   findAttemptSource,
+   listFinishedAttemptUserIds,
    findAttemptGrantSource,
    findEnrollmentSource,
    findModuleGrantSource,

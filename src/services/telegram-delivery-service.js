@@ -3,7 +3,7 @@ import { retryDelayMs } from '../jobs/job-worker.js'
 import * as notificationRepository from '../repositories/notification-repository.js'
 import * as telegramDeliveryRepository from '../repositories/telegram-delivery-repository.js'
 import { withTransaction } from '../repositories/transaction-repository.js'
-import { renderNotification, telegramMessageText } from '../utils/notification-texts.js'
+import { notificationExpiresAt, renderNotification, telegramMessageText } from '../utils/notification-texts.js'
 import { quietUntil } from '../utils/quiet-hours.js'
 import { TelegramBotProvider } from './auth/telegram-bot-provider.js'
 
@@ -75,7 +75,9 @@ async function sendTelegramBatchService({ limiter, batchSize = 20, leaseSeconds 
    const { config, deliveries, botProvider, now, log } = context
    const stale = await deliveries.markStaleSendingUnknown()
    if (stale) log('telegram deliveries left without an outcome', { count: stale, code: 'LEASE_EXPIRED' })
-   const rows = await deliveries.claimTelegramDeliveries({ limit: batchSize, leaseSeconds })
+   const rows = await deliveries.claimTelegramDeliveries({
+      limit: batchSize, leaseSeconds, botId: config.telegram?.clientId ?? null,
+   })
    // Connections found blocked in this batch: later rows were claimed before the block.
    const blockedInBatch = new Set()
    for (let index = 0; index < rows.length; index += 1) {
@@ -85,7 +87,17 @@ async function sendTelegramBatchService({ limiter, batchSize = 20, leaseSeconds 
          await deliveries.finishDelivery(row.id, 'cancelled', reason)
          continue
       }
-      const quietEnd = quietUntil(now(), { start: row.quiet_start, end: row.quiet_end, timeZone: row.timezone })
+      const current = now()
+      const quietEnd = quietUntil(current, { start: row.quiet_start, end: row.quiet_end, timeZone: row.timezone })
+      const expiresAt = notificationExpiresAt(row.event_code, row.dedupe_key)
+      if (expiresAt && quietEnd && quietEnd >= expiresAt) {
+         await deliveries.finishDelivery(row.id, 'cancelled', 'QUIET_EXPIRED')
+         continue
+      }
+      if (expiresAt && current >= expiresAt) {
+         await deliveries.finishDelivery(row.id, 'cancelled', 'NOTIFICATION_EXPIRED')
+         continue
+      }
       if (quietEnd) {
          await deliveries.rescheduleDelivery(row.id, { nextAttemptAt: quietEnd, errorCode: 'QUIET_HOURS', consumeAttempt: false })
          continue

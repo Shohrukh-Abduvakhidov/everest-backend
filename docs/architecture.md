@@ -364,7 +364,7 @@ The initial permission set exactly preserves account administration: `accounts.p
 | Question bank | banks/imports/errors/questions/options/matching/keys/topics/assets/duplicates | None | Planned (schema + immutability guards) |
 | Tests/attempts | tests/questions/assignments/attempts/attempt questions/answers/revisions | None | Planned (schema + constraints/guards) |
 | Analytics/ranking | activity events; attempt/progress source data | None; no ranking table/formula | Planned/decision required |
-| Notifications | settings/preferences/campaigns/notifications/deliveries | In-app notifications and the `/me/notifications` inbox (M14 PR 1); Telegram delivery, `/me/notification-settings`, quiet hours (M14 PR 2); reminders pending | Partial |
+| Notifications | settings/preferences/campaigns/notifications/deliveries | In-app inbox, Telegram delivery, settings, quiet hours, close-time reminders and 180-day retention (M14); `broadcast_campaigns` and `push_subscriptions` unused until after the launch | Done (M14) |
 | Telegram | identities, OIDC states, connections | Five routes, service/repository/providers | Done |
 | Web Push | `push_subscriptions`, deliveries | None; VAPID key unused | Planned |
 | AI | conversations/messages/policies/budgets/usage/requests/reservations/ledger/analyses | None; AI key unused | Planned (schema only) |

@@ -914,6 +914,12 @@ Own notifications only; the user id comes from the session. Full contract with a
 | `account.approved`, `account.unblocked` | the account | approve, unblock | `/` |
 | `course.enrolled` | the student | grant or re-grant, at `beginsAt`; skipped if revoked or expired by then | `/courses/:courseId` |
 | `module.opened` | the student | module grant or re-grant, at `beginsAt`; skipped if revoked by then | `/courses/:courseId` |
+| `test.closing_24h` | audience members without a finished attempt who still have attempts (extra attempts counted) | `closesAt` − 24 h; not when the assignment was created or moved to close less than 24 h ahead, nor if revoked or the close time changed since | `/courses/:courseId` |
+| `test.answers_available` | everyone with a finished attempt | at `closesAt`, only for `answerRevealPolicy: after_window` | `/courses/:courseId` |
+| `test.result_updated` (in-app only) | the student | a regrade that changed the score | the attempt result page |
+| `attempt.expired` (in-app only) | the student | the timer closed the attempt | the attempt result page (`/tests/attempts/:id/result`, `/nct/attempts/:id/result` or `/nct/exam/:id/result`) |
+
+Notifications older than 180 days are deleted once a day.
 
 Only active accounts receive notifications. The text is rendered in `user_profiles.language_code` (`tg` in the database is `tj` in the API) and the profile time zone (dates as `DD.MM.YYYY HH:mm`).
 

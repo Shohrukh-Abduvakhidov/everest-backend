@@ -133,7 +133,7 @@ const schemas = {
    }),
    Notification: obj({
       id: id(),
-      eventCode: enumOf(['test.assigned', 'group.announcement', 'test.extra_attempts', 'account.approved', 'account.unblocked', 'course.enrolled', 'module.opened', 'telegram.disconnected']),
+      eventCode: enumOf(['test.assigned', 'group.announcement', 'test.extra_attempts', 'account.approved', 'account.unblocked', 'course.enrolled', 'module.opened', 'test.closing_24h', 'test.answers_available', 'test.result_updated', 'attempt.expired', 'telegram.disconnected']),
       title: str({ description: 'Rendered once on creation in the profile language (ru, tj, en)' }),
       body: str(),
       targetPath: nullable(str({ description: 'Path inside the student app, e.g. /courses/12 or /' })),

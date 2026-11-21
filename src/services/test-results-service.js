@@ -13,7 +13,7 @@ import {
 import { normalizeInternalId } from '../utils/internal-id.js'
 import { parsePagination, parseText, validateBody, validationError } from './course-service.js'
 import { completeTestLessonsService } from './lesson-completion-service.js'
-import { enqueueExtraAttempts } from './notification-service.js'
+import { enqueueExtraAttempts, enqueueResultUpdated } from './notification-service.js'
 import { safeAttempt, safeQuestionBase } from './test-attempt-service.js'
 
 const attemptStatuses = ['in_progress', 'graded', 'expired', 'cancelled']
@@ -209,7 +209,7 @@ async function regradeAttemptService(userId, testIdValue, attemptIdValue, body, 
          gradingSnapshot: { overrides: changed },
          idempotencyKey,
       }, client)
-      await auth.appendAuditEvent({
+      const auditEvent = await auth.appendAuditEvent({
          actorUserId: actorId,
          subjectUserId: attempt.user_id,
          code: 'test.attempt_regraded',
@@ -217,6 +217,10 @@ async function regradeAttemptService(userId, testIdValue, attemptIdValue, body, 
          entityId: attemptId,
          metadata: { testId, previousScore: attempt.score, newScore },
       }, client)
+      // The student is told only when the score really changed (in-app only, D1).
+      if (attempt.score === null || toHundredths(attempt.score) !== toHundredths(newScore)) {
+         await enqueueResultUpdated(client, { attemptId, auditId: auditEvent.id })
+      }
    })
    return readDetail(repository, actorId, testId, attemptId)
 }

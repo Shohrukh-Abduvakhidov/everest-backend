@@ -1,5 +1,34 @@
 # Decisions
 
+## 2026-11-21 — M14 PR 3: scheduled notifications, retention, scope of M14
+
+**Scope (owner).** Web Push (`push_subscriptions`, VAPID) and broadcast campaigns (`broadcast_campaigns`) are not part of M14. They are moved to after the launch, and the tables stay in the schema unused. With PR 3, M14 is Done.
+
+Implementation choices made without the owner, within D1–D8:
+
+1. **No migration.** Close-time events are jobs in `background_jobs` with `available_at`.
+2. **`test.closing_24h`.**
+   - Scheduled when an assignment is created, and again when its `closes_at` changes, at `closes_at − 24 h`.
+   - It is scheduled only if that moment is not in the past at scheduling time. So an assignment created (or moved to close) less than 24 h ahead gets no reminder, and one created exactly 24 h ahead gets it at once.
+   - Job key and notification key both end with the close time (`test.closing_24h:<assignmentId>:<closesAt ISO>`). A job whose close time no longer matches writes nothing; the new close time has its own job.
+   - Recipients: the audience as it is now (the user, or active group members), active accounts. Excluded: anyone with a finished attempt (graded or expired), and anyone whose attempts, excluding cancelled ones, reached `max_attempts` plus the extra attempts granted on that assignment. An attempt in progress counts as used, the same rule as starting an attempt.
+   - Not sent for a revoked, closed or unpublished assignment.
+3. **`test.answers_available`.**
+   - A job at `closes_at`, queued only for `answer_reveal_policy = after_window`. The policy is checked again when the job runs.
+   - Recipients: everyone with a finished attempt on the assignment, including a student who has left the group.
+   - Not sent for a revoked assignment, before the close, or for an older close time.
+4. **`test.result_updated`.** Queued in the regrade transaction only when the score changed (compared in hundredths). The key includes the audit id, so each changing regrade is its own notification. Target: the attempt result page.
+5. **`attempt.expired`.** Queued in `finalizeAttempt` whenever the status is `expired`: the sweep, the lazy expiry, or a submit after the deadline. It covers course tests, trainer attempts and mock exams. Target by origin: `/tests/attempts/:id/result`, `/nct/attempts/:id/result`, `/nct/exam/:id/result`.
+6. **`QUIET_EXPIRED` (D5).**
+   - Applies only to `test.closing_24h`, the one event with a deadline. The deadline is the close time, read from the notification key, so no column is needed (`notificationExpiresAt`).
+   - The Telegram delivery is written `cancelled QUIET_EXPIRED` when the end of quiet hours is at or after the close, and checked again at send time. The in-app notification stays.
+   - A due delivery whose close has already passed (for example, the worker was down) is cancelled with `NOTIFICATION_EXPIRED`.
+7. **Retention (D3).**
+   - `worker:jobs` enqueues `notification.retention` at start and every hour, with the job key `notification.retention:<UTC date>`, so it runs once a day.
+   - It deletes notifications older than 180 days, read or unread, and their deliveries first (RESTRICT FK), in batches of 1000, one transaction per batch.
+   - Audit events are not touched.
+8. **The sender claims only deliveries of the configured bot** (`telegram_connections.bot_id = TELEGRAM_CLIENT_ID`). Rows of an old bot are never sent with a new token. This was found by the PR 3 tests.
+
 ## 2026-11-21 — M14 PR 2: Telegram delivery (implementation choices)
 
 Made without the owner, within the approved D1–D8, while the owner was away. Each can be changed in review.

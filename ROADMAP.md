@@ -1,8 +1,8 @@
 ---
 project: EVEREST Backend
 roadmap_version: 1
-current_milestone: M14
-current_status: in_progress
+current_milestone: M13
+current_status: planned
 updated_at: 2026-11-21
 architecture: docs/architecture.md
 ---
@@ -359,16 +359,16 @@ This roadmap orders implementation; it does not replace the [current architectur
 
 ## M14 — Notifications
 
-- **Status:** In progress. Plan approved by the owner on 2026-11-21 (D1–D8 and additions in `docs/decisions.md`), in three PRs:
-   1. **PR 1** (merged in PR #71, not deployed): `worker:jobs` on `background_jobs` (leases, retries, dead letter, outbox), in-app notifications for `test.assigned` (also on joining a group), `group.announcement`, `test.extra_attempts`, `account.approved`, `account.unblocked`, `course.enrolled`, `module.opened`; inbox API `/me/notifications`. Migration `20261121010000000`. `npm test` on a disposable database: 573 passed, 0 failed.
-   2. **PR 2** (open, branch `feat/m14-telegram-delivery`): Telegram delivery (20/s per bot, 1/s per chat, 429 pause, at most once), settings and quiet hours, blocked bot and unlink cancel pending deliveries. No migration. `npm test` on a disposable database: 592 passed, 0 failed.
-   3. **PR 3** (planned): `test.closing_24h`, `test.answers_available`, `test.result_updated`, `attempt.expired`, 180-day retention.
+- **Status:** Done (owner's decision of 2026-11-21; PR 3 is open for review). Plan approved by the owner on 2026-11-21 (D1–D8 and additions in `docs/decisions.md`), in three PRs:
+   1. **PR 1** (merged in PR #71, deployed 2026-11-21): `worker:jobs` on `background_jobs` (leases, retries, dead letter, outbox), in-app notifications for `test.assigned` (also on joining a group), `group.announcement`, `test.extra_attempts`, `account.approved`, `account.unblocked`, `course.enrolled`, `module.opened`; inbox API `/me/notifications`. Migration `20261121010000000`. `npm test` on a disposable database: 573 passed, 0 failed.
+   2. **PR 2** (merged in PR #72, deployed 2026-11-21): Telegram delivery (20/s per bot, 1/s per chat, 429 pause, at most once), settings and quiet hours, blocked bot and unlink cancel pending deliveries. No migration. `npm test` on a disposable database: 592 passed, 0 failed.
+   3. **PR 3** (open, branch `feat/m14-scheduled-notifications`): `test.closing_24h`, `test.answers_available` (after_window), `test.result_updated` and `attempt.expired` (in-app only), `QUIET_EXPIRED`, daily 180-day retention; the sender only claims deliveries of the configured bot. No migration. `npm test` on a disposable database: 603 passed, 0 failed.
 - **Goal:** Deliver reliable user-controlled notifications.
 - **Dependencies:** M02F, M03, M19.
-- **Deliverables:** In-app inbox, preferences, Telegram, Web Push, campaigns, attempts/retries, invalid-destination handling, and delivery jobs.
+- **Deliverables:** In-app inbox; per-event Telegram preferences and quiet hours; Telegram delivery with rate limits, retries, "at most once" and blocked-bot handling; scheduled reminders; delivery jobs on `background_jobs`; retention.
 - **Verification:** Preference, channel, retry/idempotency, blocked destination, authorization, and worker tests.
 - **Documentation updates:** API, provider decisions, architecture, progress, roadmap.
-- **Exclusions:** Treating Telegram permission as Web Push permission.
+- **Exclusions:** Web Push (`push_subscriptions`) and broadcast campaigns (`broadcast_campaigns`) are moved to after the launch (decisions.md 2026-11-21, M14 PR 3); the tables stay unused. Treating Telegram permission as Web Push permission.
 
 ## M15 — AI assistant
 
