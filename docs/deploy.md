@@ -39,7 +39,7 @@ compose project "everest": db · backend · worker-attempts · worker-jobs · wo
 |---|---|---|
 | `backend` | `node src/server.js` | Health `/api/v1/health`, readiness `/api/v1/ready` |
 | `worker-attempts` | `npm run worker:attempts` | **Required.** Finalizes attempts whose time expired |
-| `worker-jobs` | `npm run worker:jobs` | **Required for notifications.** Runs `background_jobs` (notification fan-out). 192 MB limit, heap 128 MB, 0.25 CPU. If it is stopped, jobs wait in the table and run when it starts again |
+| `worker-jobs` | `npm run worker:jobs` | **Required for notifications.** Runs `background_jobs` (notification fan-out) and, when `TELEGRAM_CLIENT_ID` and `TELEGRAM_BOT_TOKEN` are set, the Telegram sender (20 messages/s, 1/s per chat). 192 MB limit, heap 128 MB, 0.25 CPU. **Run exactly one replica**: the Telegram rate limit lives in the process. If it is stopped, jobs and messages wait in the database and go out when it starts again. The start line logs `telegramSender: true/false` and `appUrl: set/missing` |
 | `worker-imports` | `npm run worker:imports` | Processes admin-uploaded question packages (`/admin/question-imports`). Cheap when idle; stop it if web imports are not used |
 | `s3` | `weed server -s3` | Pinned image tag; data in volume `everest_s3-data` |
 | `migrate` (ops) | `npm run migrate:up` | Run before a new backend version starts |
@@ -129,7 +129,7 @@ Backend variables are validated in `src/configs/env.js`; the full list with defa
 | `APP_URL_STUDENT` | Frontend build time: absolute student URL used in links |
 | `APP_URL_MARKETING` | Frontend build time: landing URL used in links (the app URL while there is no landing) |
 | `TELEGRAM_*` | Telegram login; empty keeps it disabled |
-| `APP_URL` | Backend: student app root used for links in Telegram notifications (`https://app.<host>`, no trailing slash). Validated at start: an invalid value stops the backend and the workers |
+| `APP_URL` | Backend: student app root used for links in Telegram notifications (`https://app.<host>`, no trailing slash). Validated at start: an invalid value stops the backend and the workers. Without it Telegram messages are sent without a link |
 | `JOB_WORKER_INTERVAL_MS`, `JOB_LEASE_SECONDS` | `worker:jobs` idle poll (5000) and job lease (60 s, renewed while a job runs) |
 
 `API_ORIGIN` for the frontend is fixed to `http://backend:4100` in compose and does not depend on the host.

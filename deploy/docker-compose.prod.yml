@@ -134,8 +134,9 @@ services:
       db:
         condition: service_healthy
 
-  # Runs background_jobs: notification fan-out (M14). Without it notifications stay queued
-  # (nothing is lost; they are written when the worker starts again).
+  # Runs background_jobs (notification fan-out) and the Telegram sender (M14). One replica only:
+  # the Telegram rate limit (20/s, 1/s per chat) lives in this process. Without it notifications
+  # stay queued (nothing is lost; they go out when the worker starts again).
   worker-jobs:
     <<: *backend-service
     command: ["npm", "run", "worker:jobs"]

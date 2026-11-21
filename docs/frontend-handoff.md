@@ -529,7 +529,8 @@ Session-bound licenses (POST without `deviceId`) still work as before (no key, `
 - **Pagination**: { limit: integer, offset: integer, hasMore: boolean, total?: integer }
 - **PendingUser**: { id?: Id, status?: string, firstName?: string?, lastName?: string?, phone?: string?, createdAt?: string, onboardingCompletedAt?: string? }
 - **PreviewModule**: { id?: Id, title?: string, description?: string?, position?: integer, status?: string, lessonsCount?: integer, testsCount?: integer }
-- **Notification**: { id: Id, eventCode: test.assigned/group.announcement/test.extra_attempts/account.approved/account.unblocked/course.enrolled/module.opened, title: string, body: string, targetPath: string?, createdAt: string, readAt: string? }
+- **NotificationSettings**: { telegramEnabled: boolean, quietHours: { start: string, end: string }?, timeZone: string, messagingConnected: boolean, events: { [eventCode]: { telegram: boolean } } }
+- **Notification**: { id: Id, eventCode: test.assigned/group.announcement/test.extra_attempts/account.approved/account.unblocked/course.enrolled/module.opened/telegram.disconnected, title: string, body: string, targetPath: string?, createdAt: string, readAt: string? }
 - **Profile**: { id?: Id, firstName?: string?, lastName?: string?, displayName?: string?, phone?: string?, telegramLinked?: boolean, messagingConnected?: boolean, avatarAssetId?: Id or null, status?: string, roles?: string[], preferredLanguage?: ru/tj/en, timezone?: string?, onboarding?: Onboarding, createdAt?: string, updatedAt?: string }
 - **Progress**: { status?: string, playbackSeconds?: integer, watchedSeconds?: integer, completedAt?: string?, revision?: integer, updatedAt?: string }
 - **QuestionBank**: { id?: Id, code?: string, title?: string, subjectId?: Id, ownerId?: Id, visibility?: private/staff, sourceMetadata?: SourceMetadata, questionCount?: integer, permissions?: { manage?: boolean }, createdAt?: string }
@@ -1216,9 +1217,42 @@ POST routes need CSRF (`X-CSRF-Token` + `Origin`) with the cookie session, like 
 
 - `title` and `body` are ready to show: rendered once in the user's profile language (`ru`, `tj`, `en`) and time zone when the notification is created. Changing the language later does not rewrite old notifications.
 - `targetPath` is a path inside the student app (`/courses/:courseId` or `/`). Open it on click; it can be `null`.
-- `eventCode`: `test.assigned`, `group.announcement`, `test.extra_attempts`, `account.approved`, `account.unblocked`, `course.enrolled`, `module.opened`. Use it for an icon; do not parse `body`.
+- `eventCode`: `test.assigned`, `group.announcement`, `test.extra_attempts`, `account.approved`, `account.unblocked`, `course.enrolled`, `module.opened`, `telegram.disconnected`. Use it for an icon; do not parse `body`.
+- `telegram.disconnected` (target `/profile`) means the bot can no longer write to the user (they blocked it). The profile then shows `messagingConnected: false`; linking Telegram again reconnects.
 - Errors: `400 VALIDATION_ERROR` (bad `limit`, `before`, `unread`, `upToId`, unknown query field), `400 INVALID_NOTIFICATION_ID`, `401`, `403 ACCOUNT_NOT_ACTIVE`, `404 NOTIFICATION_NOT_FOUND`.
-- Telegram copies and notification settings come in M14 PR 2; nothing changes in these routes.
+
+### Notification settings (M14 PR 2, 2026-11-21)
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/me/notification-settings` | Current settings (defaults when nothing was saved) |
+| PUT | `/me/notification-settings` | Partial update; returns the full settings. CSRF with the cookie session |
+
+```json
+{
+  "data": {
+    "telegramEnabled": true,
+    "quietHours": { "start": "22:00", "end": "08:00" },
+    "timeZone": "Asia/Dushanbe",
+    "messagingConnected": true,
+    "events": {
+      "test.assigned": { "telegram": true },
+      "group.announcement": { "telegram": true },
+      "test.extra_attempts": { "telegram": true },
+      "account.approved": { "telegram": true },
+      "account.unblocked": { "telegram": true },
+      "course.enrolled": { "telegram": true },
+      "module.opened": { "telegram": false }
+    }
+  }
+}
+```
+
+- In-app notifications are always on; only Telegram can be switched, as a whole (`telegramEnabled`) or per event (`events`). Show the event list from the GET response; new events may appear.
+- `quietHours`: `HH:MM` in `timeZone` (the profile time zone); `end` earlier than `start` crosses midnight; `null` turns them off. During quiet hours Telegram messages wait; the in-app notification appears at once.
+- `messagingConnected: false`: Telegram copies are not sent. Offer to link Telegram (`POST /auth/telegram/link`). The switches are still saved.
+- PUT body examples: `{ "telegramEnabled": false }`, `{ "quietHours": null }`, `{ "quietHours": { "start": "23:00", "end": "07:00" } }`, `{ "events": { "group.announcement": { "telegram": false } } }`. Unknown fields, an event that is not listed, `start` equal to `end` or a non-`HH:MM` time → `400 VALIDATION_ERROR`.
+- The Telegram message is plain text: title, body and a link into the student app.
 
 ### Admin: tests (M10)
 

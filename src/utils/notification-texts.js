@@ -65,9 +65,22 @@ const templates = {
          en: (p) => `Module “${p.module}” of “${p.course}” is now open to you.`,
       },
    },
+   'telegram.disconnected': {
+      telegram: false,
+      title: { ru: 'Telegram отключён', tg: 'Telegram ҷудо шуд', en: 'Telegram disconnected' },
+      body: {
+         ru: () => 'Бот не может писать вам в Telegram. Подключите его снова в профиле.',
+         tg: () => 'Бот ба шумо дар Telegram навишта наметавонад. Онро дар профил дубора пайваст кунед.',
+         en: () => "The bot can't message you on Telegram. Reconnect it in your profile.",
+      },
+   },
 }
 
 const notificationEventCodes = Object.freeze(Object.keys(templates))
+// Events that may also go to Telegram (D1); the others are in-app only.
+const telegramEventCodes = Object.freeze(
+   notificationEventCodes.filter((code) => templates[code].telegram !== false),
+)
 
 function resolveLanguage(languageCode) {
    return languageAliases[languageCode] || defaultLanguage
@@ -113,4 +126,20 @@ function renderNotification(eventCode, params, { languageCode, timeZone } = {}) 
    return { title: template.title[language], body: template.body[language](values) }
 }
 
-export { formatDateTime, notificationEventCodes, renderNotification, resolveLanguage }
+const telegramTextLimit = 4000
+
+// Plain text for Telegram (no parse_mode): title, body and, when APP_URL is set, the link.
+function telegramMessageText({ title, body, targetPath }, appUrl) {
+   const link = appUrl && targetPath && targetPath.startsWith('/') ? `${appUrl}${targetPath}` : null
+   const text = [title, body, link].filter(Boolean).join('\n\n')
+   return text.length > telegramTextLimit ? `${text.slice(0, telegramTextLimit - 1)}…` : text
+}
+
+export {
+   formatDateTime,
+   notificationEventCodes,
+   renderNotification,
+   resolveLanguage,
+   telegramEventCodes,
+   telegramMessageText,
+}

@@ -2,6 +2,8 @@ import express from 'express'
 
 import {
    countUnreadNotificationsController,
+   getNotificationSettingsController,
+   updateNotificationSettingsController,
    listNotificationsController,
    markAllNotificationsReadController,
    markNotificationReadController,
@@ -28,5 +30,7 @@ meRouter.get('/notifications', listNotificationsController)
 meRouter.get('/notifications/unread-count', countUnreadNotificationsController)
 meRouter.post('/notifications/read-all', authenticatedCsrfMiddleware, markAllNotificationsReadController)
 meRouter.post('/notifications/:notificationId/read', authenticatedCsrfMiddleware, markNotificationReadController)
+meRouter.get('/notification-settings', getNotificationSettingsController)
+meRouter.put('/notification-settings', authenticatedCsrfMiddleware, updateNotificationSettingsController)
 
 export default meRouter

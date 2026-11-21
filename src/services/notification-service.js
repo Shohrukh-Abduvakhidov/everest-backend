@@ -1,9 +1,12 @@
+import env from '../configs/env.js'
 import * as jobRepository from '../repositories/job-repository.js'
 import * as notificationRepository from '../repositories/notification-repository.js'
+import * as telegramDeliveryRepository from '../repositories/telegram-delivery-repository.js'
 import { withTransaction } from '../repositories/transaction-repository.js'
 import AppError from '../utils/app-error.js'
 import { normalizeInternalId } from '../utils/internal-id.js'
-import { renderNotification } from '../utils/notification-texts.js'
+import { renderNotification, telegramEventCodes } from '../utils/notification-texts.js'
+import { quietUntil } from '../utils/quiet-hours.js'
 
 // M14 (decisions.md 2026-11-21). Domain services call enqueue* inside their own transaction, so
 // a rolled-back change leaves no job (outbox). worker:jobs runs notification.fanout later: it
@@ -16,10 +19,40 @@ const insertBatchSize = 500
 
 function dependencies(overrides = {}) {
    return {
+      config: overrides.config || env,
       repository: overrides.repository || notificationRepository,
+      deliveries: overrides.deliveries || telegramDeliveryRepository,
       jobs: overrides.jobs || jobRepository,
       transaction: overrides.transaction || withTransaction,
+      now: overrides.now || (() => new Date()),
    }
+}
+
+// Telegram copies need a configured bot; without one nothing is queued for Telegram.
+function telegramBotId(config) {
+   const telegram = config.telegram || {}
+   return telegram.clientId && telegram.botToken ? telegram.clientId : null
+}
+
+// One pending delivery per new notification whose recipient has Telegram on, the event on and an
+// active connection. Inside quiet hours the delivery waits until they end (D5).
+async function queueTelegramCopies(entry, inserted, context, client) {
+   const { config, deliveries, now } = context
+   const botId = telegramBotId(config)
+   if (!botId || !inserted.length || !telegramEventCodes.includes(entry.eventCode)) return 0
+   const notificationByUser = new Map(inserted.map((row) => [String(row.user_id), row.id]))
+   const targets = await deliveries.findTelegramTargets([...notificationByUser.keys()], botId, entry.eventCode, client)
+   const current = now()
+   const rows = targets
+      .filter((target) => target.telegram_enabled && target.event_enabled)
+      .map((target) => ({
+         notificationId: notificationByUser.get(String(target.user_id)),
+         connectionId: target.connection_id,
+         nextAttemptAt: quietUntil(current, {
+            start: target.quiet_start, end: target.quiet_end, timeZone: target.timezone,
+         }) || current,
+      }))
+   return deliveries.insertTelegramDeliveries(rows, client)
 }
 
 function id(value) {
@@ -216,12 +249,14 @@ function permanentError(code) {
 
 // notification.fanout handler. Idempotent: running it again writes nothing new.
 async function runNotificationFanoutService(payload, overrides) {
-   const { repository, transaction } = dependencies(overrides)
+   const context = dependencies(overrides)
+   const { repository, transaction } = context
    const resolver = resolvers[payload?.event]
    if (!resolver) throw permanentError('NOTIFICATION_EVENT_UNKNOWN')
    return transaction(async (client) => {
       const entries = await resolver(repository, payload, client)
       let created = 0
+      let telegram = 0
       for (const entry of entries) {
          const recipients = await repository.findRecipients([...new Set(entry.userIds.map(String))], client)
          for (let start = 0; start < recipients.length; start += insertBatchSize) {
@@ -235,16 +270,22 @@ async function runNotificationFanoutService(payload, overrides) {
                   timeZone: recipient.timezone,
                }),
             }))
-            created += await repository.insertNotifications(rows, client)
+            const inserted = await repository.insertNotifications(rows, client)
+            created += inserted.length
+            telegram += await queueTelegramCopies(entry, inserted, context, client)
          }
       }
-      return { created }
+      return { created, telegram }
    })
 }
 
-const notificationJobHandlers = Object.freeze({
-   [fanoutJobType]: (payload) => runNotificationFanoutService(payload),
-})
+function createNotificationJobHandlers(overrides) {
+   return Object.freeze({
+      [fanoutJobType]: (payload) => runNotificationFanoutService(payload, overrides),
+   })
+}
+
+const notificationJobHandlers = createNotificationJobHandlers()
 
 // ---------------------------------------------------------------- inbox
 
@@ -349,6 +390,7 @@ async function markAllNotificationsReadService(userId, body, overrides) {
 }
 
 export {
+   createNotificationJobHandlers,
    countUnreadNotificationsService,
    enqueueAccountEvent,
    enqueueCourseEnrolled,

@@ -917,6 +917,21 @@ Own notifications only; the user id comes from the session. Full contract with a
 
 Only active accounts receive notifications. The text is rendered in `user_profiles.language_code` (`tg` in the database is `tj` in the API) and the profile time zone (dates as `DD.MM.YYYY HH:mm`).
 
+`telegram.disconnected` (in-app only, target `/profile`) is written once when the bot finds it can no longer message the user (403, blocked, chat not found).
+
+### Telegram copies and settings (M14 PR 2)
+
+- Every event above except `telegram.disconnected` also goes to Telegram when:
+   - the user has linked Telegram and the connection is active (`messagingConnected`);
+   - the master switch and the event switch are on.
+- The message is plain text: title, body and the link `APP_URL + targetPath`. Rules are in decisions.md (2026-11-21, M14 PR 2).
+- `GET /api/v1/me/notification-settings` → `{ telegramEnabled, quietHours: { start, end } | null, timeZone, messagingConnected, events: { "<eventCode>": { telegram } } }`.
+   - Defaults without saved settings: Telegram on for every event, quiet hours `22:00`–`08:00` in the profile time zone.
+- `PUT /api/v1/me/notification-settings`: partial body with any of `telegramEnabled`, `quietHours` (`{ start, end }` as `HH:MM`, different; `null` = off) and `events`. Returns the full settings.
+   - Errors: `400 VALIDATION_ERROR`, `401`, `403 ACCOUNT_NOT_ACTIVE` and CSRF errors for cookie requests.
+   - Switches apply to messages already queued.
+- Quiet hours delay a Telegram message to the end of the window; the in-app notification appears at once.
+
 ## NCT trainer
 
 Full contract with examples and error table: `docs/frontend-handoff.md` → "NCT trainer". Summary:
