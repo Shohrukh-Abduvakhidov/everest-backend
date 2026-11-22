@@ -57,9 +57,18 @@ function difficultiesOf(level) {
    return values
 }
 
+const modes = ['standard', 'mistakes']
+const countAll = 'all'
+const maximumTimeLimitMinutes = 1440
+const maximumTopicCodes = 50
+
 function trainerOptions(config) {
    return {
+      modes,
       questionCounts: config.questionCounts,
+      countAll,
+      maxQuestions: config.maxQuestions,
+      timeLimitMinutes: { min: 1, max: maximumTimeLimitMinutes },
       difficulties: [...config.levels.map((level) => level.name), 'mixed'],
       levels: config.levels.map((level) => ({ name: level.name, minDifficulty: level.min, maxDifficulty: level.max })),
       mixedShares: Object.fromEntries(config.levels.map((level, index) => [level.name, config.mixedShares[index]])),
@@ -68,6 +77,52 @@ function trainerOptions(config) {
 
 // ------------------------------------------------------------------ catalog
 
+// Rows of (language_code, difficulty, total) added up per language: the total and the count of
+// each level. Questions without a difficulty (or outside every level) count only for mixed.
+function countsByLanguage(config, rows) {
+   const byLanguage = new Map()
+   for (const row of rows) {
+      const entry = byLanguage.get(row.language_code) ?? {
+         language: row.language_code,
+         total: 0,
+         difficulties: Object.fromEntries(config.levels.map((level) => [level.name, 0])),
+      }
+      const level = levelOf(config, row.difficulty)
+      entry.total += row.total
+      if (level) entry.difficulties[level] += row.total
+      byLanguage.set(row.language_code, entry)
+   }
+   return [...byLanguage.values()]
+}
+
+// Rows of one entity per (language, difficulty) folded into one entry per entity, in row order.
+function groupRows(rows, keyOf) {
+   const groups = new Map()
+   for (const row of rows) {
+      const key = keyOf(row)
+      groups.set(key, [...(groups.get(key) ?? []), row])
+   }
+   return [...groups.values()]
+}
+
+function sumTotals(rows) {
+   return rows.reduce((sum, row) => sum + row.total, 0)
+}
+
+// Open mistakes per subject, section and topic (see listMistakeCounts); missing keys mean 0.
+function mistakeIndex(rows) {
+   const index = { subjects: new Map(), sections: new Map(), topics: new Map() }
+   for (const row of rows) {
+      const subjectId = String(row.subject_id)
+      if (row.level === 3) index.subjects.set(subjectId, row.total)
+      else if (row.level === 1 && row.section_code !== null) index.sections.set(`${subjectId}:${row.section_code}`, row.total)
+      else if (row.level === 0 && row.topic_code !== null) {
+         index.topics.set(`${subjectId}:${row.topic_code}`, { total: row.total, sectionCode: row.section_code })
+      }
+   }
+   return index
+}
+
 async function getTrainerCatalogService(userId, overrides) {
    const deps = dependencies(overrides)
    const actorId = parseUserId(userId)
@@ -75,44 +130,41 @@ async function getTrainerCatalogService(userId, overrides) {
    const { config } = deps
    const counts = await deps.repository.listTrainableCounts(config.bankCodePrefix)
    const subjectIds = [...new Set(counts.map((row) => row.subject_id))]
-   const [subjects, sections, topics] = await Promise.all([
+   const [subjects, sections, topics, mistakeRows] = await Promise.all([
       deps.repository.listSubjects(subjectIds),
       deps.repository.listTrainableSections(config.bankCodePrefix),
       deps.repository.listTrainableTopics(config.bankCodePrefix),
+      deps.repository.listMistakeCounts(actorId, config.bankCodePrefix),
    ])
+   const mistakes = mistakeIndex(mistakeRows)
    return {
       options: trainerOptions(config),
       subjects: subjects.map((subject) => {
-         const byLanguage = new Map()
-         for (const row of counts.filter((entry) => entry.subject_id === subject.id)) {
-            const entry = byLanguage.get(row.language_code) ?? {
-               language: row.language_code,
-               total: 0,
-               difficulties: Object.fromEntries(config.levels.map((level) => [level.name, 0])),
-            }
-            const level = levelOf(config, row.difficulty)
-            // Questions without a difficulty (or outside every level) count only for mixed.
-            entry.total += row.total
-            if (level) entry.difficulties[level] += row.total
-            byLanguage.set(row.language_code, entry)
-         }
+         const subjectId = String(subject.id)
          return {
             id: subject.id,
             code: subject.code,
             color: subject.color,
             primaryLanguage: subject.primary_language,
             titles: subject.titles,
-            languages: [...byLanguage.values()],
-            sections: sections
-               .filter((section) => section.subject_id === subject.id)
-               .map((section) => ({ code: section.code, titles: section.titles, total: section.total })),
-            topics: topics
-               .filter((topic) => topic.subject_id === subject.id)
-               .map((topic) => ({
-                  code: topic.code,
-                  sectionCode: topic.section_code,
-                  titles: topic.titles,
-                  total: topic.total,
+            languages: countsByLanguage(config, counts.filter((entry) => entry.subject_id === subject.id)),
+            mistakes: mistakes.subjects.get(subjectId) ?? 0,
+            sections: groupRows(sections.filter((row) => row.subject_id === subject.id), (row) => row.code)
+               .map((rows) => ({
+                  code: rows[0].code,
+                  titles: rows[0].titles,
+                  total: sumTotals(rows),
+                  languages: countsByLanguage(config, rows),
+                  mistakes: mistakes.sections.get(`${subjectId}:${rows[0].code}`) ?? 0,
+               })),
+            topics: groupRows(topics.filter((row) => row.subject_id === subject.id), (row) => row.code)
+               .map((rows) => ({
+                  code: rows[0].code,
+                  sectionCode: rows[0].section_code,
+                  titles: rows[0].titles,
+                  total: sumTotals(rows),
+                  languages: countsByLanguage(config, rows),
+                  mistakes: mistakes.topics.get(`${subjectId}:${rows[0].code}`)?.total ?? 0,
                })),
          }
       }),
@@ -139,29 +191,130 @@ function parseOptionalCode(value, field) {
    return value
 }
 
-function parseCreateBody(body, config) {
-   validateBody(body, ['subject', 'difficulty', 'count', 'language', 'sectionCode', 'topicCode', 'idempotencyKey'])
+// topicCode (one topic, kept for older clients) or topicCodes (several); sorted and unique, so the
+// same choice in another order is the same request.
+function parseTopicCodes(body) {
+   const hasList = body.topicCodes !== undefined && body.topicCodes !== null
+   if (hasList && body.topicCode !== undefined && body.topicCode !== null) {
+      throw validationError('topicCodes', 'Send topicCode or topicCodes, not both')
+   }
+   if (!hasList) {
+      const single = parseOptionalCode(body.topicCode, 'topicCode')
+      return single ? [single] : []
+   }
+   if (!Array.isArray(body.topicCodes) || body.topicCodes.length === 0 || body.topicCodes.length > maximumTopicCodes) {
+      throw validationError('topicCodes', `topicCodes must be a list of 1-${maximumTopicCodes} topic codes`)
+   }
+   for (const code of body.topicCodes) {
+      if (typeof code !== 'string' || !codePattern.test(code)) throw validationError('topicCodes')
+   }
+   return [...new Set(body.topicCodes)].sort()
+}
+
+// What both the create body and the availability query select: mode, subject, level, language,
+// section and topics. In mistakes mode the level is optional (mixed = any).
+function parseSelection(body, config) {
+   const mode = body.mode ?? 'standard'
+   if (!modes.includes(mode)) throw validationError('mode', `mode must be one of ${modes.join(', ')}`)
    const difficulties = trainerOptions(config).difficulties
-   if (!difficulties.includes(body.difficulty)) {
+   const difficulty = body.difficulty ?? (mode === 'mistakes' ? 'mixed' : undefined)
+   if (!difficulties.includes(difficulty)) {
       throw validationError('difficulty', `difficulty must be one of ${difficulties.join(', ')}`)
    }
-   if (!config.questionCounts.includes(body.count)) {
-      throw validationError('count', `count must be one of ${config.questionCounts.join(', ')}`)
+   if (body.language !== undefined && body.language !== null && !languages.includes(body.language)) {
+      throw validationError('language')
    }
-   if (body.language !== undefined && !languages.includes(body.language)) throw validationError('language')
+   return {
+      mode,
+      subject: parseSubject(body.subject),
+      difficulty,
+      language: body.language ?? null,
+      sectionCode: parseOptionalCode(body.sectionCode, 'sectionCode'),
+      topicCodes: parseTopicCodes(body),
+   }
+}
+
+function parseCount(value, config) {
+   if (value === countAll || config.questionCounts.includes(value)) return value
+   throw validationError('count', `count must be one of ${[...config.questionCounts, countAll].join(', ')}`)
+}
+
+function parseTimeLimit(value) {
+   if (value === undefined || value === null) return null
+   if (!Number.isSafeInteger(value) || value < 1 || value > maximumTimeLimitMinutes) {
+      throw validationError('timeLimitMinutes', `timeLimitMinutes must be a whole number from 1 to ${maximumTimeLimitMinutes}`)
+   }
+   return value
+}
+
+function parseCreateBody(body, config) {
+   validateBody(body, [
+      'mode', 'subject', 'difficulty', 'count', 'language', 'sectionCode', 'topicCode', 'topicCodes',
+      'timeLimitMinutes', 'idempotencyKey',
+   ])
+   const selection = parseSelection(body, config)
    if (body.idempotencyKey !== undefined
       && (typeof body.idempotencyKey !== 'string' || !idempotencyKeyPattern.test(body.idempotencyKey))) {
       throw validationError('idempotencyKey', 'idempotencyKey must be 8-100 characters of A-Z a-z 0-9 . _ : -')
    }
    return {
-      subject: parseSubject(body.subject),
-      difficulty: body.difficulty,
-      count: body.count,
-      language: body.language ?? null,
-      sectionCode: parseOptionalCode(body.sectionCode, 'sectionCode'),
-      topicCode: parseOptionalCode(body.topicCode, 'topicCode'),
+      ...selection,
+      count: parseCount(body.count, config),
+      timeLimitMinutes: parseTimeLimit(body.timeLimitMinutes),
       idempotencyKey: body.idempotencyKey ?? null,
    }
+}
+
+// Query strings: topicCodes may come as a comma-separated value or a repeated parameter.
+function parseAvailabilityQuery(query, config) {
+   validateBody(query, ['mode', 'subject', 'difficulty', 'language', 'sectionCode', 'topicCode', 'topicCodes'])
+   const list = query.topicCodes
+   const topicCodes = list === undefined ? undefined : (Array.isArray(list) ? list : String(list).split(','))
+   return parseSelection({ ...query, topicCodes }, config)
+}
+
+// Candidate filters of a request (see candidateFilter in the repository). A standard training
+// draws from one language, the subject's primary one by default; mistakes come from any language
+// unless one is asked for.
+function candidateFilters(deps, actorId, subject, request) {
+   const level = deps.config.levels.find((entry) => entry.name === request.difficulty)
+   return {
+      subjectId: subject.id,
+      language: request.mode === 'mistakes' ? request.language : (request.language ?? subject.primary_language),
+      sectionCode: request.sectionCode,
+      topicCodes: request.topicCodes,
+      mistakesOf: request.mode === 'mistakes' ? actorId : null,
+      difficulties: level ? difficultiesOf(level) : null,
+   }
+}
+
+function notEnough(available) {
+   return new AppError(409, 'TRAINER_NOT_ENOUGH_QUESTIONS', 'Not enough questions for this request', [
+      { field: 'available', message: String(available) },
+   ])
+}
+
+// How many questions the training gets, or the refusal. A standard numeric count is checked after
+// picking (the 30/40/30 split can fall short). count "all" is for small choices only: every
+// available question when there are fewer than the smallest count. A mistakes training takes
+// what there is up to the count ("all" = up to maxQuestions); it needs at least one mistake.
+async function plannedCount(deps, client, request, filters) {
+   const { config } = deps
+   if (request.mode === 'standard' && request.count !== countAll) return request.count
+   const available = await deps.repository.countCandidates(config.bankCodePrefix, filters, client)
+   if (request.mode === 'mistakes') {
+      if (available === 0) {
+         throw new AppError(409, 'TRAINER_NO_MISTAKES', 'There are no mistakes to repeat for this choice')
+      }
+      return Math.min(available, request.count === countAll ? config.maxQuestions : request.count)
+   }
+   if (available === 0) throw notEnough(0)
+   if (available >= Math.min(...config.questionCounts)) {
+      throw new AppError(409, 'TRAINER_COUNT_ALL_NOT_ALLOWED', 'count "all" is only for choices smaller than the smallest count', [
+         { field: 'available', message: String(available) },
+      ])
+   }
+   return available
 }
 
 // Largest-remainder split of count by percentage shares.
@@ -180,9 +333,10 @@ function splitByShares(count, shares) {
    return parts
 }
 
-// Picks count questions. Mixed takes each level's share first and fills any shortfall from
-// every trainable question of the request, so a thin level does not block the whole test.
-async function pickQuestions(deps, client, actorId, request, filters) {
+// Picks target questions. A standard mixed training takes each level's share first and fills any
+// shortfall from every trainable question of the request, so a thin level does not block the
+// whole test. Mistakes and count "all" take the whole target from the filtered set at once.
+async function pickQuestions(deps, client, actorId, request, filters, target) {
    const { config } = deps
    const pick = (difficulties, limit, excludeIds) => deps.repository.pickCandidates(
       config.bankCodePrefix,
@@ -190,18 +344,17 @@ async function pickQuestions(deps, client, actorId, request, filters) {
       { userId: actorId, excludeIds, limit },
       client,
    )
-   if (request.difficulty !== 'mixed') {
-      const level = config.levels.find((entry) => entry.name === request.difficulty)
-      return pick(difficultiesOf(level), request.count, [])
+   if (request.difficulty !== 'mixed' || request.mode === 'mistakes' || request.count === countAll) {
+      return pick(filters.difficulties, target, [])
    }
    const picked = []
-   const targets = splitByShares(request.count, config.mixedShares)
+   const targets = splitByShares(target, config.mixedShares)
    for (const [index, level] of config.levels.entries()) {
       if (targets[index] === 0) continue
       picked.push(...await pick(difficultiesOf(level), targets[index], picked.map((row) => row.id)))
    }
-   if (picked.length < request.count) {
-      picked.push(...await pick(null, request.count - picked.length, picked.map((row) => row.id)))
+   if (picked.length < target) {
+      picked.push(...await pick(null, target - picked.length, picked.map((row) => row.id)))
    }
    return picked
 }
@@ -218,13 +371,35 @@ function shuffled(values) {
    return result
 }
 
+// Trainings stored before topicCodes existed keep only topicCode.
+function storedTopicCodes(stored) {
+   if (Array.isArray(stored.topicCodes)) return stored.topicCodes
+   return stored.topicCode ? [stored.topicCode] : []
+}
+
 function sameRequest(stored, request, subjectId) {
    return stored.subjectId === String(subjectId)
+      && (stored.mode ?? 'standard') === request.mode
       && stored.difficulty === request.difficulty
       && stored.count === request.count
       && (request.language === null || stored.language === request.language)
-      && stored.sectionCode === request.sectionCode
-      && stored.topicCode === request.topicCode
+      && (stored.sectionCode ?? null) === request.sectionCode
+      && storedTopicCodes(stored).join(',') === request.topicCodes.join(',')
+      && (stored.timeLimitMinutes ?? null) === request.timeLimitMinutes
+}
+
+// The request part of a training as the history and the overview return it.
+function trainingFilters(filters) {
+   const topicCodes = storedTopicCodes(filters)
+   return {
+      mode: filters.mode ?? 'standard',
+      difficulty: filters.difficulty,
+      language: filters.language ?? null,
+      sectionCode: filters.sectionCode ?? null,
+      topicCode: topicCodes.length === 1 ? topicCodes[0] : null,
+      topicCodes,
+      timeLimitMinutes: filters.timeLimitMinutes ?? null,
+   }
 }
 
 // Answer-sheet cells, chosen by the mock exam's rule: the subject has a cells item in an active
@@ -270,39 +445,35 @@ async function createTrainerAttemptService(userId, body, overrides) {
             { field: 'attemptId', message: String(open.id) },
          ])
       }
-      const filters = {
-         subjectId: subject.id,
-         language: request.language ?? subject.primary_language,
-         sectionCode: request.sectionCode,
-         topicCode: request.topicCode,
-      }
-      const picked = await pickQuestions(deps, client, actorId, request, filters)
-      if (picked.length < request.count) {
-         const level = deps.config.levels.find((entry) => entry.name === request.difficulty)
-         const available = await deps.repository.countCandidates(
-            deps.config.bankCodePrefix,
-            { ...filters, difficulties: level ? difficultiesOf(level) : null },
-            client,
-         )
-         throw new AppError(409, 'TRAINER_NOT_ENOUGH_QUESTIONS', 'Not enough questions for this request', [
-            { field: 'available', message: String(available) },
-         ])
+      const filters = candidateFilters(deps, actorId, subject, request)
+      const target = await plannedCount(deps, client, request, filters)
+      const picked = await pickQuestions(deps, client, actorId, request, filters, target)
+      // Only a standard numeric count must be met in full; the other targets were just counted
+      // in this transaction and may only shrink if questions were withdrawn meanwhile.
+      const exact = request.mode === 'standard' && request.count !== countAll
+      if (exact ? picked.length < target : picked.length === 0) {
+         throw notEnough(await deps.repository.countCandidates(deps.config.bankCodePrefix, filters, client))
       }
       const generationFilters = {
          subjectId: String(subject.id),
          subjectCode: subject.code,
+         mode: request.mode,
          difficulty: request.difficulty,
          count: request.count,
          language: filters.language,
          sectionCode: request.sectionCode,
-         topicCode: request.topicCode,
+         topicCode: request.topicCodes.length === 1 ? request.topicCodes[0] : null,
+         topicCodes: request.topicCodes,
+         timeLimitMinutes: request.timeLimitMinutes,
          ...(request.idempotencyKey ? { idempotencyKey: request.idempotencyKey } : {}),
       }
-      const title = subject.titles?.[filters.language] ?? subject.titles?.[subject.primary_language] ?? subject.code
+      const titleLanguage = filters.language ?? subject.primary_language
+      const title = subject.titles?.[titleLanguage] ?? subject.titles?.[subject.primary_language] ?? subject.code
       const testId = await deps.repository.createTrainerTest({
          title,
          generationFilters,
          createdBy: actorId,
+         durationSeconds: request.timeLimitMinutes === null ? null : request.timeLimitMinutes * 60,
       }, client)
       const questionIds = shuffled(picked).map((row) => String(row.id))
       const cells = await cellsExtensions(deps, subject.code, questionIds, client)
@@ -323,11 +494,46 @@ async function createTrainerAttemptService(userId, body, overrides) {
          code: 'trainer.attempt_created',
          entityType: 'test_attempt',
          entityId: id,
-         metadata: { testId, subjectId: String(subject.id), difficulty: request.difficulty, count: request.count },
+         metadata: {
+            testId,
+            subjectId: String(subject.id),
+            mode: request.mode,
+            difficulty: request.difficulty,
+            count: request.count,
+            questionCount: questionIds.length,
+         },
       }, client)
       return { attemptId: id, resumed: false }
    })
    return { ...await getAttemptService(actorId, attemptId, deps.attempts), resumed }
+}
+
+// ------------------------------------------------------------------ availability
+
+// Exact number of questions one choice can draw right now (the union of several topics included,
+// which catalog counts cannot give), and the counts the create request would accept.
+async function getTrainerAvailabilityService(userId, query = {}, overrides) {
+   const deps = dependencies(overrides)
+   const actorId = parseUserId(userId)
+   const request = parseAvailabilityQuery(query, deps.config)
+   await requireTrainerLearner(deps, actorId)
+   const subject = await deps.repository.findSubject(request.subject)
+   if (!subject) throw new AppError(404, 'SUBJECT_NOT_FOUND', 'Subject was not found')
+   const filters = candidateFilters(deps, actorId, subject, request)
+   const available = await deps.repository.countCandidates(deps.config.bankCodePrefix, filters)
+   const { questionCounts } = deps.config
+   const mistakes = request.mode === 'mistakes'
+   return {
+      mode: request.mode,
+      subjectId: subject.id,
+      language: filters.language,
+      available,
+      // Mistakes take what there is, so every count works once one mistake exists.
+      questionCounts: mistakes
+         ? (available > 0 ? [...questionCounts] : [])
+         : questionCounts.filter((count) => count <= available),
+      allowsAll: mistakes ? available > 0 : available > 0 && available < Math.min(...questionCounts),
+   }
 }
 
 // ------------------------------------------------------------------ history
@@ -360,10 +566,7 @@ function safeHistoryAttempt(row) {
       status: row.status,
       subjectId: filters.subjectId,
       subjectCode: filters.subjectCode,
-      difficulty: filters.difficulty,
-      language: filters.language,
-      sectionCode: filters.sectionCode,
-      topicCode: filters.topicCode,
+      ...trainingFilters(filters),
       questionCount: row.question_count,
       startedAt: iso(row.started_at),
       submittedAt: iso(row.submitted_at),
@@ -470,10 +673,11 @@ async function getTrainerOverviewService(userId, overrides) {
    const actorId = parseUserId(userId)
    await requireTrainerLearner(deps, actorId)
    const { config } = deps
-   const [readiness, topicRows, recentRows] = await Promise.all([
+   const [readiness, topicRows, recentRows, mistakeRows] = await Promise.all([
       computeReadiness(deps, actorId),
       deps.repository.listTopicResults(actorId, config.weakTopicMinAnswers, config.weakTopicsLimit),
       deps.repository.listRecentFinished(actorId, config.recentResultsLimit),
+      deps.repository.listMistakeCounts(actorId, config.bankCodePrefix),
    ])
    const { completedTrainings, subjects } = readiness
    return {
@@ -495,19 +699,37 @@ async function getTrainerOverviewService(userId, overrides) {
          attemptId: row.id,
          subjectId: row.generation_filters.subjectId,
          subjectCode: row.generation_filters.subjectCode,
-         difficulty: row.generation_filters.difficulty,
-         sectionCode: row.generation_filters.sectionCode,
-         topicCode: row.generation_filters.topicCode,
+         ...trainingFilters(row.generation_filters),
          questionCount: row.question_count,
          percent: scorePercent(row.score, row.max_score),
          submittedAt: iso(row.submitted_at),
       })),
+      mistakes: mistakeSummary(mistakeRows),
    }
+}
+
+// Open mistakes for the /nct page: per subject, with its sections and topics. Titles come from
+// the catalog. A question in two topics counts in both topics but once in the subject.
+function mistakeSummary(rows) {
+   const subjects = new Map()
+   for (const row of rows) {
+      const key = String(row.subject_id)
+      const entry = subjects.get(key) ?? { subjectId: row.subject_id, total: 0, sections: [], topics: [] }
+      if (row.level === 3) entry.total = row.total
+      else if (row.level === 1 && row.section_code !== null) entry.sections.push({ code: row.section_code, total: row.total })
+      else if (row.level === 0 && row.topic_code !== null) {
+         entry.topics.push({ code: row.topic_code, sectionCode: row.section_code, total: row.total })
+      }
+      subjects.set(key, entry)
+   }
+   const list = [...subjects.values()].filter((entry) => entry.total > 0)
+   return { total: list.reduce((sum, entry) => sum + entry.total, 0), subjects: list }
 }
 
 export {
    createTrainerAttemptService,
    getReadinessSummaryService,
+   getTrainerAvailabilityService,
    getTrainerOverviewService,
    getTrainerCatalogService,
    listTrainerHistoryService,

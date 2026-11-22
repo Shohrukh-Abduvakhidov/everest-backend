@@ -54,6 +54,7 @@ import './integration/lesson-tests.test.js';
 import './integration/test-attempts.test.js';
 import './integration/question-image-urls.test.js';
 import './integration/nct-trainer.test.js';
+import './integration/trainer-mistakes.test.js';
 import './integration/nct-mock-exam.test.js';
 import './integration/student-home.test.js';
 import './integration/student-analytics.test.js';

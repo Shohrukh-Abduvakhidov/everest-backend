@@ -89,6 +89,7 @@ function readTrainerConfig() {
   return Object.freeze({
     bankCodePrefix: readString('TRAINER_BANK_CODE_PREFIX', 'nct-'),
     levels: Object.freeze(levels),
+    maxQuestions,
     questionCounts: Object.freeze(questionCounts),
     mixedShares: Object.freeze(mixedShares),
     readinessWindow: readInteger('TRAINER_READINESS_WINDOW', 5, { max: 100 }),

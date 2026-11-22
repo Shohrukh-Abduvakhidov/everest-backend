@@ -34,11 +34,14 @@ async function listTrainableSubjectIds(bankCodePrefix, db = pool) {
    return result.rows.map((row) => row.subject_id)
 }
 
+// One row per section, question language and stored difficulty; the service adds them up, so
+// counts per language and level are exact. Sections without trainable questions are absent.
 async function listTrainableSections(bankCodePrefix, db = pool) {
    const result = await db.query(
       `SELECT section.subject_id, section.code,
          (SELECT COALESCE(jsonb_object_agg(language_code, title), '{}')
           FROM section_translations WHERE section_id = section.id) AS titles,
+         question.language_code, question.difficulty,
          count(DISTINCT question.id)::integer AS total
        FROM sections AS section
        JOIN topics AS topic ON topic.section_id = section.id
@@ -48,8 +51,8 @@ async function listTrainableSections(bankCodePrefix, db = pool) {
        JOIN question_answer_keys AS answer_key
           ON answer_key.question_id = question.id AND answer_key.status = 'verified'
        WHERE question.status = 'published' AND starts_with(bank.code, $1)
-       GROUP BY section.id
-       ORDER BY section.subject_id, section.code`,
+       GROUP BY section.id, question.language_code, question.difficulty
+       ORDER BY section.subject_id, section.code, question.language_code, question.difficulty`,
       [bankCodePrefix],
    )
    return result.rows
@@ -80,13 +83,16 @@ async function findAccountStatus(userId, db = pool) {
    return result.rows[0]?.status ?? null
 }
 
-// Topics that hold trainable questions, with their section, for the "repeat a topic" choice.
+// Topics that hold trainable questions, with their section, for the "repeat a topic" choice. One
+// row per topic, question language and stored difficulty, as for sections; a topic without
+// trainable questions has no row and is never offered.
 async function listTrainableTopics(bankCodePrefix, db = pool) {
    const result = await db.query(
       `SELECT topic.subject_id, topic.code,
          (SELECT code FROM sections WHERE id = topic.section_id) AS section_code,
          (SELECT COALESCE(jsonb_object_agg(language_code, title), '{}')
           FROM topic_translations WHERE topic_id = topic.id) AS titles,
+         question.language_code, question.difficulty,
          count(DISTINCT question.id)::integer AS total
        FROM topics AS topic
        JOIN question_topics AS link ON link.topic_id = topic.id
@@ -95,8 +101,8 @@ async function listTrainableTopics(bankCodePrefix, db = pool) {
        JOIN question_answer_keys AS answer_key
           ON answer_key.question_id = question.id AND answer_key.status = 'verified'
        WHERE question.status = 'published' AND starts_with(bank.code, $1)
-       GROUP BY topic.id
-       ORDER BY topic.subject_id, topic.code`,
+       GROUP BY topic.id, question.language_code, question.difficulty
+       ORDER BY topic.subject_id, topic.code, question.language_code, question.difficulty`,
       [bankCodePrefix],
    )
    return result.rows
@@ -106,22 +112,26 @@ const finishedTrainerSql = `attempt.user_id = $1 AND attempt.status IN ('graded'
    AND attempt.max_score > 0`
 
 // The last `window` finished trainings of every subject, newest first, numbered per subject.
+// total counts every finished training of the subject; mistakes trainings (only questions the
+// student got wrong) stay out of the window, so they do not pull readiness down.
 async function listRecentFinishedBySubject(userId, window, db = pool) {
    const result = await db.query(
       `SELECT subject_id, score, max_score, submitted_at, total
        FROM (
           SELECT (test.generation_filters ->> 'subjectId')::bigint AS subject_id,
              attempt.score, attempt.max_score, attempt.submitted_at,
+             COALESCE(test.generation_filters ->> 'mode', 'standard') = 'mistakes' AS mistakes,
              row_number() OVER subject_window AS position,
              count(*) OVER (PARTITION BY test.generation_filters ->> 'subjectId')::integer AS total
           ${trainerAttemptFrom}
           WHERE ${finishedTrainerSql}
           WINDOW subject_window AS (
-             PARTITION BY test.generation_filters ->> 'subjectId'
+             PARTITION BY test.generation_filters ->> 'subjectId',
+                COALESCE(test.generation_filters ->> 'mode', 'standard') = 'mistakes'
              ORDER BY attempt.submitted_at DESC, attempt.id DESC
           )
        ) AS ranked
-       WHERE position <= $2
+       WHERE NOT mistakes AND position <= $2
        ORDER BY subject_id, submitted_at DESC`,
       [normalizeInternalId(userId), window],
    )
@@ -203,30 +213,54 @@ async function findOpenTrainerAttempt(userId, client) {
    return result.rows[0] || null
 }
 
-// Count of trainable questions for one request, before any is picked.
+// The student's open mistakes: questions whose latest finished occurrence (trainer or mock exam)
+// earned less than full points. An unanswered question is 0 points, so it counts. A later
+// occurrence with full points takes the question out; a later wrong one brings it back.
+// Course tests are not a source: their reveal policy may hide which answers were wrong.
+function mistakeQuestionIdsSql(userParam) {
+   return `SELECT latest.question_id FROM (
+         SELECT DISTINCT ON (item.question_id) item.question_id,
+            COALESCE(answer.awarded_points, 0) >= item.max_points AS correct
+         FROM test_attempts AS attempt
+         JOIN tests AS test ON test.id = attempt.test_id AND test.origin IN ('trainer', 'mock_exam')
+         JOIN attempt_questions AS item ON item.attempt_id = attempt.id
+         LEFT JOIN student_answers AS answer ON answer.attempt_question_id = item.id
+         WHERE attempt.user_id = ${userParam} AND attempt.status IN ('graded', 'expired')
+         ORDER BY item.question_id, COALESCE(attempt.submitted_at, attempt.graded_at) DESC, attempt.id DESC
+      ) AS latest
+      WHERE NOT latest.correct`
+}
+
+// Filters of one request, six parameters from start: subject; language (NULL = any); stored
+// difficulties (NULL = any); section code; topic codes (a question in any of them); the user
+// whose open mistakes the questions must be (NULL = no such limit).
 function candidateFilter(start) {
-   return `AND question.subject_id = $${start} AND question.language_code = $${start + 1}
+   return `AND question.subject_id = $${start}
+      AND ($${start + 1}::text IS NULL OR question.language_code = $${start + 1})
       AND ($${start + 2}::smallint[] IS NULL OR question.difficulty = ANY($${start + 2}::smallint[]))
       AND ($${start + 3}::text IS NULL OR EXISTS (
          SELECT 1 FROM question_topics AS link JOIN topics AS topic ON topic.id = link.topic_id
          JOIN sections AS section ON section.id = topic.section_id
          WHERE link.question_id = question.id AND section.code = $${start + 3}))
-      AND ($${start + 4}::text IS NULL OR EXISTS (
+      AND ($${start + 4}::text[] IS NULL OR EXISTS (
          SELECT 1 FROM question_topics AS link JOIN topics AS topic ON topic.id = link.topic_id
-         WHERE link.question_id = question.id AND topic.code = $${start + 4}))`
+         WHERE link.question_id = question.id AND topic.code = ANY($${start + 4}::text[])))
+      AND ($${start + 5}::bigint IS NULL OR question.id IN (${mistakeQuestionIdsSql(`$${start + 5}`)}))`
 }
 
 function candidateParams(filters) {
    return [
       normalizeInternalId(filters.subjectId),
-      filters.language,
-      filters.difficulties,
-      filters.sectionCode,
-      filters.topicCode,
+      filters.language ?? null,
+      filters.difficulties ?? null,
+      filters.sectionCode ?? null,
+      filters.topicCodes?.length ? filters.topicCodes : null,
+      filters.mistakesOf ? normalizeInternalId(filters.mistakesOf) : null,
    ]
 }
 
-async function countCandidates(bankCodePrefix, filters, client) {
+// Count of trainable questions for one request, before any is picked.
+async function countCandidates(bankCodePrefix, filters, client = pool) {
    const result = await client.query(
       `SELECT count(*)::integer AS total ${trainableFrom} ${candidateFilter(2)}`,
       [bankCodePrefix, ...candidateParams(filters)],
@@ -238,14 +272,14 @@ async function countCandidates(bankCodePrefix, filters, client) {
 async function pickCandidates(bankCodePrefix, filters, { userId, excludeIds, limit }, client) {
    const result = await client.query(
       `SELECT question.id, question.difficulty ${trainableFrom} ${candidateFilter(2)}
-         AND NOT (question.id = ANY($7::bigint[]))
+         AND NOT (question.id = ANY($8::bigint[]))
        ORDER BY EXISTS (
             SELECT 1 FROM attempt_questions AS seen
             JOIN test_attempts AS seen_attempt ON seen_attempt.id = seen.attempt_id
             JOIN tests AS seen_test ON seen_test.id = seen_attempt.test_id AND seen_test.origin = 'trainer'
-            WHERE seen.question_id = question.id AND seen_attempt.user_id = $8
+            WHERE seen.question_id = question.id AND seen_attempt.user_id = $9
          ), random()
-       LIMIT $9`,
+       LIMIT $10`,
       [
          bankCodePrefix,
          ...candidateParams(filters),
@@ -257,18 +291,48 @@ async function pickCandidates(bankCodePrefix, filters, { userId, excludeIds, lim
    return result.rows
 }
 
-// No course: the trainer is its own module (tests_course_required_check allows it).
+// Open mistakes among the trainable questions, per subject, per section and per topic. A question
+// in two topics counts in both, so topic counts may add up to more than the subject count.
+// level: 3 = subject row, 1 = section row, 0 = topic row (GROUPING bits of section and topic).
+async function listMistakeCounts(userId, bankCodePrefix, db = pool) {
+   const result = await db.query(
+      `SELECT question.subject_id, section.code AS section_code, topic.code AS topic_code,
+         GROUPING(section.code, topic.code)::integer AS level,
+         count(DISTINCT question.id)::integer AS total
+       FROM questions AS question
+       JOIN question_banks AS bank ON bank.id = question.bank_id
+       JOIN question_answer_keys AS answer_key
+          ON answer_key.question_id = question.id AND answer_key.status = 'verified'
+       LEFT JOIN question_topics AS link ON link.question_id = question.id
+       LEFT JOIN topics AS topic ON topic.id = link.topic_id
+       LEFT JOIN sections AS section ON section.id = topic.section_id
+       WHERE question.status = 'published' AND starts_with(bank.code, $1)
+         AND question.id IN (${mistakeQuestionIdsSql('$2')})
+       GROUP BY GROUPING SETS (
+          (question.subject_id),
+          (question.subject_id, section.code),
+          (question.subject_id, section.code, topic.code)
+       )
+       ORDER BY 1, 2, 3`,
+      [bankCodePrefix, normalizeInternalId(userId)],
+   )
+   return result.rows
+}
+
+// No course: the trainer is its own module (tests_course_required_check allows it). A time limit
+// is optional; without one the training has no deadline.
 async function createTrainerTest(test, client) {
    const result = await client.query(
       `INSERT INTO tests (
          title, mode, origin, max_attempts, result_policy, answer_reveal_policy,
-         shuffle_questions, shuffle_options, generation_filters, created_by
-       ) VALUES ($1, 'practice', 'trainer', 1, 'first', 'after_submission', FALSE, FALSE, $2, $3)
+         shuffle_questions, shuffle_options, generation_filters, created_by, duration_seconds
+       ) VALUES ($1, 'practice', 'trainer', 1, 'first', 'after_submission', FALSE, FALSE, $2, $3, $4)
        RETURNING id`,
       [
          test.title,
          test.generationFilters,
          normalizeInternalId(test.createdBy),
+         test.durationSeconds ?? null,
       ],
    )
    return result.rows[0].id
@@ -379,6 +443,7 @@ export {
    listTrainableCounts,
    listTrainableSections,
    listTrainableSubjectIds,
+   listMistakeCounts,
    listTrainerAttempts,
    listRecentFinished,
    listRecentFinishedBySubject,

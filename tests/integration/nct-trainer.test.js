@@ -157,10 +157,18 @@ test('NCT trainer integration', async (t) => {
       const entry = catalog.subjects.find((row) => row.code === subject.code)
       assert.equal(Object.hasOwn(entry, 'accessible'), false)
       assert.deepEqual(entry.languages, [{ language: 'en', total: 12, difficulties: { easy: 4, medium: 5, hard: 3 } }])
-      assert.deepEqual(entry.sections, [{ code: 'part-a', titles: { en: 'Part A' }, total: 12 }])
-      assert.deepEqual(entry.topics.map((topic) => [topic.code, topic.sectionCode, topic.total]), [
-         ['grammar', 'part-a', 4], ['reading', 'part-a', 3], ['spelling', 'part-a', 5],
+      assert.deepEqual(entry.sections, [{
+         code: 'part-a',
+         titles: { en: 'Part A' },
+         total: 12,
+         languages: [{ language: 'en', total: 12, difficulties: { easy: 4, medium: 5, hard: 3 } }],
+         mistakes: 0,
+      }])
+      assert.equal(entry.mistakes, 0)
+      assert.deepEqual(entry.topics.map((topic) => [topic.code, topic.sectionCode, topic.total, topic.mistakes]), [
+         ['grammar', 'part-a', 4, 0], ['reading', 'part-a', 3, 0], ['spelling', 'part-a', 5, 0],
       ])
+      assert.deepEqual(entry.topics[0].languages, [{ language: 'en', total: 4, difficulties: { easy: 4, medium: 0, hard: 0 } }])
    })
 
    await t.test('only active students, administrators and owners may use the trainer; courses play no part', async () => {
@@ -199,6 +207,7 @@ test('NCT trainer integration', async (t) => {
          subjects: [],
          weakTopics: [],
          recentResults: [],
+         mistakes: { total: 0, subjects: [] },
       })
    })
 
