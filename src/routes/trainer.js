@@ -12,6 +12,7 @@ import {
 } from '../controllers/mock-exam-controller.js'
 import {
    createTrainerAttemptController,
+   getTrainerAvailabilityController,
    getTrainerCatalogController,
    getTrainerOverviewController,
    listTrainerHistoryController,
@@ -25,6 +26,7 @@ const trainerRouter = express.Router()
 
 trainerRouter.use(authMiddleware)
 trainerRouter.get('/catalog', getTrainerCatalogController)
+trainerRouter.get('/availability', getTrainerAvailabilityController)
 trainerRouter.get('/overview', getTrainerOverviewController)
 trainerRouter.get('/attempts', listTrainerHistoryController)
 trainerRouter.post('/attempts', authenticatedCsrfMiddleware, createTrainerAttemptController)

@@ -626,7 +626,7 @@ Show the grant button to a teacher only on group assignments of their groups.
 
 A student, an administrator or an owner picks a subject, a difficulty and a count. The server builds a practice test from published NCT questions with verified keys and starts its attempt. Answering, submitting and reading the result use the ordinary attempt routes above (`/tests/attempts/:attemptId...`). Every route needs a signed-in user. `POST` also needs CSRF when the request uses cookies.
 
-**Access.** The trainer is a separate module and does not depend on courses or enrollments. Every student, administrator and owner whose account is `active` may use every subject; teachers may not. Administrators and owners train exactly like students, with their own trainings, overview and history; nobody sees another account's trainings, and staff trainings never reach student statistics or authoring lists. All four trainer routes refuse:
+**Access.** The trainer is a separate module and does not depend on courses or enrollments. Every student, administrator and owner whose account is `active` may use every subject; teachers may not. Administrators and owners train exactly like students, with their own trainings, overview and history; nobody sees another account's trainings, and staff trainings never reach student statistics or authoring lists. Every trainer route refuses:
 
 | Status | Code | When |
 |---|---|---|
@@ -639,17 +639,22 @@ A student, an administrator or an owner picks a subject, a difficulty and a coun
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/trainer/catalog` | Options and the subjects with trainable questions |
+| GET | `/trainer/catalog` | Options and the subjects with trainable questions, exact counts and my mistakes |
+| GET | `/trainer/availability` | Exact count for one choice (several topics included) and the counts it accepts |
 | POST | `/trainer/attempts` | Generate and start a training: `201`, or `200` for a repeated `idempotencyKey` |
 | GET | `/trainer/attempts` | My trainings, newest first, plus statistics per subject |
-| GET | `/trainer/overview` | Everything the /nct page shows: readiness, per subject, weak topics, recent results |
+| GET | `/trainer/overview` | Everything the /nct page shows: readiness, per subject, weak topics, recent results, mistakes |
 
-**`GET /trainer/catalog`** returns:
+**`GET /trainer/catalog`** returns (2026-11-22: `modes`, `countAll`, `maxQuestions`, `timeLimitMinutes`, per-section and per-topic `languages`, `mistakes`):
 
 ```json
 { "data": {
   "options": {
+    "modes": ["standard", "mistakes"],
     "questionCounts": [10, 20, 30, 50],
+    "countAll": "all",
+    "maxQuestions": 50,
+    "timeLimitMinutes": { "min": 1, "max": 1440 },
     "difficulties": ["easy", "medium", "hard", "mixed"],
     "levels": [{ "name": "easy", "minDifficulty": 1, "maxDifficulty": 2 }, { "name": "medium", "minDifficulty": 3, "maxDifficulty": 3 }, { "name": "hard", "minDifficulty": 4, "maxDifficulty": 5 }],
     "mixedShares": { "easy": 30, "medium": 40, "hard": 30 }
@@ -658,36 +663,72 @@ A student, an administrator or an owner picks a subject, a difficulty and a coun
     "id": "135", "code": "zaboni-tochiki", "color": "orange", "primaryLanguage": "tg",
     "titles": { "tg": "…", "ru": "…" },
     "languages": [{ "language": "tg", "total": 972, "difficulties": { "easy": 333, "medium": 605, "hard": 34 } }],
-    "sections": [{ "code": "syntax", "titles": { "tg": "…" }, "total": 120 }],
-    "topics": [{ "code": "verbs", "sectionCode": "morphology", "titles": { "tg": "…" }, "total": 40 }]
+    "mistakes": 7,
+    "sections": [{ "code": "syntax", "titles": { "tg": "…" }, "total": 248,
+      "languages": [{ "language": "tg", "total": 248, "difficulties": { "easy": 80, "medium": 160, "hard": 8 } }],
+      "mistakes": 3 }],
+    "topics": [{ "code": "verbs", "sectionCode": "morphology", "titles": { "tg": "…" }, "total": 40,
+      "languages": [{ "language": "tg", "total": 40, "difficulties": { "easy": 12, "medium": 25, "hard": 3 } }],
+      "mistakes": 2 }]
   }]
 } }
 ```
 
-- Disable a difficulty and count pair when `difficulties[level] < count`.
-- For `mixed`, compare against `total`. Mixed takes about 30/40/30 from the levels and fills any shortfall from the other levels. A question without a difficulty counts only in `total`.
-- `sections[].total` counts all languages. Section and topic filters are optional, so a combination can still be too small; the server answers that with `409`.
+- **Exact counts.** `languages[]` of the subject, of every section and of every topic count questions of that language and level. For one topic (or one section) in the chosen language: a level is possible when `languages[lang].difficulties[level] >= count`; for `mixed` compare against `languages[lang].total`. Mixed takes about 30/40/30 from the levels and fills any shortfall from the other levels. A question without a difficulty counts only in `total`.
+- `total` of a section or topic counts all languages (as before).
+- **Several topics, or a section plus topics:** a question can sit in two topics, so per-topic numbers cannot be added up. Ask `GET /trainer/availability` for the exact number.
+- **Empty topics and sections are never listed:** an entry appears only with at least one trainable question.
+- **`mistakes`** = my open mistakes (see "Mistakes" below) in the subject, section or topic, all languages. A question in two topics counts in both topics, but once in the subject.
+
+**`GET /trainer/availability`** (new, 2026-11-22). The query is the selection of `POST /trainer/attempts` without `count`: `subject` (required), `mode`, `difficulty`, `language`, `sectionCode`, `topicCode` or `topicCodes` (comma-separated `alpha,beta`, or a repeated parameter). Unknown parameters return `400`.
+
+```json
+{ "data": { "mode": "standard", "subjectId": "135", "language": "tg", "available": 8, "questionCounts": [], "allowsAll": true } }
+```
+
+- `available`: how many questions the choice can draw now. Standard mode: in `language` (the subject's primary language by default). Mistakes mode: my open mistakes; `language` is `null` unless one is asked for.
+- `questionCounts`: the configured counts the create request accepts for this choice. In standard mode these are the counts up to `available`. In mistakes mode every count is accepted once there is one mistake, because the training takes what there is.
+- `allowsAll`: whether `count: "all"` is accepted (see below).
+- Errors: `400 VALIDATION_ERROR`, `403` as in "Access", `404 SUBJECT_NOT_FOUND`.
+- Call it when the choice changes, with a short debounce. It is read-only.
 
 **`POST /trainer/attempts`** takes this body:
 
 | Field | Required | Value |
 |---|---|---|
+| `mode` | no | `standard` (default) or `mistakes` (2026-11-22, see "Mistakes") |
 | `subject` | yes | Subject id (`"135"`) or code (`"zaboni-tochiki"`) |
-| `difficulty` | yes | One of `options.difficulties` |
-| `count` | yes | One of `options.questionCounts` (number) |
-| `language` | no | `tg`, `ru` or `en`; defaults to the subject's `primaryLanguage` |
+| `difficulty` | standard: yes; mistakes: no | One of `options.difficulties`. In mistakes mode it defaults to `mixed` (any level) |
+| `count` | yes | One of `options.questionCounts` (number), or `"all"` (see below) |
+| `language` | no | `tg`, `ru` or `en`. Standard mode: defaults to the subject's `primaryLanguage`. Mistakes mode: any language unless given |
 | `sectionCode` | no | Code from `sections` |
-| `topicCode` | no | Topic code |
+| `topicCodes` | no | 1–50 topic codes; a question in **any** of them qualifies. Order does not matter (the server sorts them) |
+| `topicCode` | no | One topic code, kept for older clients. Do not send it together with `topicCodes` (`400`) |
+| `timeLimitMinutes` | no | Whole number 1–1440. The training gets a server deadline, like a timed test (`attempt.deadlineAt`); when time runs out the attempt is closed as `expired`. Omit or `null` for no limit |
 | `idempotencyKey` | no | 8–100 characters `A-Z a-z 0-9 . _ : -`. Generate one per click and reuse it on retry |
+
+**`count: "all"`** takes every available question of the choice. In standard mode it is accepted only when the choice has from 1 to (smallest of `questionCounts` − 1) questions, e.g. a small topic with 6 questions when the smallest count is 10. Otherwise pick a number. In mistakes mode `"all"` means every open mistake, up to `options.maxQuestions`.
+
+**Mistakes** (`mode: "mistakes"`, 2026-11-22):
+
+- An open mistake is a trainable question whose **latest** finished occurrence for me, in a training or a mock exam, earned less than full points. An unanswered question is 0 points, so it counts. A partly right matching question counts too.
+- Solving it with full points later (in any training or mock exam, including a mistakes training) closes it. A new wrong answer opens it again.
+- Course tests are not a source: their reveal policy may hide which answers were wrong.
+- Filters: `sectionCode`, `topicCodes`/`topicCode`, `language` and `difficulty` work as usual and narrow the mistakes.
+- **Size:** the training takes `min(count, open mistakes)` questions, so asking for 10 with 3 open mistakes gives 3, without `409`. With no open mistakes for the choice: `409 TRAINER_NO_MISTAKES`.
+- It is an ordinary training (`origin = trainer`): same attempt routes, result with keys, history (`mode: "mistakes"`).
+- **Readiness:** mistakes trainings hold only questions I got wrong, so they count in `trainings` and `completedTrainings` but stay out of the readiness window. Weak topics include them.
 
 The response is the same `AttemptView` as `GET /tests/attempts/:attemptId`, plus `resumed`. It has no keys, no explanations and no grading data. Image blocks carry `url` and `expiresAt` (5 minutes), like every attempt view, so re-read the attempt to get fresh URLs. Questions come in a random order. Options keep their book order, because their labels (А, Б, …) are part of the content.
 
 | Status | Code | Meaning / UI |
 |---|---|---|
-| 400 | `VALIDATION_ERROR` | `details[0].field` names the field (`count` outside the allowed set, unknown `difficulty`, an unknown body field, …) |
+| 400 | `VALIDATION_ERROR` | `details[0].field` names the field (`count` outside the allowed set, unknown `difficulty` or `mode`, `topicCode` with `topicCodes`, `timeLimitMinutes` outside 1–1440, an unknown body field, …) |
 | 403 | `ACCOUNT_NOT_ACTIVE`, `TRAINER_STUDENT_ROLE_REQUIRED` | See "Access" |
 | 404 | `SUBJECT_NOT_FOUND` | Unknown id or code |
-| 409 | `TRAINER_NOT_ENOUGH_QUESTIONS` | `details[0].field = "available"`, `details[0].message` = how many questions match (as a string). Offer a smaller count |
+| 409 | `TRAINER_NOT_ENOUGH_QUESTIONS` | Standard mode. `details[0].field = "available"`, `details[0].message` = how many questions match (as a string). Offer a smaller count, or `"all"` when the number is below the smallest count |
+| 409 | `TRAINER_COUNT_ALL_NOT_ALLOWED` | Standard mode, `count: "all"` while the choice has at least the smallest count of questions. `details[0].message` = available. Offer the numeric counts |
+| 409 | `TRAINER_NO_MISTAKES` | Mistakes mode, no open mistakes for this choice. Hide or disable "Repeat mistakes" when `mistakes` is 0 |
 | 409 | `TRAINER_ATTEMPT_IN_PROGRESS` | One running training per student. `details[0].message` = the running `attemptId`. Offer "continue" (open it) or "finish" (`POST /tests/attempts/:id/submit`) |
 | 409 | `IDEMPOTENCY_KEY_REUSED` | The same key was sent with different parameters |
 
@@ -695,7 +736,7 @@ Then use the ordinary attempt routes:
 
 - `PUT /tests/attempts/:attemptId/answers/:attemptQuestionId` with `{ answer, revision }`. The answer formats are the same as for tests.
 - `POST /tests/attempts/:attemptId/submit`. A repeat returns the same result.
-- `GET /tests/attempts/:attemptId/result`. A training has no timer, one attempt and `answerRevealPolicy: "after_submission"`, so the result is `revealed: true` right after submit. Each question has:
+- `GET /tests/attempts/:attemptId/result`. A training has no timer unless `timeLimitMinutes` was sent, one attempt and `answerRevealPolicy: "after_submission"`, so the result is `revealed: true` right after submit (or after the timer closes it). Each question has:
    - `answer`, `awardedPoints`, `points` (1);
    - **`correct`** (boolean, new): full points;
    - `correctAnswer`;
@@ -707,7 +748,8 @@ Then use the ordinary attempt routes:
 ```json
 { "data": {
   "attempts": [{ "attemptId": "9", "status": "graded", "subjectId": "135", "subjectCode": "zaboni-tochiki",
-    "difficulty": "mixed", "language": "tg", "sectionCode": null, "topicCode": null, "questionCount": 10,
+    "mode": "standard", "difficulty": "mixed", "language": "tg", "sectionCode": null,
+    "topicCode": null, "topicCodes": [], "timeLimitMinutes": null, "questionCount": 10,
     "startedAt": "…", "submittedAt": "…", "score": "6.00", "maxScore": "10.00", "percent": 60 }],
   "pagination": { "limit": 20, "offset": 0, "hasMore": false },
   "stats": [{ "subjectId": "135", "attempts": 2, "averagePercent": 30, "lastSubmittedAt": "…" }]
@@ -716,6 +758,8 @@ Then use the ordinary attempt routes:
 
 - `score`, `maxScore` and `percent` are `null` while a training is `in_progress`.
 - `stats` counts finished trainings only and does not depend on `subjectId`.
+- New fields (2026-11-22): `mode`, `topicCodes` (always a list; empty without topics), `timeLimitMinutes`. `topicCode` is the single topic when exactly one was chosen, otherwise `null`. A mistakes training without a `language` has `language: null`. Older trainings read as `mode: "standard"`, `timeLimitMinutes: null`.
+- `questionCount` is the real number of questions; with `count: "all"` or in mistakes mode it may be smaller than the requested count.
 **`GET /trainer/overview`** is computed from my **finished** trainings (`graded` or `expired`; a running one does not count):
 
 ```json
@@ -728,18 +772,24 @@ Then use the ordinary attempt routes:
     "readinessPercent": 54.55, "trainings": 2, "lastSubmittedAt": "…" }],
   "weakTopics": [{ "subjectId": "135", "subjectCode": "zaboni-tochiki", "topicCode": "spelling", "titles": { "tg": "…" },
     "answered": 4, "correct": 0, "correctPercent": 0 }],
-  "recentResults": [{ "attemptId": "9", "subjectId": "135", "subjectCode": "zaboni-tochiki", "difficulty": "mixed",
-    "sectionCode": null, "topicCode": null, "questionCount": 10, "percent": 60, "submittedAt": "…" }]
+  "recentResults": [{ "attemptId": "9", "subjectId": "135", "subjectCode": "zaboni-tochiki", "mode": "standard",
+    "difficulty": "mixed", "language": "tg", "sectionCode": null, "topicCode": null, "topicCodes": [],
+    "timeLimitMinutes": null, "questionCount": 10, "percent": 60, "submittedAt": "…" }],
+  "mistakes": { "total": 7, "subjects": [{ "subjectId": "135", "total": 7,
+    "sections": [{ "code": "syntax", "total": 3 }],
+    "topics": [{ "code": "verbs", "sectionCode": "morphology", "total": 2 }] }] }
 } }
 ```
 
-- **Readiness of a subject:** points ÷ questions over its last `readinessWindow` finished trainings (`TRAINER_READINESS_WINDOW`, default 5), × 100. Every question is 1 point, so this is the share of correct answers, and longer trainings weigh more.
+- **Readiness of a subject:** points ÷ questions over its last `readinessWindow` finished **standard** trainings (`TRAINER_READINESS_WINDOW`, default 5), × 100. Every question is 1 point, so this is the share of correct answers, and longer trainings weigh more. Mistakes trainings stay out (2026-11-22); the same rule applies to readiness on `/me/home` and in the staff views.
 - **Overall `readinessPercent`:** the average of the subject values, where every trained subject counts equally.
-- **`subjects[].trainings`** counts all finished trainings of the subject. **`completedTrainings`** is their sum.
+- **`subjects[].trainings`** counts all finished trainings of the subject, mistakes trainings included. **`completedTrainings`** is their sum. A subject trained only in mistakes mode has no readiness and is not listed.
+- **`mistakes`** (2026-11-22): my open mistakes per subject, with `sections[]` and `topics[]` (codes only; take titles from the catalog). `total` is the sum over subjects. A question in two topics counts in both topics but once in its subject. Subjects without open mistakes are left out; with none, `{ "total": 0, "subjects": [] }`. "Repeat mistakes" = `POST /trainer/attempts` with `{ mode: "mistakes", subject, topicCodes?, count }`.
+- `recentResults[]` carry the same new fields as the history (`mode`, `language`, `topicCodes`, `timeLimitMinutes`).
 - **Weak topics:** taken from all finished trainings.
    - A topic needs at least `TRAINER_WEAK_TOPIC_MIN_ANSWERS` (5) questions and must be below 100% correct. An unanswered question counts as wrong.
    - Sorted by the lowest share of correct answers, then by the most questions. At most `TRAINER_WEAK_TOPICS_LIMIT` (5).
-   - "Repeat" = `POST /trainer/attempts` with `{ subject: subjectId, topicCode, difficulty: "mixed", count }`. Check `catalog.subjects[].topics[].total` first.
+   - "Repeat" = `POST /trainer/attempts` with `{ subject: subjectId, topicCodes: [topicCode], difficulty: "mixed", count }`. Check the topic's `languages[]` in the catalog first; for a topic smaller than the smallest count send `count: "all"`.
 - **Recent results:** the last `TRAINER_RECENT_RESULTS_LIMIT` (5) finished trainings, newest first. Build the title on the frontend.
 - **No trainings yet:** `200` with `empty: true`, `readinessPercent: null`, `completedTrainings: 0` and empty lists.
 

@@ -1,5 +1,21 @@
 # Decisions
 
+## 2026-11-22 — NCT trainer: mistakes mode, several topics, count "all", time limit
+
+Requested by the owner: `mode: 'mistakes'`, `topicCodes[]`, `count: "all"` for small choices, an optional `timeLimitMinutes`, exact counts per topic by language and level, and open mistakes in the catalog and overview. No migration: everything lives in `tests.generation_filters` and the existing `duration_seconds`.
+
+Choices made without the owner:
+
+1. **Source of mistakes:** finished trainer **and mock exam** attempts. Course tests are left out, because their reveal policy (`never`, `after_window`) may hide which answers were wrong, and a mistakes list would disclose it.
+2. **Rule:** the latest finished occurrence of the question decides (`submitted_at`, then attempt id). Less than full points is a mistake; unanswered (0) and partly right matching count. Full points later closes it, a later wrong answer reopens it. Only questions that are still trainable count.
+3. **Mistakes filters:** subject, section and topics as usual. `language` is optional (any language by default, unlike a standard training), and `difficulty` is optional (`mixed`). No 30/40/30 split: random among the open mistakes.
+4. **Size:** `min(count, open mistakes)`. `"all"` = all open mistakes up to `TRAINER_MAX_QUESTIONS` (now exposed as `options.maxQuestions`). None: `409 TRAINER_NO_MISTAKES` (a new code, so the client can tell it from a too-small choice).
+5. **`count: "all"` in standard mode** is accepted only when 1 to (smallest count − 1) questions are available. Otherwise `409 TRAINER_COUNT_ALL_NOT_ALLOWED`; with none `409 TRAINER_NOT_ENOUGH_QUESTIONS` (available 0).
+6. **Readiness excludes mistakes trainings** (trainer overview, `/me/home`, staff views): they hold only wrong questions and would pull readiness down. They still count in `trainings`/`completedTrainings`. Weak topics include them.
+7. **`GET /trainer/availability`** (not requested). Per-topic counts cannot be added up for several topics, because a question may sit in two topics. This read-only route gives the exact number for any choice and the counts the create request would accept.
+8. **`topicCodes` are sorted and de-duplicated**, so the same choice in another order repeats an idempotent request. `topicCode` and `topicCodes` together are refused (`400`). History keeps `topicCode` (the one topic, else `null`) next to `topicCodes`.
+9. **Time limit:** 1–1440 minutes, stored as `tests.duration_seconds`; the M11 engine sets the deadline and the attempt sweep closes it as `expired`.
+
 ## 2026-11-21 — M14 PR 3: scheduled notifications, retention, scope of M14
 
 **Scope (owner).** Web Push (`push_subscriptions`, VAPID) and broadcast campaigns (`broadcast_campaigns`) are not part of M14. They are moved to after the launch, and the tables stay in the schema unused. With PR 3, M14 is Done.
