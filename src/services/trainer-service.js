@@ -8,6 +8,7 @@ import AppError from '../utils/app-error.js'
 import { digitsSnapshot, scorePercent } from '../utils/attempt-grading.js'
 import { normalizeInternalId } from '../utils/internal-id.js'
 import { subjectReadiness } from '../utils/learning-metrics.js'
+import { storedTopicCodes, trainingFilters, trainingSummary } from '../utils/trainer-training.js'
 import { authorizePermissionService } from './authorization-service.js'
 import { parseUserId, validateBody, validationError } from './course-service.js'
 import { getAttemptService, startAttemptInTransactionService } from './test-attempt-service.js'
@@ -256,8 +257,18 @@ function parseSelection(body, config) {
       }
       return { mode, sourceAttemptId: parseSourceAttemptId(body.sourceAttemptId) }
    }
+   // Mistakes may come from one finished attempt (2026-11-22); its subject and language are used.
+   let sourceAttemptId = null
    if (body.sourceAttemptId !== undefined && body.sourceAttemptId !== null) {
-      throw validationError('sourceAttemptId', 'sourceAttemptId is only for mode unanswered')
+      if (mode !== 'mistakes') {
+         throw validationError('sourceAttemptId', 'sourceAttemptId is only for modes mistakes and unanswered')
+      }
+      for (const field of ['subject', 'language']) {
+         if (body[field] !== undefined && body[field] !== null) {
+            throw validationError(field, `${field} comes from the source attempt when sourceAttemptId is sent`)
+         }
+      }
+      sourceAttemptId = parseSourceAttemptId(body.sourceAttemptId)
    }
    const difficulties = trainerOptions(config).difficulties
    const difficulty = body.difficulty ?? (mode === 'mistakes' ? 'mixed' : undefined)
@@ -269,11 +280,12 @@ function parseSelection(body, config) {
    }
    return {
       mode,
-      subject: parseSubject(body.subject),
+      subject: sourceAttemptId === null ? parseSubject(body.subject) : null,
       difficulty,
       language: body.language ?? null,
       sectionCode: parseOptionalCode(body.sectionCode, 'sectionCode'),
       topicCodes: parseTopicCodes(body),
+      sourceAttemptId,
    }
 }
 
@@ -330,8 +342,20 @@ function candidateFilters(deps, actorId, subject, request) {
       sectionCode: request.sectionCode,
       topicCodes: request.topicCodes,
       mistakesOf: request.mode === 'mistakes' ? actorId : null,
+      mistakesFromAttempt: request.mode === 'mistakes' ? request.sourceAttemptId ?? null : null,
       difficulties: level ? difficultiesOf(level) : null,
    }
+}
+
+// The subject of a request: named in it, or (mistakes with sourceAttemptId) the one of my
+// finished trainer attempt, whose language the request then takes. A named subject that does not
+// exist is null here; the caller answers 404 after the idempotency check.
+async function requestSubject(deps, actorId, request, db) {
+   if (request.sourceAttemptId === null || request.sourceAttemptId === undefined) {
+      return { request, subject: await deps.repository.findSubject(request.subject, db) }
+   }
+   const { filters, subject } = await resolveSourceAttempt(deps, actorId, request.sourceAttemptId, db)
+   return { request: { ...request, language: filters.language ?? null }, subject }
 }
 
 function notEnough(available) {
@@ -418,12 +442,6 @@ function shuffled(values) {
    return result
 }
 
-// Trainings stored before topicCodes existed keep only topicCode.
-function storedTopicCodes(stored) {
-   if (Array.isArray(stored.topicCodes)) return stored.topicCodes
-   return stored.topicCode ? [stored.topicCode] : []
-}
-
 function sameRequest(stored, request, subjectId) {
    return stored.subjectId === String(subjectId)
       && (stored.mode ?? 'standard') === request.mode
@@ -433,21 +451,7 @@ function sameRequest(stored, request, subjectId) {
       && (stored.sectionCode ?? null) === request.sectionCode
       && storedTopicCodes(stored).join(',') === request.topicCodes.join(',')
       && (stored.timeLimitMinutes ?? null) === request.timeLimitMinutes
-}
-
-// The request part of a training as the history and the overview return it.
-function trainingFilters(filters) {
-   const topicCodes = storedTopicCodes(filters)
-   return {
-      mode: filters.mode ?? 'standard',
-      difficulty: filters.difficulty,
-      language: filters.language ?? null,
-      sectionCode: filters.sectionCode ?? null,
-      topicCode: topicCodes.length === 1 ? topicCodes[0] : null,
-      topicCodes,
-      timeLimitMinutes: filters.timeLimitMinutes ?? null,
-      sourceAttemptId: filters.sourceAttemptId ?? null,
-   }
+      && (stored.sourceAttemptId ?? null) === (request.sourceAttemptId ? String(request.sourceAttemptId) : null)
 }
 
 // Answer-sheet cells, chosen by the mock exam's rule: the subject has a cells item in an active
@@ -471,13 +475,13 @@ async function cellsExtensions(deps, subjectCode, questionIds, client) {
 async function createTrainerAttemptService(userId, body, overrides) {
    const deps = dependencies(overrides)
    const actorId = parseUserId(userId)
-   const request = parseCreateBody(body, deps.config)
-   if (request.mode === 'unanswered') return createUnansweredTraining(deps, actorId, request)
+   const parsed = parseCreateBody(body, deps.config)
+   if (parsed.mode === 'unanswered') return createUnansweredTraining(deps, actorId, parsed)
    const { attemptId, resumed } = await deps.transaction(async (client) => {
       const now = deps.clock()
       await deps.repository.lockTrainerSlot(actorId, client)
       await requireTrainerLearner(deps, actorId, client)
-      const subject = await deps.repository.findSubject(request.subject, client)
+      const { request, subject } = await requestSubject(deps, actorId, parsed, client)
       if (request.idempotencyKey) {
          const existing = await deps.repository.findTrainerAttemptByKey(actorId, request.idempotencyKey, client)
          if (existing) {
@@ -514,6 +518,7 @@ async function createTrainerAttemptService(userId, body, overrides) {
          topicCode: request.topicCodes.length === 1 ? request.topicCodes[0] : null,
          topicCodes: request.topicCodes,
          timeLimitMinutes: request.timeLimitMinutes,
+         ...(request.sourceAttemptId ? { sourceAttemptId: String(request.sourceAttemptId) } : {}),
          ...(request.idempotencyKey ? { idempotencyKey: request.idempotencyKey } : {}),
       }
       const questionIds = shuffled(picked).map((row) => String(row.id))
@@ -567,9 +572,9 @@ async function storeTraining(deps, client, { actorId, subject, request, generati
 
 // ------------------------------------------------------------------ mode unanswered
 
-// The source of a mode "unanswered" training: the student's own finished trainer attempt, its
-// subject and its blank questions that are still trainable, in the attempt's order.
-async function resolveUnanswered(deps, actorId, sourceAttemptId, db) {
+// A source attempt (modes unanswered and mistakes): my own finished trainer attempt and its
+// subject. Another student's attempt, a course test or a mock exam is not found.
+async function resolveSourceAttempt(deps, actorId, sourceAttemptId, db) {
    const source = await deps.repository.findTrainerSourceAttempt(actorId, sourceAttemptId, db)
    if (!source) throw new AppError(404, 'ATTEMPT_NOT_FOUND', 'Attempt was not found')
    if (!finishedStatuses.includes(source.status)) {
@@ -578,6 +583,13 @@ async function resolveUnanswered(deps, actorId, sourceAttemptId, db) {
    const filters = source.generation_filters
    const subject = await deps.repository.findSubject({ id: filters.subjectId }, db)
    if (!subject) throw new AppError(404, 'SUBJECT_NOT_FOUND', 'Subject was not found')
+   return { source, filters, subject }
+}
+
+// The source of a mode "unanswered" training: the student's own finished trainer attempt, its
+// subject and its blank questions that are still trainable, in the attempt's order.
+async function resolveUnanswered(deps, actorId, sourceAttemptId, db) {
+   const { source, filters, subject } = await resolveSourceAttempt(deps, actorId, sourceAttemptId, db)
    const questionIds = await deps.repository.listUnansweredQuestionIds(deps.config.bankCodePrefix, source.id, db)
    return { filters, subject, questionIds }
 }
@@ -674,10 +686,10 @@ async function getUnansweredAvailability(deps, actorId, request) {
 async function getTrainerAvailabilityService(userId, query = {}, overrides) {
    const deps = dependencies(overrides)
    const actorId = parseUserId(userId)
-   const request = parseAvailabilityQuery(query, deps.config)
+   const parsed = parseAvailabilityQuery(query, deps.config)
    await requireTrainerLearner(deps, actorId)
-   if (request.mode === 'unanswered') return getUnansweredAvailability(deps, actorId, request)
-   const subject = await deps.repository.findSubject(request.subject)
+   if (parsed.mode === 'unanswered') return getUnansweredAvailability(deps, actorId, parsed)
+   const { request, subject } = await requestSubject(deps, actorId, parsed)
    if (!subject) throw new AppError(404, 'SUBJECT_NOT_FOUND', 'Subject was not found')
    const filters = candidateFilters(deps, actorId, subject, request)
    const available = await deps.repository.countCandidates(deps.config.bankCodePrefix, filters)
@@ -693,6 +705,12 @@ async function getTrainerAvailabilityService(userId, query = {}, overrides) {
          ? (available > 0 ? [...questionCounts] : [])
          : questionCounts.filter((count) => count <= available),
       allowsAll: mistakes ? available > 0 : available > 0 && available < Math.min(...questionCounts),
+      // Mistakes: how many questions a count "all" training really gets (filters and
+      // TRAINER_MAX_QUESTIONS applied), and the source attempt when one was named.
+      ...(mistakes ? {
+         plannedCount: Math.min(available, deps.config.maxQuestions),
+         sourceAttemptId: request.sourceAttemptId ? String(request.sourceAttemptId) : null,
+      } : {}),
    }
 }
 
@@ -797,7 +815,8 @@ function safeHistoryAttempt(row) {
       status: row.status,
       subjectId: filters.subjectId,
       subjectCode: filters.subjectCode,
-      ...trainingFilters(filters),
+      // subject { id, code, titles } joins the flat fields (2026-11-22).
+      ...trainingSummary(filters, row.subject_titles),
       questionCount: row.question_count,
       startedAt: iso(row.started_at),
       submittedAt: iso(row.submitted_at),

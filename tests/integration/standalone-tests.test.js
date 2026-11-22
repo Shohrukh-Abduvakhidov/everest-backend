@@ -206,7 +206,9 @@ test('standalone tests and the question generator', async (t) => {
          `SELECT user_id::text, target_path FROM notifications WHERE dedupe_key = $1 ORDER BY user_id`,
          [`test.assigned:${groupAssignmentId}`],
       )
-      assert.deepEqual(rows.map((row) => [row.user_id, row.target_path]).sort(), [[memberId, '/'], [secondMemberId, '/']].sort())
+      // The link leads to the assignment itself, not home (2026-11-22).
+      const assignmentPath = `/tests/assignments/${groupAssignmentId}`
+      assert.deepEqual(rows.map((row) => [row.user_id, row.target_path]).sort(), [[memberId, assignmentPath], [secondMemberId, assignmentPath]].sort())
 
       // A copy stays standalone and belongs to whoever copied it.
       const copy = await copyTestService(teacherId, testId)

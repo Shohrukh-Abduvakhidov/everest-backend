@@ -29,7 +29,7 @@ const attemptColumns = `attempt.id, attempt.test_id, attempt.assignment_id, atte
    attempt.policy_snapshot`
 
 const attemptContextColumns = `${attemptColumns}, test.title, test.course_id, test.module_id, test.origin,
-   assignment.closes_at`
+   test.generation_filters, assignment.closes_at`
 
 const attemptContextFrom = `FROM test_attempts AS attempt
    JOIN tests AS test ON test.id = attempt.test_id
@@ -218,6 +218,16 @@ async function addAttemptQuestions(attemptId, testId, questions, client) {
        )`,
       [normalizeInternalId(attemptId), normalizeInternalId(testId), JSON.stringify(questions)],
    )
+}
+
+// Titles of a subject per language, for the training block of a trainer attempt result.
+async function findSubjectTitles(subjectId, db = pool) {
+   const result = await db.query(
+      `SELECT COALESCE(jsonb_object_agg(language_code, title), '{}') AS titles
+       FROM subject_translations WHERE subject_id = $1`,
+      [normalizeInternalId(String(subjectId))],
+   )
+   return result.rows[0]?.titles ?? {}
 }
 
 async function findAttempt(userId, attemptId, db = pool) {
@@ -635,6 +645,7 @@ async function addScoreRevision(revision, client) {
 }
 
 export {
+   findSubjectTitles,
    addAttemptQuestions,
    addScoreRevision,
    createAttempt,
