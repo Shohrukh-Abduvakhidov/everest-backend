@@ -689,7 +689,8 @@ A student, an administrator or an owner picks a subject, a difficulty and a coun
 - `available`: how many questions the choice can draw now. Standard mode: in `language` (the subject's primary language by default). Mistakes mode: my open mistakes; `language` is `null` unless one is asked for.
 - `questionCounts`: the configured counts the create request accepts for this choice. In standard mode these are the counts up to `available`. In mistakes mode every count is accepted once there is one mistake, because the training takes what there is.
 - `allowsAll`: whether `count: "all"` is accepted (see below).
-- Mode `unanswered` (2026-11-24): send only `?mode=unanswered&sourceAttemptId=…`. `available` = blank questions of that attempt; `questionCount` = how many the training gets with `count: "all"` (at most `options.maxQuestions`). See "Unanswered" below.
+- **`plannedCount`** (mode mistakes, 2026-11-22): how many questions a `count: "all"` training **really** gets, filters and `options.maxQuestions` applied. Show it instead of `available` on the "All mistakes" option, e.g. "All mistakes (25)", or "50 of 160" when `plannedCount < available`. Mode mistakes also returns `sourceAttemptId` (`null` without one); `?mode=mistakes&sourceAttemptId=…` counts the mistakes of that attempt.
+- Mode `unanswered` (2026-11-22): send only `?mode=unanswered&sourceAttemptId=…`. `available` = blank questions of that attempt; `questionCount` = how many the training gets with `count: "all"` (at most `options.maxQuestions`). See "Unanswered" below.
 - Errors: `400 VALIDATION_ERROR`, `403` as in "Access", `404 SUBJECT_NOT_FOUND`; mode unanswered: `404 ATTEMPT_NOT_FOUND`, `409 ATTEMPT_NOT_FINISHED`.
 - Call it when the choice changes, with a short debounce. It is read-only.
 
@@ -697,9 +698,9 @@ A student, an administrator or an owner picks a subject, a difficulty and a coun
 
 | Field | Required | Value |
 |---|---|---|
-| `mode` | no | `standard` (default), `mistakes` (2026-11-22, see "Mistakes") or `unanswered` (2026-11-24, see "Unanswered") |
-| `sourceAttemptId` | unanswered: yes; other modes: not sent | My finished trainer attempt whose blank questions to repeat |
-| `subject` | yes (not sent in mode unanswered) | Subject id (`"135"`) or code (`"zaboni-tochiki"`) |
+| `mode` | no | `standard` (default), `mistakes` (2026-11-22, see "Mistakes") or `unanswered` (2026-11-22, see "Unanswered") |
+| `sourceAttemptId` | unanswered: yes; mistakes: no; standard: not sent | My finished trainer attempt: its blank questions (unanswered) or its open mistakes (mistakes) |
+| `subject` | yes (not sent in mode unanswered or with `sourceAttemptId`) | Subject id (`"135"`) or code (`"zaboni-tochiki"`) |
 | `difficulty` | standard: yes; mistakes: no | One of `options.difficulties`. In mistakes mode it defaults to `mixed` (any level) |
 | `count` | yes (optional in mode unanswered, default `"all"`) | One of `options.questionCounts` (number), or `"all"` (see below) |
 | `language` | no | `tg`, `ru` or `en`. Standard mode: defaults to the subject's `primaryLanguage`. Mistakes mode: any language unless given |
@@ -713,15 +714,18 @@ A student, an administrator or an owner picks a subject, a difficulty and a coun
 
 **Mistakes** (`mode: "mistakes"`, 2026-11-22):
 
-- An open mistake is a trainable question whose **latest** finished occurrence for me, in a training or a mock exam, earned less than full points. An unanswered question is 0 points, so it counts. A partly right matching question counts too.
+- **Rule of 2026-11-22.** An open mistake is a trainable question whose **latest answered** finished occurrence for me, in a training or a mock exam, earned less than full points. A partly right matching question counts too.
+- **A blank question is never a mistake**, anywhere: in a training, a mock exam or an attempt closed by the timer. Occurrences without an answer are skipped entirely: they neither open a mistake nor close an earlier one. (Before 2026-11-22 a blank question counted as a mistake; a student who opened a mock exam and left a subject empty got all of it as mistakes.)
 - Solving it with full points later (in any training or mock exam, including a mistakes training) closes it. A new wrong answer opens it again.
-- Course tests are not a source: their reveal policy may hide which answers were wrong.
+- Course tests and standalone tests are not a source: their reveal policy may hide which answers were wrong.
+- **Order:** the training takes the freshest mistakes first (by the time of their latest answered occurrence), wrong answers (0 points) before partial ones, random only among equals. Whether I met a question in the trainer before does not matter here. The questions of the training are then shown in a random order.
+- **From one attempt** (`sourceAttemptId`, 2026-11-22): `{ mode: "mistakes", sourceAttemptId, count }` takes only the mistakes I made in that finished trainer attempt that are still open. Subject and language come from the attempt: do not send `subject` or `language` (`400`); `sectionCode`, `topicCodes` and `difficulty` still narrow. Use it for "Repeat my mistakes" on a result page. Another student's attempt, a mock exam or a course test: `404 ATTEMPT_NOT_FOUND`; a running one: `409 ATTEMPT_NOT_FINISHED`; none open: `409 TRAINER_NO_MISTAKES`.
 - Filters: `sectionCode`, `topicCodes`/`topicCode`, `language` and `difficulty` work as usual and narrow the mistakes.
 - **Size:** the training takes `min(count, open mistakes)` questions, so asking for 10 with 3 open mistakes gives 3, without `409`. With no open mistakes for the choice: `409 TRAINER_NO_MISTAKES`.
 - It is an ordinary training (`origin = trainer`): same attempt routes, result with keys, history (`mode: "mistakes"`).
 - **Readiness:** mistakes trainings hold only questions I got wrong, so they count in `trainings` and `completedTrainings` but stay out of the readiness window. Weak topics include them.
 
-**Unanswered** (`mode: "unanswered"`, 2026-11-24): "Solve the questions I skipped" after a training.
+**Unanswered** (`mode: "unanswered"`, 2026-11-22): "Solve the questions I skipped" after a training.
 
 ```json
 { "mode": "unanswered", "sourceAttemptId": "335", "idempotencyKey": "nct-…" }
@@ -746,8 +750,8 @@ The response is the same `AttemptView` as `GET /tests/attempts/:attemptId`, plus
 | 409 | `TRAINER_NOT_ENOUGH_QUESTIONS` | Standard mode. `details[0].field = "available"`, `details[0].message` = how many questions match (as a string). Offer a smaller count, or `"all"` when the number is below the smallest count |
 | 409 | `TRAINER_COUNT_ALL_NOT_ALLOWED` | Standard mode, `count: "all"` while the choice has at least the smallest count of questions. `details[0].message` = available. Offer the numeric counts |
 | 409 | `TRAINER_NO_MISTAKES` | Mistakes mode, no open mistakes for this choice. Hide or disable "Repeat mistakes" when `mistakes` is 0 |
-| 404 | `ATTEMPT_NOT_FOUND` | Mode unanswered: `sourceAttemptId` is not my trainer attempt |
-| 409 | `ATTEMPT_NOT_FINISHED` | Mode unanswered: the source attempt is still running |
+| 404 | `ATTEMPT_NOT_FOUND` | Modes unanswered and mistakes: `sourceAttemptId` is not my trainer attempt |
+| 409 | `ATTEMPT_NOT_FINISHED` | Modes unanswered and mistakes: the source attempt is still running |
 | 409 | `TRAINER_NO_UNANSWERED` | Mode unanswered: every question of the source attempt has an answer |
 | 409 | `TRAINER_ATTEMPT_IN_PROGRESS` | One running training per student. `details[0].message` = the running `attemptId`. Offer "continue" (open it) or "finish" (`POST /tests/attempts/:id/submit`) |
 | 409 | `IDEMPOTENCY_KEY_REUSED` | The same key was sent with different parameters |
@@ -762,7 +766,8 @@ Then use the ordinary attempt routes:
    - `correctAnswer`;
    - `explanation` (blocks; image URLs signed).
 - `percent`, `attempt.score` and `attempt.maxScore` are the total.
-- **`counts`** (2026-11-24, every attempt result, also the submit response): `{ "correct": 6, "wrong": 2, "unanswered": 2, "pending": 0 }`. `unanswered` = no answer; `correct` = full points; `wrong` = answered with fewer points, partial credit included; `pending` = answered but not scored yet (manual review in course tests; always 0 in the trainer). `null` while the review is hidden (`revealed: false`). Use it for "Right / Wrong / Not solved" and for the "Solve the skipped questions" button.
+- **`training`** (2026-11-22, trainer attempts only, `null` otherwise): `{ subject: { id, code, titles }, mode, difficulty, language, sectionCode, topicCode, topicCodes, timeLimitMinutes, sourceAttemptId }`. The result page can show the subject and topics and start "Repeat" or "Repeat my mistakes" without looking the training up in the history.
+- **`counts`** (2026-11-22, every attempt result, also the submit response): `{ "correct": 6, "wrong": 2, "unanswered": 2, "pending": 0 }`. `unanswered` = no answer; `correct` = full points; `wrong` = answered with fewer points, partial credit included; `pending` = answered but not scored yet (manual review in course tests; always 0 in the trainer). `null` while the review is hidden (`revealed: false`). Use it for "Right / Wrong / Not solved" and for the "Solve the skipped questions" button.
 
 **`GET /trainer/attempts`** takes the query `subjectId`, `limit` (1–100, default 20) and `offset`. It returns:
 
@@ -779,7 +784,7 @@ Then use the ordinary attempt routes:
 
 - `score`, `maxScore` and `percent` are `null` while a training is `in_progress`.
 - `stats` counts finished trainings only and does not depend on `subjectId`.
-- New fields (2026-11-22): `mode`, `topicCodes` (always a list; empty without topics), `timeLimitMinutes`. `topicCode` is the single topic when exactly one was chosen, otherwise `null`. A mistakes training without a `language` has `language: null`. Older trainings read as `mode: "standard"`, `timeLimitMinutes: null`. `sourceAttemptId` (2026-11-24) is the source attempt of an unanswered training, `null` otherwise.
+- New fields (2026-11-22): `mode`, `topicCodes` (always a list; empty without topics), `timeLimitMinutes`. `topicCode` is the single topic when exactly one was chosen, otherwise `null`. A mistakes training without a `language` has `language: null`. Older trainings read as `mode: "standard"`, `timeLimitMinutes: null`. `sourceAttemptId` (2026-11-22) is the source attempt of an unanswered training or of a mistakes training from one attempt, `null` otherwise. `subject { id, code, titles }` (2026-11-22) is there too, next to the flat `subjectId` and `subjectCode`.
 - `questionCount` is the real number of questions; with `count: "all"` or in mistakes mode it may be smaller than the requested count.
 **`GET /trainer/overview`** is computed from my **finished** trainings (`graded` or `expired`; a running one does not count):
 
@@ -802,7 +807,7 @@ Then use the ordinary attempt routes:
 } }
 ```
 
-- **Readiness of a subject:** points ÷ questions over its last `readinessWindow` finished **standard** trainings (`TRAINER_READINESS_WINDOW`, default 5), × 100. Every question is 1 point, so this is the share of correct answers, and longer trainings weigh more. Mistakes trainings (2026-11-22) and unanswered trainings (2026-11-24) stay out; the same rule applies to readiness on `/me/home` and in the staff views.
+- **Readiness of a subject:** points ÷ questions over its last `readinessWindow` finished **standard** trainings (`TRAINER_READINESS_WINDOW`, default 5), × 100. Every question is 1 point, so this is the share of correct answers, and longer trainings weigh more. Mistakes trainings (2026-11-22) and unanswered trainings (2026-11-22) stay out; the same rule applies to readiness on `/me/home` and in the staff views.
 - **Overall `readinessPercent`:** the average of the subject values, where every trained subject counts equally.
 - **`subjects[].trainings`** counts all finished trainings of the subject, mistakes trainings included. **`completedTrainings`** is their sum. A subject trained only in mistakes mode has no readiness and is not listed.
 - **`mistakes`** (2026-11-22): my open mistakes per subject, with `sections[]` and `topics[]` (codes only; take titles from the catalog). `total` is the sum over subjects. A question in two topics counts in both topics but once in its subject. Subjects without open mistakes are left out; with none, `{ "total": 0, "subjects": [] }`. "Repeat mistakes" = `POST /trainer/attempts` with `{ mode: "mistakes", subject, topicCodes?, count }`.
@@ -1287,7 +1292,8 @@ POST routes need CSRF (`X-CSRF-Token` + `Origin`) with the cookie session, like 
 ```
 
 - `title` and `body` are ready to show: rendered once in the user's profile language (`ru`, `tj`, `en`) and time zone when the notification is created. Changing the language later does not rewrite old notifications.
-- `targetPath` is a path inside the student app (`/courses/:courseId` or `/`). Open it on click; it can be `null`.
+- `targetPath` is a path inside the student app (`/courses/:courseId`, `/tests/assignments/:assignmentId`, an attempt result page or `/`). Open it on click; it can be `null`.
+- **Tests outside courses** (2026-11-22): `test.assigned`, `test.closing_24h`, `test.answers_available` and `test.extra_attempts` of a standalone test lead to `/tests/assignments/:assignmentId` (before: `/`). The student app needs a page there: start or resume with `POST /tests/assignments/:assignmentId/start`, or show `GET /tests/assignments/:assignmentId/result` when no attempts are left. Course tests keep `/courses/:courseId`.
 - `eventCode`: `test.assigned`, `group.announcement`, `test.extra_attempts`, `account.approved`, `account.unblocked`, `course.enrolled`, `module.opened`, `test.closing_24h`, `test.answers_available`, `test.result_updated`, `attempt.expired`, `telegram.disconnected`. Use it for an icon; do not parse `body`.
 - `test.result_updated` and `attempt.expired` link to the attempt result page (`/tests/attempts/:id/result`, `/nct/attempts/:id/result`, `/nct/exam/:id/result`). They are in-app only and do not appear in `/me/notification-settings` events.
 - Notifications older than 180 days are deleted by the server; the inbox never shows older items.
@@ -1392,7 +1398,7 @@ Exact bodies and error codes are in Swagger and `docs/api.md`.
 **Lists.** `GET /admin/tests?origin=standalone` returns standalone tests only. A teacher sees the ones they created; owner/admin see all. `?courseId=` returns course tests only.
 
 **Students.**
-- `GET /me/home` lists the assignments in `tests.open` / `tests.upcoming` with `origin: "standalone"` and `courseId`/`courseTitle` `null`. Show the test title and the deadline; there is no course to link to.
+- `GET /me/home` lists the assignments in `tests.open` / `tests.upcoming` with `origin: "standalone"` and `courseId`/`courseTitle` `null`. Show the test title and the deadline; there is no course to link to. Notifications about it lead to `/tests/assignments/:assignmentId` (see "Notifications").
 - Start with `POST /tests/assignments/:assignmentId/start`, then use the usual attempt and result routes. No enrollment is needed.
 - `GET /me/attempts` returns `origin: "standalone"` (also a valid `origin` filter) with `title` and `courseId: null`.
 - Notifications about these tests point to `/`.

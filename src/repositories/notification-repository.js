@@ -34,7 +34,7 @@ async function listActiveGroupMemberIds(groupId, db = pool) {
 async function findAssignmentSource(assignmentId, db = pool) {
    const result = await db.query(
       `SELECT assignment.id, assignment.status, assignment.opens_at, assignment.closes_at,
-          assignment.group_id, assignment.user_id, test.title AS test_title, test.course_id,
+          assignment.group_id, assignment.user_id, test.title AS test_title, test.course_id, test.origin,
           test.status AS test_status,
           (assignment.opens_at <= CURRENT_TIMESTAMP) AS is_open,
           (assignment.closes_at IS NOT NULL AND assignment.closes_at <= CURRENT_TIMESTAMP) AS is_closed
@@ -87,7 +87,7 @@ async function findAttemptGrantSource(grantId, db = pool) {
    const result = await db.query(
       `SELECT grant_record.id, grant_record.user_id, grant_record.extra_attempts,
           assignment.id AS assignment_id, assignment.status AS assignment_status,
-          test.title AS test_title, test.course_id
+          test.title AS test_title, test.course_id, test.origin
        FROM test_attempt_grants AS grant_record
        JOIN test_assignments AS assignment ON assignment.id = grant_record.assignment_id
        JOIN tests AS test ON test.id = assignment.test_id
@@ -131,7 +131,7 @@ async function findModuleGrantSource(grantId, db = pool) {
 async function findAssignmentWindowSource(assignmentId, db = pool) {
    const result = await db.query(
       `SELECT assignment.id, assignment.status, assignment.closes_at, assignment.group_id,
-          assignment.user_id, test.title AS test_title, test.course_id, test.status AS test_status,
+          assignment.user_id, test.title AS test_title, test.course_id, test.origin, test.status AS test_status,
           test.max_attempts, test.answer_reveal_policy,
           (assignment.closes_at IS NOT NULL AND assignment.closes_at <= CURRENT_TIMESTAMP) AS is_closed
        FROM test_assignments AS assignment

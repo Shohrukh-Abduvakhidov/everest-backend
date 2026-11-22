@@ -1,5 +1,50 @@
 # Decisions
 
+## 2026-11-22 — Trainer: the mistakes rule and mode unanswered
+
+**Why.** A diagnosis of one student (user 2240) showed 160 "mistakes" in biology, of which 137 were questions the student never answered: 47 from mock exams where biology was left empty, the rest from trainings sent in blank. The 8 real mistakes of the last 10-question training were not in the mistakes training, because picking put questions not met in the trainer first, and those were the blank mock exam ones. "All mistakes (160)" then gave 50 questions (`TRAINER_MAX_QUESTIONS`).
+
+**Owner's decisions:**
+1. **Mistake = a wrong answer, not a blank one.**
+   - For each question the latest finished occurrence *in which the student answered* counts (`answer_data` not null).
+   - Blank occurrences are skipped: they neither create a mistake nor cancel an earlier one.
+   - A mistake = less than full points in that latest answered occurrence.
+   - Sources: trainer and mock exam; not course tests or standalone tests.
+   - A blank question is no mistake anywhere, mock exams and attempts closed by the timer included.
+   - The rule is in `mistakeQuestionIdsSql`, so the catalog, the overview, availability and picking all follow it.
+   - For user 2240 biology goes from 160 to 25.
+2. **Picking in mistakes mode.**
+   - The freshest mistakes come first, by the time of their latest answered occurrence.
+   - Wrong (0 points) comes before partial; random only among equals.
+   - "Not met in the trainer first" is not used in this mode.
+3. **`plannedCount`** in `/trainer/availability` for mode mistakes: how many questions a `count: "all"` training really takes, with the filters and `TRAINER_MAX_QUESTIONS`.
+4. **`sourceAttemptId` in mode mistakes.**
+   - It takes only the mistakes (by rule 1) of that finished trainer attempt of the student.
+   - Subject and language come from the attempt.
+   - Another student's attempt is `404`; no mistakes is `409 TRAINER_NO_MISTAKES`.
+5. **The training of an attempt** (subject, sectionCode, topicCodes and the other filters) is in the attempt result and the trainer history.
+6. **Links of notifications about standalone tests** lead to the test, not to `/`.
+7. **Mode `unanswered`** (PR #76).
+   - `POST /trainer/attempts { mode: "unanswered", sourceAttemptId }` repeats the questions of the student's finished trainer attempt that got no answer, in its order.
+   - Subject and language come from the attempt.
+   - Another student's attempt is `404`; none blank is `409 TRAINER_NO_UNANSWERED`.
+   - Size: at most `TRAINER_MAX_QUESTIONS`; how many go in is in the response and in availability.
+   - It is an ordinary training (`origin = 'trainer'`), out of readiness like mistakes trainings.
+   - Attempt results count right, wrong and blank questions.
+
+**Choices made without the owner:**
+1. **"Mistakes of this attempt"** = questions answered in that attempt with less than full points *and* still open by rule 1. A question solved later is no longer offered, and a blank question of that attempt is not offered either, even if an earlier attempt got it wrong.
+2. **With `sourceAttemptId`,** `subject` and `language` are `400` (they come from the attempt). `sectionCode`, `topicCodes` and `difficulty` still narrow, as in plain mistakes mode. The source is a trainer attempt only: a mock exam has several subjects.
+3. **A finished source** is `submitted`, `graded` or `expired`; a running one is `409 ATTEMPT_NOT_FINISHED` (as in mode unanswered).
+4. **Order.** Recency picks the questions; the training then shows them in a random order, as every training does.
+5. **Rule boundary.** The answered-occurrence rule covers open mistakes only. Weak topics (`/trainer/overview`) still count a blank question as wrong, because they measure the share of solved questions.
+6. **The link of a standalone test** is `/tests/assignments/:assignmentId`, for `test.assigned`, `test.closing_24h`, `test.answers_available` and `test.extra_attempts`. The student app has no such page yet; frontend-handoff describes it (start/resume, or the assignment result). `test.result_updated` and `attempt.expired` already led to the attempt result.
+7. **Result fields.**
+   - The trainer attempt result has `training { subject { id, code, titles }, mode, difficulty, language, sectionCode, topicCode, topicCodes, timeLimitMinutes, sourceAttemptId }`; it is `null` for other attempts.
+   - The history keeps its flat fields and adds the same `subject` object.
+8. **`counts` of a result** (mode unanswered, PR #76) has a fourth field, `pending`: answered, not scored yet, which happens only in course tests with manual review. It is `null` while the reveal policy hides the review.
+9. **Mode unanswered limits.** The source is a trainer attempt only. Its level, section and topics are copied into the new training, so the history labels it.
+
 ## 2026-11-23 — M10 tail: standalone tests and the question generator
 
 **Owner's decisions:**
@@ -47,7 +92,7 @@
 9. **M12 figures.**
    - Recent results, `below_pass`, first-attempt statistics and `missed_deadline` count standalone tests. `missed_deadline` needs no enrollment for them.
    - The course filter of the course view leaves them out, and so does the "courses" staff scope of `/admin/users/:id/attempts`.
-10. **M14.** No change was needed: the resolvers do not depend on the course. The target path is `/`, because the student app has no page for a test outside a course.
+10. **M14.** No change was needed: the resolvers do not depend on the course. The target path is `/`, because the student app has no page for a test outside a course. (Changed on 2026-11-22: it is `/tests/assignments/:assignmentId`.)
 11. **Not added:** a learner list of standalone assignments beyond `/me/home` (10 open, 10 upcoming), and parameter-based generation per student (every student gets the same set, by decision 2).
 
 ## 2026-11-22 — NCT trainer: mistakes mode, several topics, count "all", time limit

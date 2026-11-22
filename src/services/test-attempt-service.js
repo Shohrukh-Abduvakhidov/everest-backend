@@ -20,6 +20,7 @@ import {
    selectResultAttempt,
 } from '../utils/attempt-policy.js'
 import { normalizeInternalId } from '../utils/internal-id.js'
+import { trainingSummary } from '../utils/trainer-training.js'
 import { parseCourseId, parseUserId, validateBody, validationError } from './course-service.js'
 import { completeTestLessonsService } from './lesson-completion-service.js'
 import { enqueueAttemptExpired } from './notification-service.js'
@@ -621,6 +622,11 @@ async function readResult(deps, attempt, now) {
    const percent = scorePercent(attempt.score, attempt.max_score)
    // Counted from the revealed questions, so a hidden review hides the counts too.
    const counts = revealed ? outcomeCounts(questions) : null
+   // A trainer attempt also names its training: subject, section, topics, mode (2026-11-22).
+   const filters = attempt.generation_filters
+   const training = attempt.origin === 'trainer' && filters?.subjectId
+      ? trainingSummary(filters, await deps.repository.findSubjectTitles(filters.subjectId))
+      : null
    // From the snapshot taken at start, so editing the test later cannot change this result.
    const passPercent = attempt.policy_snapshot.passPercent ?? null
    return {
@@ -633,6 +639,7 @@ async function readResult(deps, attempt, now) {
       revealsAt: policy !== 'never' && !revealed ? iso(attempt.closes_at) : null,
       remainingAttempts: remaining,
       counts,
+      training,
       questions: await withAttemptImages(deps, questions, questions.map(safeReviewQuestion)),
       serverNow: now.toISOString(),
    }

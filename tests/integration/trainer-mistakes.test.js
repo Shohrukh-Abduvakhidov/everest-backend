@@ -275,19 +275,24 @@ test('NCT trainer: mistakes, topics, small choices and time limits', async (t) =
       await assert.rejects(create(learnerId, { mode: 'mistakes', count: 'all' }), { code: 'TRAINER_NO_MISTAKES' })
       assert.equal((await getTrainerOverviewService(learnerId, deps)).mistakes.total, 0)
 
-      // A new wrong answer (an unanswered question counts) brings the question back.
+      // Leaving it blank (2026-11-22) neither reopens nor closes it: empty occurrences are skipped.
       const second = await create(learnerId, { difficulty: 'mixed', count: 'all', topicCode: 'tiny' })
       await finish(learnerId, second.attempt.id, [], { skip: [tinyIds[0]] })
+      assert.equal((await getTrainerOverviewService(learnerId, deps)).mistakes.total, 0)
+
+      // A new wrong answer brings the question back.
+      const third = await create(learnerId, { difficulty: 'mixed', count: 'all', topicCode: 'tiny' })
+      await finish(learnerId, third.attempt.id, [tinyIds[0]])
       overview = await getTrainerOverviewService(learnerId, deps)
       assert.equal(overview.mistakes.total, 1)
       catalog = (await getTrainerCatalogService(learnerId, deps)).subjects.find((row) => row.code === subject.code)
       assert.equal(catalog.mistakes, 1)
 
-      // Readiness uses the two standard trainings only: (1 + 1) / (2 + 2); the mistakes training
-      // (1 / 1) would make it 60. It still counts as a training.
+      // Readiness uses the three standard trainings only: (1 + 1 + 1) / (2 + 2 + 2); the mistakes
+      // training (1 / 1) would make it 57.14. It still counts as a training.
       const readiness = overview.subjects.find((row) => row.subjectCode === subject.code)
       assert.equal(readiness.readinessPercent, 50)
-      assert.equal(readiness.trainings, 3)
-      assert.equal(overview.recentResults[1].mode, 'mistakes')
+      assert.equal(readiness.trainings, 4)
+      assert.equal(overview.recentResults[2].mode, 'mistakes')
    })
 })

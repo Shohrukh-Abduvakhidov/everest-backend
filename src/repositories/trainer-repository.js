@@ -244,27 +244,41 @@ async function findOpenTrainerAttempt(userId, client) {
    return result.rows[0] || null
 }
 
-// The student's open mistakes: questions whose latest finished occurrence (trainer or mock exam)
-// earned less than full points. An unanswered question is 0 points, so it counts. A later
-// occurrence with full points takes the question out; a later wrong one brings it back.
-// Course tests are not a source: their reveal policy may hide which answers were wrong.
-function mistakeQuestionIdsSql(userParam) {
-   return `SELECT latest.question_id FROM (
-         SELECT DISTINCT ON (item.question_id) item.question_id,
-            COALESCE(answer.awarded_points, 0) >= item.max_points AS correct
-         FROM test_attempts AS attempt
-         JOIN tests AS test ON test.id = attempt.test_id AND test.origin IN ('trainer', 'mock_exam')
-         JOIN attempt_questions AS item ON item.attempt_id = attempt.id
-         LEFT JOIN student_answers AS answer ON answer.attempt_question_id = item.id
-         WHERE attempt.user_id = ${userParam} AND attempt.status IN ('graded', 'expired')
-         ORDER BY item.question_id, COALESCE(attempt.submitted_at, attempt.graded_at) DESC, attempt.id DESC
-      ) AS latest
-      WHERE NOT latest.correct`
+// An answer the student gave: answer_data present (an empty occurrence has none or JSON null).
+const answeredSql = (alias) => `${alias}.answer_data IS NOT NULL AND ${alias}.answer_data <> 'null'::jsonb`
+
+// Per question, the student's latest finished occurrence in a training or a mock exam in which they
+// answered it (2026-11-22). Occurrences without an answer are skipped: they neither open nor close
+// a mistake. Course tests and standalone tests are not a source: their reveal policy may hide which
+// answers were wrong.
+function latestAnsweredSql(userParam) {
+   return `SELECT DISTINCT ON (item.question_id) item.question_id,
+         COALESCE(attempt.submitted_at, attempt.graded_at) AS answered_at,
+         COALESCE(answer.awarded_points, 0) AS awarded_points, item.max_points
+      FROM test_attempts AS attempt
+      JOIN tests AS test ON test.id = attempt.test_id AND test.origin IN ('trainer', 'mock_exam')
+      JOIN attempt_questions AS item ON item.attempt_id = attempt.id
+      JOIN student_answers AS answer ON answer.attempt_question_id = item.id AND ${answeredSql('answer')}
+      WHERE attempt.user_id = ${userParam} AND attempt.status IN ('graded', 'expired')
+      ORDER BY item.question_id, COALESCE(attempt.submitted_at, attempt.graded_at) DESC, attempt.id DESC`
 }
 
-// Filters of one request, six parameters from start: subject; language (NULL = any); stored
+// The student's open mistakes: the latest answered occurrence earned less than full points.
+// answered_at orders them (freshest first); wrong = 0 points, otherwise partial credit.
+function openMistakesSql(userParam) {
+   return `SELECT latest.question_id, latest.answered_at, latest.awarded_points <= 0 AS wrong
+      FROM (${latestAnsweredSql(userParam)}) AS latest
+      WHERE latest.awarded_points < latest.max_points`
+}
+
+function mistakeQuestionIdsSql(userParam) {
+   return `SELECT mistake.question_id FROM (${openMistakesSql(userParam)}) AS mistake`
+}
+
+// Filters of one request, seven parameters from start: subject; language (NULL = any); stored
 // difficulties (NULL = any); section code; topic codes (a question in any of them); the user
-// whose open mistakes the questions must be (NULL = no such limit).
+// whose open mistakes the questions must be (NULL = no such limit); a source attempt whose
+// answered questions below full points the questions must be (NULL = any attempt).
 function candidateFilter(start) {
    return `AND question.subject_id = $${start}
       AND ($${start + 1}::text IS NULL OR question.language_code = $${start + 1})
@@ -276,7 +290,13 @@ function candidateFilter(start) {
       AND ($${start + 4}::text[] IS NULL OR EXISTS (
          SELECT 1 FROM question_topics AS link JOIN topics AS topic ON topic.id = link.topic_id
          WHERE link.question_id = question.id AND topic.code = ANY($${start + 4}::text[])))
-      AND ($${start + 5}::bigint IS NULL OR question.id IN (${mistakeQuestionIdsSql(`$${start + 5}`)}))`
+      AND ($${start + 5}::bigint IS NULL OR question.id IN (${mistakeQuestionIdsSql(`$${start + 5}`)}))
+      AND ($${start + 6}::bigint IS NULL OR EXISTS (
+         SELECT 1 FROM attempt_questions AS source_item
+         JOIN student_answers AS source_answer
+            ON source_answer.attempt_question_id = source_item.id AND ${answeredSql('source_answer')}
+         WHERE source_item.attempt_id = $${start + 6} AND source_item.question_id = question.id
+            AND COALESCE(source_answer.awarded_points, 0) < source_item.max_points))`
 }
 
 function candidateParams(filters) {
@@ -287,6 +307,7 @@ function candidateParams(filters) {
       filters.sectionCode ?? null,
       filters.topicCodes?.length ? filters.topicCodes : null,
       filters.mistakesOf ? normalizeInternalId(filters.mistakesOf) : null,
+      filters.mistakesFromAttempt ? normalizeInternalId(String(filters.mistakesFromAttempt)) : null,
    ]
 }
 
@@ -295,32 +316,41 @@ function candidateParams(filters) {
 async function countCandidates(bankCodePrefix, filters, client = pool) {
    const result = await client.query(
       `SELECT count(*)::integer AS total ${trainableFrom} ${candidateFilter(2)}
-         AND NOT (question.id = ANY($8::bigint[]))`,
+         AND NOT (question.id = ANY($9::bigint[]))`,
       [bankCodePrefix, ...candidateParams(filters), (filters.excludeIds ?? []).map(normalizeInternalId)],
    )
    return result.rows[0].total
 }
 
-// Random questions; ones this student has not met in an earlier trainer attempt come first.
+// Standard: random questions; ones this student has not met in an earlier trainer attempt come
+// first. Mistakes (filters.mistakesOf): the freshest mistakes first (by their latest answered
+// occurrence), wrong (0 points) before partial credit, random only among equals; whether a
+// question was met in the trainer does not matter there.
 async function pickCandidates(bankCodePrefix, filters, { userId, excludeIds, limit }, client) {
-   const result = await client.query(
-      `SELECT question.id, question.difficulty ${trainableFrom} ${candidateFilter(2)}
-         AND NOT (question.id = ANY($8::bigint[]))
-       ORDER BY EXISTS (
-            SELECT 1 FROM attempt_questions AS seen
-            JOIN test_attempts AS seen_attempt ON seen_attempt.id = seen.attempt_id
-            JOIN tests AS seen_test ON seen_test.id = seen_attempt.test_id AND seen_test.origin = 'trainer'
-            WHERE seen.question_id = question.id AND seen_attempt.user_id = $9
-         ), random()
-       LIMIT $10`,
-      [
-         bankCodePrefix,
-         ...candidateParams(filters),
-         excludeIds.map(normalizeInternalId),
-         normalizeInternalId(userId),
-         limit,
-      ],
-   )
+   const base = [bankCodePrefix, ...candidateParams(filters), excludeIds.map(normalizeInternalId)]
+   const select = `SELECT question.id, question.difficulty ${trainableFrom} ${candidateFilter(2)}
+         AND NOT (question.id = ANY($9::bigint[]))`
+   const result = filters.mistakesOf
+      ? await client.query(
+         `WITH mistake AS MATERIALIZED (${openMistakesSql('$7')})
+          ${select}
+          ORDER BY (SELECT mistake.answered_at FROM mistake WHERE mistake.question_id = question.id) DESC NULLS LAST,
+             (SELECT mistake.wrong FROM mistake WHERE mistake.question_id = question.id) DESC NULLS LAST,
+             random()
+          LIMIT $10`,
+         [...base, limit],
+      )
+      : await client.query(
+         `${select}
+          ORDER BY EXISTS (
+               SELECT 1 FROM attempt_questions AS seen
+               JOIN test_attempts AS seen_attempt ON seen_attempt.id = seen.attempt_id
+               JOIN tests AS seen_test ON seen_test.id = seen_attempt.test_id AND seen_test.origin = 'trainer'
+               WHERE seen.question_id = question.id AND seen_attempt.user_id = $10
+            ), random()
+          LIMIT $11`,
+         [...base, normalizeInternalId(userId), limit],
+      )
    return result.rows
 }
 
@@ -435,7 +465,10 @@ async function createTrainerAssignment(testId, userId, opensAt, client) {
 
 async function listTrainerAttempts(userId, filters, db = pool) {
    const result = await db.query(
-      `SELECT ${trainerAttemptColumns} ${trainerAttemptFrom}
+      `SELECT ${trainerAttemptColumns},
+         (SELECT COALESCE(jsonb_object_agg(language_code, title), '{}') FROM subject_translations
+          WHERE subject_id = (test.generation_filters ->> 'subjectId')::bigint) AS subject_titles
+       ${trainerAttemptFrom}
        WHERE attempt.user_id = $1
          AND ($2::bigint IS NULL OR (test.generation_filters ->> 'subjectId')::bigint = $2)
        ORDER BY attempt.id DESC

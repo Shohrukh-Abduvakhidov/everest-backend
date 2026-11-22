@@ -75,6 +75,13 @@ function coursePath(courseId) {
    return courseId ? `/courses/${courseId}` : '/'
 }
 
+// Where a notification about an assignment leads: the course of a course test, the assignment
+// itself for a test outside courses (origin standalone, 2026-11-22).
+function testPath(row, assignmentId) {
+   if (row.origin === 'standalone') return `/tests/assignments/${assignmentId}`
+   return coursePath(row.course_id)
+}
+
 // Result pages of the student app for each kind of attempt.
 function attemptResultPath(attempt) {
    if (attempt.origin === 'trainer') return `/nct/attempts/${attempt.id}/result`
@@ -224,7 +231,7 @@ async function resolveAssignment(repository, db, assignmentId, onlyUserId = null
       eventCode: 'test.assigned',
       userIds,
       params: { test: assignment.test_title, closesAt: assignment.closes_at },
-      targetPath: coursePath(assignment.course_id),
+      targetPath: testPath(assignment, assignment.id),
       dedupeKey: `test.assigned:${assignment.id}`,
    }]
 }
@@ -262,7 +269,7 @@ const resolvers = {
          eventCode: 'test.extra_attempts',
          userIds: [grant.user_id],
          params: { test: grant.test_title, count: grant.extra_attempts },
-         targetPath: coursePath(grant.course_id),
+         targetPath: testPath(grant, grant.assignment_id),
          dedupeKey: `test.extra_attempts:${grant.id}`,
       }]
    },
@@ -307,7 +314,7 @@ const resolvers = {
          eventCode: 'test.closing_24h',
          userIds: await repository.filterUsersToRemind(assignment.id, assignment.max_attempts, audience, db),
          params: { test: assignment.test_title, closesAt: assignment.closes_at },
-         targetPath: coursePath(assignment.course_id),
+         targetPath: testPath(assignment, assignment.id),
          dedupeKey: `test.closing_24h:${assignment.id}:${payload.closesAt}`,
       }]
    },
@@ -321,7 +328,7 @@ const resolvers = {
          eventCode: 'test.answers_available',
          userIds: await repository.listFinishedAttemptUserIds(assignment.id, db),
          params: { test: assignment.test_title },
-         targetPath: coursePath(assignment.course_id),
+         targetPath: testPath(assignment, assignment.id),
          dedupeKey: `test.answers_available:${assignment.id}:${payload.closesAt}`,
       }]
    },
