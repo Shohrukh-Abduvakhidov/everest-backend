@@ -213,8 +213,10 @@ function safeLearnerAssignment(row, attempts, now, extraAttempts = 0) {
 
 async function requireContentAccess(deps, actorId, { course_id: courseId, module_id: moduleId, origin }, now, db) {
    // Trainer and mock exam attempts belong to no course: an active account is the whole rule,
-   // so revoking a course enrollment never stops a running training or exam.
-   if (origin === 'trainer' || origin === 'mock_exam') {
+   // so revoking a course enrollment never stops a running training or exam. A standalone test
+   // has no course either: its active assignment (checked by the caller's lookup) is the access,
+   // and a running attempt goes on like any other after the assignment or membership ends.
+   if (origin === 'trainer' || origin === 'mock_exam' || origin === 'standalone') {
       if (!await deps.repository.isActiveAccount(actorId, db)) {
          throw new AppError(403, 'ACCOUNT_NOT_ACTIVE', 'Account is not active')
       }

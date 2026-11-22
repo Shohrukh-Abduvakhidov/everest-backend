@@ -118,12 +118,15 @@ All mutations need CSRF for cookie sessions, use the administrative rate limit, 
 
 | Method | Path | Permission | Purpose |
 |---|---|---|---|
-| GET | `/admin/tests` | `tests.read` | List in scope; `limit`, `offset`, `courseId`, `status`; `hasMore` |
-| POST | `/admin/tests` | `tests.manage` | Create a draft |
+| GET | `/admin/tests` | `tests.read` | List in scope; `limit`, `offset`, `courseId`, `status`, `origin` (`authored`, `standalone`); `hasMore` |
+| POST | `/admin/tests` | `tests.manage` | Create a draft in a course, or a standalone test (`courseId: null`) |
 | GET | `/admin/tests/:testId` | `tests.read` | Test with questions |
 | PATCH | `/admin/tests/:testId` | `tests.manage` | Edit draft settings |
 | DELETE | `/admin/tests/:testId` | `tests.manage` | Delete a draft |
 | POST | `/admin/tests/:testId/questions` | `tests.manage` | Add up to 100 questions |
+| POST | `/admin/tests/:testId/questions/generate` | `tests.manage` | Add questions by parameters (the trainer selection), 2026-11-23 |
+| GET | `/admin/trainer/catalog` | `tests.manage` | Trainable NCT questions with exact counts, no mistakes, 2026-11-23 |
+| GET | `/admin/trainer/availability` | `tests.manage` | Exact count for one generator choice; optional `testId`, 2026-11-23 |
 | PUT | `/admin/tests/:testId/questions/order` | `tests.manage` | Replace the order (full list) |
 | DELETE | `/admin/tests/:testId/questions/:questionId` | `tests.manage` | Remove a question |
 | PUT | `/admin/tests/:testId/questions/:questionId/points` | `tests.manage` | Set points |
@@ -135,9 +138,20 @@ All mutations need CSRF for cookie sessions, use the administrative rate limit, 
 | PATCH | `/admin/tests/:testId/assignments/:assignmentId` | `tests.assign` | Change `opensAt`, `closesAt` |
 | DELETE | `/admin/tests/:testId/assignments/:assignmentId` | `tests.assign` | Revoke (the row stays) |
 
-**Scope.** Owner/admin reach every test. A teacher needs the `teacher` role and `course_teachers.can_manage_tests` on the test's course; otherwise `404 TEST_NOT_FOUND` or `404 COURSE_NOT_FOUND`. Assigning to a group also needs `group_teachers.can_assign_tests`; otherwise `404 GROUP_NOT_FOUND`. `tests.publish` is owner/admin only.
+**Kinds of tests (`origin`, 2026-11-23).**
+- `authored`: a test inside a course. It works as before: a student needs a current enrollment, and a module test also needs module access.
+- `standalone`: no course and no module (`courseId` and `moduleId` are `null`). Only an active assignment opens it to a student: to their group or to them personally. No enrollment is needed.
+- Create a standalone test with `POST /admin/tests { "courseId": null, "title": … }`. Omitting `courseId` is still `400`, so an old client cannot make one by accident. A `moduleId` on a standalone test is `400`.
+- Copies keep the kind.
 
-**Settings** (`POST` needs `courseId` and `title`; `courseId` cannot change):
+**Scope.**
+- Owner/admin reach every test.
+- Course tests: a teacher needs the `teacher` role and `course_teachers.can_manage_tests` on the test's course; otherwise `404 TEST_NOT_FOUND` or `404 COURSE_NOT_FOUND`.
+- Standalone tests: a teacher reaches only the ones they created; others answer `404 TEST_NOT_FOUND`.
+- Assigning to a group also needs `group_teachers.can_assign_tests`; otherwise `404 GROUP_NOT_FOUND`.
+- **Publishing (2026-11-23):** `tests.publish` is now also held by teachers. Owner/admin publish any test of their scope; a teacher only a test they created (`created_by`), otherwise `403 ACTION_FORBIDDEN`.
+
+**Settings** (`POST` needs `courseId` (a course, or `null` for a standalone test) and `title`; `courseId` cannot change):
 
 | Field | Values | Default |
 |---|---|---|
@@ -153,7 +167,33 @@ All mutations need CSRF for cookie sessions, use the administrative rate limit, 
 
 **Questions.** `{ "questions": [{ "questionId": "1", "points": 2.5 }] }`. Points default to 1 and come back as decimal strings. Questions must be published, have a verified key (`409 QUESTION_NOT_ELIGIBLE`) and sit in a bank the actor can read (`404 QUESTION_NOT_FOUND`). Responses never carry answer keys.
 
-**Assignments.** Send exactly one of `groupId` and `userId`, plus optional `opensAt` and `closesAt`. The test must be published (`409 TEST_NOT_PUBLISHED`). A student needs a current enrollment (`409 STUDENT_NOT_ENROLLED`); a group must be active (`409 GROUP_ARCHIVED`) and grants no course access. An audience has one active assignment per test (`409 ASSIGNMENT_DUPLICATE`). `after_window` tests need `closesAt`. Revoked assignments cannot change (`409 ASSIGNMENT_NOT_ACTIVE`).
+**Question generator (2026-11-23).** `POST /admin/tests/:testId/questions/generate`, body `{ subject, difficulty, count, language?, sectionCode?, topicCodes? | topicCode? }`.
+- It draws trainable NCT questions with the trainer's standard selection: published, verified key, bank code starting with `TRAINER_BANK_CODE_PREFIX`.
+- It uses the same filters, the 30/40/30 split for `mixed` and the same count rules: a number from the trainer counts, or `"all"` only when 1 to (smallest count − 1) questions are available.
+- `language` defaults to the subject's primary language. Questions the test already holds are left out.
+- Each question gets 1 point and is appended in random order. The set is then fixed in the test and is the same for every student. Manual add, remove, reorder and points stay available.
+- Works for drafts only (`409 TEST_IMMUTABLE`), course or standalone. The 500-question limit applies (`409 TEST_QUESTION_LIMIT`).
+- The response is `TestDetail` plus `addedQuestionIds`. `generation` on the test holds the parameters of the last generation: `subjectId`, `subjectCode`, `difficulty`, `count`, `language`, `sectionCode`, `topicCodes`, `addedQuestionCount`, `generatedAt`, `generations`.
+- Errors: `400 VALIDATION_ERROR`, `404 TEST_NOT_FOUND` / `SUBJECT_NOT_FOUND`, `409 TRAINER_NOT_ENOUGH_QUESTIONS` (`details[0].message` = available), `409 TRAINER_COUNT_ALL_NOT_ALLOWED`.
+
+**Staff trainer catalog and availability (2026-11-23).**
+- `GET /admin/trainer/catalog` returns the learner catalog without any `mistakes` fields.
+- `GET /admin/trainer/availability?subject&difficulty&language&sectionCode&topicCode|topicCodes&testId` returns the learner availability in standard mode (`mode` is not accepted). With `testId` (a test of the actor's scope, else `404 TEST_NOT_FOUND`) the questions it already holds are left out, so `available` is what the generator could still add.
+
+**Assignments.** Send exactly one of `groupId` and `userId`, plus optional `opensAt` and `closesAt`.
+- The test must be published (`409 TEST_NOT_PUBLISHED`).
+- A course test: a student needs a current enrollment (`409 STUDENT_NOT_ENROLLED`).
+- A standalone test: no enrollment. Owner/admin may assign any account. A teacher only active members of groups where they have `can_assign_tests`; anyone else answers `404 USER_NOT_FOUND`. A blocked or pending account answers `409 STUDENT_NOT_ACTIVE`.
+- A group must be active (`409 GROUP_ARCHIVED`) and grants no course access.
+- An audience has one active assignment per test (`409 ASSIGNMENT_DUPLICATE`). `after_window` tests need `closesAt`. Revoked assignments cannot change (`409 ASSIGNMENT_NOT_ACTIVE`).
+
+**Standalone tests for students and staff (2026-11-23).**
+- Students see their open and upcoming standalone assignments on `GET /me/home` (`tests.open` / `tests.upcoming`, `origin: "standalone"`, `courseId` and `courseTitle` `null`). They start them with `POST /tests/assignments/:assignmentId/start`.
+- `GET /me/attempts` lists them with `origin: "standalone"`, a `title` and `courseId: null`. `subjectId` comes from the generator parameters, or is `null` for hand-picked questions.
+- First-attempt figures of `/me/analytics` and the staff views (recent results, `below_pass`, `missed_deadline`) count them; a course filter leaves them out.
+- M14 events work as for course tests: `test.assigned` (also on joining a group), `test.closing_24h`, `test.answers_available`, `test.result_updated`, `test.extra_attempts`, `attempt.expired`. The target path is `/`, because there is no course page.
+- Results and extra attempts: owner/admin, or a teacher with `can_view_results` on the assigned group. For a personal assignment, the teacher needs `can_view_results` on a group where the student is an active member.
+- Wrong answers in standalone (and course) tests never enter the trainer's mistakes.
 
 ## Question bank APIs (M08)
 

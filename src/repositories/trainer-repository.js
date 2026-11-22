@@ -259,11 +259,13 @@ function candidateParams(filters) {
    ]
 }
 
-// Count of trainable questions for one request, before any is picked.
+// Count of trainable questions for one request, before any is picked. filters.excludeIds (the
+// questions a test already holds, for the question generator) are not counted.
 async function countCandidates(bankCodePrefix, filters, client = pool) {
    const result = await client.query(
-      `SELECT count(*)::integer AS total ${trainableFrom} ${candidateFilter(2)}`,
-      [bankCodePrefix, ...candidateParams(filters)],
+      `SELECT count(*)::integer AS total ${trainableFrom} ${candidateFilter(2)}
+         AND NOT (question.id = ANY($8::bigint[]))`,
+      [bankCodePrefix, ...candidateParams(filters), (filters.excludeIds ?? []).map(normalizeInternalId)],
    )
    return result.rows[0].total
 }

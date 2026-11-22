@@ -82,18 +82,20 @@ async function listLearnerAssignments(userId, courseId, lessonId, db = pool) {
    return result.rows
 }
 
-// Assignments the learner can still use or will be able to use, across every course: published
-// authored tests, an active enrollment and (for a module test) an active module grant at $2.
-// Closed windows and assignments the learner no longer holds are not listed.
+// Assignments the learner can still use or will be able to use: published course tests with an
+// active enrollment and (for a module test) an active module grant at $2, and published standalone
+// tests, which the assignment alone opens (no course, course_title null). Closed windows and
+// assignments the learner no longer holds are not listed.
 async function listLearnerHomeAssignments(userId, now, db = pool) {
    const result = await db.query(
       `SELECT ${assignmentColumns}, course.title AS course_title
        FROM test_assignments AS assignment
        JOIN tests AS test ON test.id = assignment.test_id
-       JOIN courses AS course ON course.id = test.course_id
-       WHERE test.origin = 'authored' AND test.status = 'published' AND course.status = 'published'
+       LEFT JOIN courses AS course ON course.id = test.course_id
+       WHERE test.status = 'published'
          AND ${learnerAudienceSql}
          AND (assignment.closes_at IS NULL OR assignment.closes_at > $2)
+         AND (test.origin = 'standalone' OR (test.origin = 'authored' AND course.status = 'published'
          AND EXISTS (
             SELECT 1 FROM course_enrollments AS enrollment
             WHERE enrollment.user_id = $1 AND enrollment.course_id = test.course_id
@@ -105,7 +107,7 @@ async function listLearnerHomeAssignments(userId, now, db = pool) {
             WHERE module_grant.user_id = $1 AND module_grant.module_id = test.module_id
                AND module_grant.revoked_at IS NULL AND module_grant.begins_at <= $2
                AND (module_grant.expires_at IS NULL OR module_grant.expires_at > $2)
-         ))
+         ))))
        ORDER BY assignment.closes_at NULLS LAST, assignment.opens_at, assignment.id
        LIMIT 200`,
       [normalizeInternalId(userId), now],
@@ -377,13 +379,34 @@ const groupResultsSql = (condition) => `EXISTS (
    WHERE ${condition} AND grant_row.user_id = $1 AND grant_row.can_view_results
 )`
 
+// A standalone test has no course teachers. Besides its group assignments, a teacher with
+// can_view_results on a group reaches the personal assignments of that group's active members.
+const memberResultsSql = (userColumn) => `EXISTS (
+   SELECT 1 FROM group_members AS result_member
+   JOIN group_teachers AS grant_row ON grant_row.group_id = result_member.group_id
+   WHERE result_member.user_id = ${userColumn} AND result_member.status = 'active'
+     AND grant_row.user_id = $1 AND grant_row.can_view_results
+)`
+
+const standaloneTestResultsSql = `(test.origin = 'standalone' AND EXISTS (
+   SELECT 1 FROM test_assignments AS personal_assignment
+   WHERE personal_assignment.test_id = test.id AND personal_assignment.user_id IS NOT NULL
+     AND ${memberResultsSql('personal_assignment.user_id')}
+))`
+
+const standaloneAttemptResultsSql = `(test.origin = 'standalone' AND EXISTS (
+   SELECT 1 FROM test_assignments AS personal_assignment
+   WHERE personal_assignment.id = attempt.assignment_id AND personal_assignment.user_id IS NOT NULL
+) AND ${memberResultsSql('attempt.user_id')})`
+
 // A test is visible when the actor can read at least some of its attempts.
 const resultsScopeSql = `(${administratorSql} OR (${teacherSql} AND (
-   ${courseResultsSql} OR ${groupResultsSql('group_assignment.test_id = test.id')}
+   ${courseResultsSql} OR ${groupResultsSql('group_assignment.test_id = test.id')} OR ${standaloneTestResultsSql}
 )))`
 
 const attemptScopeSql = `(${administratorSql} OR (${teacherSql} AND (
    ${courseResultsSql} OR ${groupResultsSql('group_assignment.id = attempt.assignment_id')}
+   OR ${standaloneAttemptResultsSql}
 )))`
 
 const attemptJoinSql = 'JOIN tests AS test ON test.id = attempt.test_id'
@@ -407,14 +430,16 @@ async function sumExtraAttempts(userId, assignmentIds, db = pool) {
 }
 
 // Who may grant: owner and admin for any assignment; a teacher only for an assignment made
-// to a group they teach with can_view_results (the results scope of group teachers).
+// to a group they teach with can_view_results (the results scope of group teachers), and for a
+// personal assignment of a standalone test to an active member of such a group.
 const grantScopeSql = `(${administratorSql} OR EXISTS (
    SELECT 1 FROM group_teachers AS grant_row
    JOIN user_roles AS membership ON membership.user_id = grant_row.user_id
    JOIN roles AS role ON role.id = membership.role_id AND role.code = 'teacher'
    WHERE grant_row.group_id = assignment.group_id AND grant_row.user_id = $1
      AND grant_row.can_view_results
-))`
+) OR (${teacherSql} AND test.origin = 'standalone' AND assignment.user_id IS NOT NULL
+   AND ${memberResultsSql('assignment.user_id')}))`
 
 const grantAssignmentColumns = `assignment.id, assignment.test_id, assignment.status,
    assignment.group_id, assignment.user_id, assignment.closes_at, test.status AS test_status,
@@ -424,7 +449,7 @@ async function findGrantAssignment(actorId, testId, assignmentId, db = pool) {
    const result = await db.query(
       `SELECT ${grantAssignmentColumns}
        FROM test_assignments AS assignment JOIN tests AS test ON test.id = assignment.test_id
-       WHERE assignment.id = $3 AND assignment.test_id = $2 AND test.origin = 'authored' AND ${grantScopeSql}`,
+       WHERE assignment.id = $3 AND assignment.test_id = $2 AND test.origin IN ('authored', 'standalone') AND ${grantScopeSql}`,
       [normalizeInternalId(actorId), normalizeInternalId(testId), normalizeInternalId(assignmentId)],
    )
    return result.rows[0] || null
@@ -435,7 +460,7 @@ async function lockGrantAssignment(actorId, testId, assignmentId, client) {
    const result = await client.query(
       `SELECT ${grantAssignmentColumns}
        FROM test_assignments AS assignment JOIN tests AS test ON test.id = assignment.test_id
-       WHERE assignment.id = $3 AND assignment.test_id = $2 AND test.origin = 'authored' AND ${grantScopeSql}
+       WHERE assignment.id = $3 AND assignment.test_id = $2 AND test.origin IN ('authored', 'standalone') AND ${grantScopeSql}
        FOR SHARE OF assignment`,
       [normalizeInternalId(actorId), normalizeInternalId(testId), normalizeInternalId(assignmentId)],
    )
@@ -507,7 +532,7 @@ async function listAttemptGrants(assignmentId, userId, db = pool) {
 async function findResultsTest(userId, testId, db = pool) {
    const result = await db.query(
       `SELECT test.id, test.title, test.course_id FROM tests AS test
-       WHERE test.id = $2 AND test.origin = 'authored' AND ${resultsScopeSql}`,
+       WHERE test.id = $2 AND test.origin IN ('authored', 'standalone') AND ${resultsScopeSql}`,
       [normalizeInternalId(userId), normalizeInternalId(testId)],
    )
    return result.rows[0] || null

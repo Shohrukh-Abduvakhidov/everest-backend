@@ -49,6 +49,7 @@ async function listCourseActivity(userId, db = pool) {
 const subjectOfAttempt = `CASE test.origin
       WHEN 'authored' THEN course.subject_id
       WHEN 'trainer' THEN (test.generation_filters ->> 'subjectId')::bigint
+      WHEN 'standalone' THEN (test.generation_filters ->> 'subjectId')::bigint
    END`
 
 const attemptColumns = `attempt.id, attempt.test_id, attempt.assignment_id, attempt.attempt_number,

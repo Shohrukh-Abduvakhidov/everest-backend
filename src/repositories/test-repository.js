@@ -23,10 +23,24 @@ const courseScopeSql = (courseColumn) => `(${administratorSql} OR (${teacherRole
      AND assignment.user_id = $1 AND assignment.can_manage_tests
 )))`
 
-const testColumns = `test.id, test.course_id, test.module_id, test.title, test.mode, test.status,
+// The authoring scope of a test: course tests as above; a standalone test (no course) belongs to
+// its author, so a teacher reaches the standalone tests they created and owner/admin reach all.
+const testScopeSql = `(${administratorSql} OR (${teacherRoleSql} AND (
+   (test.origin = 'authored' AND EXISTS (
+      SELECT 1 FROM course_teachers AS assignment
+      WHERE assignment.course_id = test.course_id
+        AND assignment.user_id = $1 AND assignment.can_manage_tests
+   ))
+   OR (test.origin = 'standalone' AND test.created_by = $1)
+)))`
+
+// Tests made in the constructor: in a course or standalone. Trainer and mock exam tests never show.
+const authoredOriginsSql = `test.origin IN ('authored', 'standalone')`
+
+const testColumns = `test.id, test.origin, test.course_id, test.module_id, test.title, test.mode, test.status,
    test.duration_seconds, test.max_attempts, test.result_policy, test.answer_reveal_policy,
-   test.shuffle_questions, test.shuffle_options, test.grading_policy, test.copied_from_id,
-   test.created_by, test.created_at, test.updated_at,
+   test.shuffle_questions, test.shuffle_options, test.grading_policy, test.generation_filters,
+   test.copied_from_id, test.created_by, test.created_at, test.updated_at,
    (SELECT status FROM courses WHERE id = test.course_id) AS course_status,
    (SELECT count(*)::integer FROM test_questions WHERE test_id = test.id) AS question_count,
    (SELECT COALESCE(sum(points), 0)::text FROM test_questions WHERE test_id = test.id) AS total_points,
@@ -54,9 +68,10 @@ async function lockManageableCourse(userId, courseId, client) {
 async function listTests(userId, filters, db = pool) {
    const result = await db.query(
       `SELECT ${testColumns} FROM tests AS test
-       WHERE test.origin = 'authored' AND ${courseScopeSql('test.course_id')}
+       WHERE ${authoredOriginsSql} AND ${testScopeSql}
          AND ($2::bigint IS NULL OR test.course_id = $2)
          AND ($3::text IS NULL OR test.status = $3)
+         AND ($6::text IS NULL OR test.origin = $6)
        ORDER BY test.id DESC
        LIMIT $4 OFFSET $5`,
       [
@@ -65,6 +80,7 @@ async function listTests(userId, filters, db = pool) {
          filters.status,
          filters.limit + 1,
          filters.offset,
+         filters.origin ?? null,
       ],
    )
    return result.rows
@@ -73,7 +89,7 @@ async function listTests(userId, filters, db = pool) {
 async function findTest(userId, testId, db = pool) {
    const result = await db.query(
       `SELECT ${testColumns} FROM tests AS test
-       WHERE test.id = $2 AND test.origin = 'authored' AND ${courseScopeSql('test.course_id')}`,
+       WHERE test.id = $2 AND ${authoredOriginsSql} AND ${testScopeSql}`,
       [normalizeInternalId(userId), normalizeInternalId(testId)],
    )
    return result.rows[0] || null
@@ -82,23 +98,29 @@ async function findTest(userId, testId, db = pool) {
 async function lockTest(userId, testId, client) {
    const result = await client.query(
       `SELECT ${testColumns} FROM tests AS test
-       WHERE test.id = $2 AND test.origin = 'authored' AND ${courseScopeSql('test.course_id')}
+       WHERE test.id = $2 AND ${authoredOriginsSql} AND ${testScopeSql}
        FOR UPDATE OF test`,
       [normalizeInternalId(userId), normalizeInternalId(testId)],
    )
    return result.rows[0] || null
 }
 
+async function isAdministrator(userId, db = pool) {
+   const result = await db.query(`SELECT ${administratorSql} AS administrator`, [normalizeInternalId(userId)])
+   return result.rows[0].administrator
+}
+
+// A standalone test has no course (courseId null); `origin` says which kind is made.
 async function createTest(test, client) {
    const result = await client.query(
       `INSERT INTO tests (
          course_id, title, mode, duration_seconds, max_attempts, result_policy,
          answer_reveal_policy, shuffle_questions, shuffle_options, grading_policy, created_by,
-         module_id
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+         module_id, origin
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
        RETURNING id`,
       [
-         normalizeInternalId(test.courseId),
+         test.courseId === null ? null : normalizeInternalId(test.courseId),
          test.title,
          test.mode,
          test.durationSeconds,
@@ -110,9 +132,19 @@ async function createTest(test, client) {
          test.gradingPolicy,
          normalizeInternalId(test.createdBy),
          test.moduleId,
+         test.origin ?? 'authored',
       ],
    )
    return result.rows[0].id
+}
+
+// Parameters of the last question generation of a draft (the questions themselves are fixed in
+// test_questions).
+async function setGenerationFilters(testId, filters, client) {
+   await client.query(
+      'UPDATE tests SET generation_filters = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1',
+      [normalizeInternalId(testId), filters],
+   )
 }
 
 async function updateTest(testId, test, client) {
@@ -184,11 +216,11 @@ async function copyTest(testId, title, actorId, client) {
       `INSERT INTO tests (
          course_id, module_id, title, mode, duration_seconds, max_attempts, result_policy,
          answer_reveal_policy, shuffle_questions, shuffle_options, grading_policy,
-         generation_filters, copied_from_id, created_by
+         generation_filters, copied_from_id, created_by, origin
        )
        SELECT course_id, module_id, $2, mode, duration_seconds, max_attempts, result_policy,
          answer_reveal_policy, shuffle_questions, shuffle_options, grading_policy,
-         generation_filters, id, $3
+         generation_filters, id, $3, origin
        FROM tests WHERE id = $1
        RETURNING id`,
       [id, title, normalizeInternalId(actorId)],
@@ -248,7 +280,7 @@ async function findUnpublishableQuestions(testId, client) {
    return result.rows.map((row) => row.id)
 }
 
-async function findTestQuestionIds(testId, client) {
+async function findTestQuestionIds(testId, client = pool) {
    const result = await client.query(
       'SELECT question_id FROM test_questions WHERE test_id = $1 ORDER BY position',
       [normalizeInternalId(testId)],
@@ -356,6 +388,23 @@ async function findAssignableStudent(userId, courseId, client) {
    return result.rows[0] || null
 }
 
+// A personal assignee of a standalone test: any account for owner/admin; for a teacher only an
+// active member of a group where the teacher has can_assign_tests (in_scope). No enrollment.
+async function findStandaloneAssignee(actorId, userId, client) {
+   const result = await client.query(
+      `SELECT account.id, account.status, (${administratorSql} OR EXISTS (
+          SELECT 1 FROM group_members AS member
+          JOIN group_teachers AS teacher ON teacher.group_id = member.group_id
+          JOIN groups AS group_record ON group_record.id = member.group_id AND group_record.status = 'active'
+          WHERE member.user_id = account.id AND member.status = 'active'
+            AND teacher.user_id = $1 AND teacher.can_assign_tests
+       )) AS in_scope
+       FROM users AS account WHERE account.id = $2`,
+      [normalizeInternalId(actorId), normalizeInternalId(userId)],
+   )
+   return result.rows[0] || null
+}
+
 async function hasActiveAssignment(testId, audience, client) {
    const result = await client.query(
       `SELECT EXISTS (
@@ -410,6 +459,9 @@ export {
    deleteDraftTest,
    findAssignableStudent,
    findAssignment,
+   findStandaloneAssignee,
+   isAdministrator,
+   setGenerationFilters,
    findTest,
    findTestQuestionIds,
    findUnpublishableQuestions,

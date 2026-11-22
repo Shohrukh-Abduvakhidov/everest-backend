@@ -5,6 +5,8 @@ import {
    createAssignmentService,
    createTestService,
    deleteTestService,
+   generateTestQuestionsService,
+   getGeneratorAvailabilityService,
    getTestService,
    listAssignmentsService,
    listTestsService,
@@ -16,6 +18,7 @@ import {
    updateTestQuestionPointsService,
    updateTestService,
 } from '../services/test-service.js'
+import { getStaffTrainerCatalogService } from '../services/trainer-service.js'
 
 function overrides(req) {
    return req.app.locals.serviceDependencies.tests
@@ -70,6 +73,33 @@ async function addTestQuestionsController(req, res, next) {
    try {
       const data = await addTestQuestionsService(req.auth.userId, req.params.testId, req.body, overrides(req))
       res.status(201).json({ data })
+   } catch (error) {
+      next(error)
+   }
+}
+
+async function generateTestQuestionsController(req, res, next) {
+   try {
+      const data = await generateTestQuestionsService(req.auth.userId, req.params.testId, req.body, overrides(req))
+      res.status(201).json({ data })
+   } catch (error) {
+      next(error)
+   }
+}
+
+async function getStaffTrainerCatalogController(req, res, next) {
+   try {
+      const data = await getStaffTrainerCatalogService(req.auth.userId, overrides(req)?.trainer)
+      res.json({ data })
+   } catch (error) {
+      next(error)
+   }
+}
+
+async function getGeneratorAvailabilityController(req, res, next) {
+   try {
+      const data = await getGeneratorAvailabilityService(req.auth.userId, req.query, overrides(req))
+      res.json({ data })
    } catch (error) {
       next(error)
    }
@@ -167,6 +197,9 @@ async function revokeAssignmentController(req, res, next) {
 
 export {
    addTestQuestionsController,
+   generateTestQuestionsController,
+   getGeneratorAvailabilityController,
+   getStaffTrainerCatalogController,
    archiveTestController,
    copyTestController,
    createAssignmentController,
