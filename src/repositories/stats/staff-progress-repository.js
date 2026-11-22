@@ -167,18 +167,19 @@ async function listCourseProgress(userIds, courseId, now, db = pool) {
 }
 
 // The last `window` finished trainings of each subject per student, for readiness (D3), and
-// the number of finished trainings per student. Mistakes trainings hold only questions the
-// student got wrong, so they count as trainings but stay out of the readiness window.
+// the number of finished trainings per student. Repeat trainings (mode mistakes or unanswered) hold
+// only questions the student got wrong or left blank, so they count as trainings but stay out of
+// the readiness window.
 async function listReadinessWindows(userIds, window, db = pool) {
    const result = await db.query(
       `SELECT user_id, subject_id, score, max_score, trainings
        FROM (
           SELECT attempt.user_id, (test.generation_filters ->> 'subjectId')::bigint AS subject_id,
              attempt.score, attempt.max_score,
-             COALESCE(test.generation_filters ->> 'mode', 'standard') = 'mistakes' AS mistakes,
+             COALESCE(test.generation_filters ->> 'mode', 'standard') IN ('mistakes', 'unanswered') AS repeat_training,
              row_number() OVER (
                 PARTITION BY attempt.user_id, test.generation_filters ->> 'subjectId',
-                   COALESCE(test.generation_filters ->> 'mode', 'standard') = 'mistakes'
+                   COALESCE(test.generation_filters ->> 'mode', 'standard') IN ('mistakes', 'unanswered')
                 ORDER BY attempt.submitted_at DESC, attempt.id DESC
              ) AS position,
              count(*) OVER (PARTITION BY attempt.user_id)::integer AS trainings
@@ -186,7 +187,7 @@ async function listReadinessWindows(userIds, window, db = pool) {
           JOIN tests AS test ON test.id = attempt.test_id AND test.origin = 'trainer'
           WHERE attempt.user_id = ANY($1::bigint[]) AND ${finishedSql}
        ) AS ranked
-       WHERE NOT mistakes AND position <= $2`,
+       WHERE NOT repeat_training AND position <= $2`,
       [ids(userIds), window],
    )
    return result.rows

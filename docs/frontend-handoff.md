@@ -650,7 +650,7 @@ A student, an administrator or an owner picks a subject, a difficulty and a coun
 ```json
 { "data": {
   "options": {
-    "modes": ["standard", "mistakes"],
+    "modes": ["standard", "mistakes", "unanswered"],
     "questionCounts": [10, 20, 30, 50],
     "countAll": "all",
     "maxQuestions": 50,
@@ -689,17 +689,19 @@ A student, an administrator or an owner picks a subject, a difficulty and a coun
 - `available`: how many questions the choice can draw now. Standard mode: in `language` (the subject's primary language by default). Mistakes mode: my open mistakes; `language` is `null` unless one is asked for.
 - `questionCounts`: the configured counts the create request accepts for this choice. In standard mode these are the counts up to `available`. In mistakes mode every count is accepted once there is one mistake, because the training takes what there is.
 - `allowsAll`: whether `count: "all"` is accepted (see below).
-- Errors: `400 VALIDATION_ERROR`, `403` as in "Access", `404 SUBJECT_NOT_FOUND`.
+- Mode `unanswered` (2026-11-24): send only `?mode=unanswered&sourceAttemptId=…`. `available` = blank questions of that attempt; `questionCount` = how many the training gets with `count: "all"` (at most `options.maxQuestions`). See "Unanswered" below.
+- Errors: `400 VALIDATION_ERROR`, `403` as in "Access", `404 SUBJECT_NOT_FOUND`; mode unanswered: `404 ATTEMPT_NOT_FOUND`, `409 ATTEMPT_NOT_FINISHED`.
 - Call it when the choice changes, with a short debounce. It is read-only.
 
 **`POST /trainer/attempts`** takes this body:
 
 | Field | Required | Value |
 |---|---|---|
-| `mode` | no | `standard` (default) or `mistakes` (2026-11-22, see "Mistakes") |
-| `subject` | yes | Subject id (`"135"`) or code (`"zaboni-tochiki"`) |
+| `mode` | no | `standard` (default), `mistakes` (2026-11-22, see "Mistakes") or `unanswered` (2026-11-24, see "Unanswered") |
+| `sourceAttemptId` | unanswered: yes; other modes: not sent | My finished trainer attempt whose blank questions to repeat |
+| `subject` | yes (not sent in mode unanswered) | Subject id (`"135"`) or code (`"zaboni-tochiki"`) |
 | `difficulty` | standard: yes; mistakes: no | One of `options.difficulties`. In mistakes mode it defaults to `mixed` (any level) |
-| `count` | yes | One of `options.questionCounts` (number), or `"all"` (see below) |
+| `count` | yes (optional in mode unanswered, default `"all"`) | One of `options.questionCounts` (number), or `"all"` (see below) |
 | `language` | no | `tg`, `ru` or `en`. Standard mode: defaults to the subject's `primaryLanguage`. Mistakes mode: any language unless given |
 | `sectionCode` | no | Code from `sections` |
 | `topicCodes` | no | 1–50 topic codes; a question in **any** of them qualifies. Order does not matter (the server sorts them) |
@@ -719,6 +721,21 @@ A student, an administrator or an owner picks a subject, a difficulty and a coun
 - It is an ordinary training (`origin = trainer`): same attempt routes, result with keys, history (`mode: "mistakes"`).
 - **Readiness:** mistakes trainings hold only questions I got wrong, so they count in `trainings` and `completedTrainings` but stay out of the readiness window. Weak topics include them.
 
+**Unanswered** (`mode: "unanswered"`, 2026-11-24): "Solve the questions I skipped" after a training.
+
+```json
+{ "mode": "unanswered", "sourceAttemptId": "335", "idempotencyKey": "nct-…" }
+```
+
+- The source is **my own trainer attempt** that is finished (`submitted`, `graded` or `expired`). Another student's attempt, a course test, a mock exam or an unknown id is `404 ATTEMPT_NOT_FOUND`; a running one is `409 ATTEMPT_NOT_FINISHED`.
+- It takes the questions of that attempt **without an answer** (`answer` was `null` in the result), in **the same order** as in the source attempt (no shuffle). Questions withdrawn from the bank since are skipped. A wrong answer is not "unanswered": use "Mistakes" for those.
+- Subject, language, level, section and topics come from the source attempt. Do not send `subject`, `difficulty`, `language`, `sectionCode`, `topicCode` or `topicCodes` (`400`).
+- **Size:** `count` is optional. Default `"all"` = every blank question, at most `options.maxQuestions` (50); a number takes up to that many. Ask `GET /trainer/availability?mode=unanswered&sourceAttemptId=…` first: `available` is the number of blank questions, `questionCount` how many go in. Show "N of M" when `questionCount < available`.
+- No blank questions: `409 TRAINER_NO_UNANSWERED`. Hide the button when the result's `counts.unanswered` is 0.
+- `timeLimitMinutes` and `idempotencyKey` work as usual.
+- The response adds `unanswered: { sourceAttemptId, available, questionCount }` (also on a repeated key).
+- It is an ordinary training (`origin = trainer`): same attempt routes, history with `mode: "unanswered"` and `sourceAttemptId`. Like mistakes trainings it counts in `trainings` but stays out of readiness.
+
 The response is the same `AttemptView` as `GET /tests/attempts/:attemptId`, plus `resumed`. It has no keys, no explanations and no grading data. Image blocks carry `url` and `expiresAt` (5 minutes), like every attempt view, so re-read the attempt to get fresh URLs. Questions come in a random order. Options keep their book order, because their labels (А, Б, …) are part of the content.
 
 | Status | Code | Meaning / UI |
@@ -729,6 +746,9 @@ The response is the same `AttemptView` as `GET /tests/attempts/:attemptId`, plus
 | 409 | `TRAINER_NOT_ENOUGH_QUESTIONS` | Standard mode. `details[0].field = "available"`, `details[0].message` = how many questions match (as a string). Offer a smaller count, or `"all"` when the number is below the smallest count |
 | 409 | `TRAINER_COUNT_ALL_NOT_ALLOWED` | Standard mode, `count: "all"` while the choice has at least the smallest count of questions. `details[0].message` = available. Offer the numeric counts |
 | 409 | `TRAINER_NO_MISTAKES` | Mistakes mode, no open mistakes for this choice. Hide or disable "Repeat mistakes" when `mistakes` is 0 |
+| 404 | `ATTEMPT_NOT_FOUND` | Mode unanswered: `sourceAttemptId` is not my trainer attempt |
+| 409 | `ATTEMPT_NOT_FINISHED` | Mode unanswered: the source attempt is still running |
+| 409 | `TRAINER_NO_UNANSWERED` | Mode unanswered: every question of the source attempt has an answer |
 | 409 | `TRAINER_ATTEMPT_IN_PROGRESS` | One running training per student. `details[0].message` = the running `attemptId`. Offer "continue" (open it) or "finish" (`POST /tests/attempts/:id/submit`) |
 | 409 | `IDEMPOTENCY_KEY_REUSED` | The same key was sent with different parameters |
 
@@ -742,6 +762,7 @@ Then use the ordinary attempt routes:
    - `correctAnswer`;
    - `explanation` (blocks; image URLs signed).
 - `percent`, `attempt.score` and `attempt.maxScore` are the total.
+- **`counts`** (2026-11-24, every attempt result, also the submit response): `{ "correct": 6, "wrong": 2, "unanswered": 2, "pending": 0 }`. `unanswered` = no answer; `correct` = full points; `wrong` = answered with fewer points, partial credit included; `pending` = answered but not scored yet (manual review in course tests; always 0 in the trainer). `null` while the review is hidden (`revealed: false`). Use it for "Right / Wrong / Not solved" and for the "Solve the skipped questions" button.
 
 **`GET /trainer/attempts`** takes the query `subjectId`, `limit` (1–100, default 20) and `offset`. It returns:
 
@@ -758,7 +779,7 @@ Then use the ordinary attempt routes:
 
 - `score`, `maxScore` and `percent` are `null` while a training is `in_progress`.
 - `stats` counts finished trainings only and does not depend on `subjectId`.
-- New fields (2026-11-22): `mode`, `topicCodes` (always a list; empty without topics), `timeLimitMinutes`. `topicCode` is the single topic when exactly one was chosen, otherwise `null`. A mistakes training without a `language` has `language: null`. Older trainings read as `mode: "standard"`, `timeLimitMinutes: null`.
+- New fields (2026-11-22): `mode`, `topicCodes` (always a list; empty without topics), `timeLimitMinutes`. `topicCode` is the single topic when exactly one was chosen, otherwise `null`. A mistakes training without a `language` has `language: null`. Older trainings read as `mode: "standard"`, `timeLimitMinutes: null`. `sourceAttemptId` (2026-11-24) is the source attempt of an unanswered training, `null` otherwise.
 - `questionCount` is the real number of questions; with `count: "all"` or in mistakes mode it may be smaller than the requested count.
 **`GET /trainer/overview`** is computed from my **finished** trainings (`graded` or `expired`; a running one does not count):
 
@@ -781,7 +802,7 @@ Then use the ordinary attempt routes:
 } }
 ```
 
-- **Readiness of a subject:** points ÷ questions over its last `readinessWindow` finished **standard** trainings (`TRAINER_READINESS_WINDOW`, default 5), × 100. Every question is 1 point, so this is the share of correct answers, and longer trainings weigh more. Mistakes trainings stay out (2026-11-22); the same rule applies to readiness on `/me/home` and in the staff views.
+- **Readiness of a subject:** points ÷ questions over its last `readinessWindow` finished **standard** trainings (`TRAINER_READINESS_WINDOW`, default 5), × 100. Every question is 1 point, so this is the share of correct answers, and longer trainings weigh more. Mistakes trainings (2026-11-22) and unanswered trainings (2026-11-24) stay out; the same rule applies to readiness on `/me/home` and in the staff views.
 - **Overall `readinessPercent`:** the average of the subject values, where every trained subject counts equally.
 - **`subjects[].trainings`** counts all finished trainings of the subject, mistakes trainings included. **`completedTrainings`** is their sum. A subject trained only in mistakes mode has no readiness and is not listed.
 - **`mistakes`** (2026-11-22): my open mistakes per subject, with `sections[]` and `topics[]` (codes only; take titles from the catalog). `total` is the sum over subjects. A question in two topics counts in both topics but once in its subject. Subjects without open mistakes are left out; with none, `{ "total": 0, "subjects": [] }`. "Repeat mistakes" = `POST /trainer/attempts` with `{ mode: "mistakes", subject, topicCodes?, count }`.

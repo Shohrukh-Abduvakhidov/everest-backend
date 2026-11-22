@@ -57,7 +57,10 @@ function difficultiesOf(level) {
    return values
 }
 
-const modes = ['standard', 'mistakes']
+const modes = ['standard', 'mistakes', 'unanswered']
+// Fields mode "unanswered" takes from its source attempt instead of the request.
+const sourceSetFields = ['subject', 'difficulty', 'language', 'sectionCode', 'topicCode', 'topicCodes']
+const finishedStatuses = ['submitted', 'graded', 'expired']
 const countAll = 'all'
 const maximumTimeLimitMinutes = 1440
 const maximumTopicCodes = 50
@@ -225,11 +228,37 @@ function parseTopicCodes(body) {
    return [...new Set(body.topicCodes)].sort()
 }
 
+function parseSourceAttemptId(value) {
+   if (value === undefined || value === null) {
+      throw validationError('sourceAttemptId', 'sourceAttemptId is required in mode unanswered')
+   }
+   if (!(Number.isSafeInteger(value) || (typeof value === 'string' && /^[0-9]+$/.test(value)))) {
+      throw validationError('sourceAttemptId')
+   }
+   try {
+      return normalizeInternalId(String(value))
+   } catch {
+      throw validationError('sourceAttemptId')
+   }
+}
+
 // What both the create body and the availability query select: mode, subject, level, language,
-// section and topics. In mistakes mode the level is optional (mixed = any).
+// section and topics. In mistakes mode the level is optional (mixed = any). Mode unanswered
+// selects only sourceAttemptId: subject and language come from that attempt.
 function parseSelection(body, config) {
    const mode = body.mode ?? 'standard'
    if (!modes.includes(mode)) throw validationError('mode', `mode must be one of ${modes.join(', ')}`)
+   if (mode === 'unanswered') {
+      for (const field of sourceSetFields) {
+         if (body[field] !== undefined && body[field] !== null) {
+            throw validationError(field, `${field} comes from the source attempt in mode unanswered`)
+         }
+      }
+      return { mode, sourceAttemptId: parseSourceAttemptId(body.sourceAttemptId) }
+   }
+   if (body.sourceAttemptId !== undefined && body.sourceAttemptId !== null) {
+      throw validationError('sourceAttemptId', 'sourceAttemptId is only for mode unanswered')
+   }
    const difficulties = trainerOptions(config).difficulties
    const difficulty = body.difficulty ?? (mode === 'mistakes' ? 'mixed' : undefined)
    if (!difficulties.includes(difficulty)) {
@@ -264,7 +293,7 @@ function parseTimeLimit(value) {
 function parseCreateBody(body, config) {
    validateBody(body, [
       'mode', 'subject', 'difficulty', 'count', 'language', 'sectionCode', 'topicCode', 'topicCodes',
-      'timeLimitMinutes', 'idempotencyKey',
+      'timeLimitMinutes', 'idempotencyKey', 'sourceAttemptId',
    ])
    const selection = parseSelection(body, config)
    if (body.idempotencyKey !== undefined
@@ -273,7 +302,8 @@ function parseCreateBody(body, config) {
    }
    return {
       ...selection,
-      count: parseCount(body.count, config),
+      // Mode unanswered takes every blank question by default (up to maxQuestions).
+      count: selection.mode === 'unanswered' && body.count === undefined ? countAll : parseCount(body.count, config),
       timeLimitMinutes: parseTimeLimit(body.timeLimitMinutes),
       idempotencyKey: body.idempotencyKey ?? null,
    }
@@ -281,7 +311,9 @@ function parseCreateBody(body, config) {
 
 // Query strings: topicCodes may come as a comma-separated value or a repeated parameter.
 function parseAvailabilityQuery(query, config) {
-   validateBody(query, ['mode', 'subject', 'difficulty', 'language', 'sectionCode', 'topicCode', 'topicCodes'])
+   validateBody(query, [
+      'mode', 'subject', 'difficulty', 'language', 'sectionCode', 'topicCode', 'topicCodes', 'sourceAttemptId',
+   ])
    const list = query.topicCodes
    const topicCodes = list === undefined ? undefined : (Array.isArray(list) ? list : String(list).split(','))
    return parseSelection({ ...query, topicCodes }, config)
@@ -414,6 +446,7 @@ function trainingFilters(filters) {
       topicCode: topicCodes.length === 1 ? topicCodes[0] : null,
       topicCodes,
       timeLimitMinutes: filters.timeLimitMinutes ?? null,
+      sourceAttemptId: filters.sourceAttemptId ?? null,
    }
 }
 
@@ -439,6 +472,7 @@ async function createTrainerAttemptService(userId, body, overrides) {
    const deps = dependencies(overrides)
    const actorId = parseUserId(userId)
    const request = parseCreateBody(body, deps.config)
+   if (request.mode === 'unanswered') return createUnansweredTraining(deps, actorId, request)
    const { attemptId, resumed } = await deps.transaction(async (client) => {
       const now = deps.clock()
       await deps.repository.lockTrainerSlot(actorId, client)
@@ -482,45 +516,155 @@ async function createTrainerAttemptService(userId, body, overrides) {
          timeLimitMinutes: request.timeLimitMinutes,
          ...(request.idempotencyKey ? { idempotencyKey: request.idempotencyKey } : {}),
       }
-      const titleLanguage = filters.language ?? subject.primary_language
-      const title = subject.titles?.[titleLanguage] ?? subject.titles?.[subject.primary_language] ?? subject.code
-      const testId = await deps.repository.createTrainerTest({
-         title,
-         generationFilters,
-         createdBy: actorId,
-         durationSeconds: request.timeLimitMinutes === null ? null : request.timeLimitMinutes * 60,
-      }, client)
       const questionIds = shuffled(picked).map((row) => String(row.id))
-      const cells = await cellsExtensions(deps, subject.code, questionIds, client)
-      await deps.repository.addTrainerQuestions(
-         testId,
-         questionIds,
-         client,
-         questionIds.map((questionId) => cells.points.get(questionId) ?? null),
-      )
-      await deps.repository.publishTrainerTest(testId, client)
-      const assignmentId = await deps.repository.createTrainerAssignment(testId, actorId, now, client)
-      const id = await startAttemptInTransactionService(actorId, assignmentId, client, deps.attempts, {
-         snapshotExtensions: cells.extensions,
-      })
-      await deps.auth.appendAuditEvent({
-         actorUserId: actorId,
-         subjectUserId: actorId,
-         code: 'trainer.attempt_created',
-         entityType: 'test_attempt',
-         entityId: id,
-         metadata: {
-            testId,
-            subjectId: String(subject.id),
-            mode: request.mode,
-            difficulty: request.difficulty,
-            count: request.count,
-            questionCount: questionIds.length,
-         },
-      }, client)
+      const id = await storeTraining(deps, client, { actorId, subject, request, generationFilters, questionIds, now })
       return { attemptId: id, resumed: false }
    })
    return { ...await getAttemptService(actorId, attemptId, deps.attempts), resumed }
+}
+
+// The generated test, its questions in the given order, the assignment, the first attempt and
+// the audit event, all in the caller's transaction. Returns the attempt id.
+async function storeTraining(deps, client, { actorId, subject, request, generationFilters, questionIds, now }) {
+   const titleLanguage = generationFilters.language ?? subject.primary_language
+   const title = subject.titles?.[titleLanguage] ?? subject.titles?.[subject.primary_language] ?? subject.code
+   const testId = await deps.repository.createTrainerTest({
+      title,
+      generationFilters,
+      createdBy: actorId,
+      durationSeconds: request.timeLimitMinutes === null ? null : request.timeLimitMinutes * 60,
+   }, client)
+   const cells = await cellsExtensions(deps, subject.code, questionIds, client)
+   await deps.repository.addTrainerQuestions(
+      testId,
+      questionIds,
+      client,
+      questionIds.map((questionId) => cells.points.get(questionId) ?? null),
+   )
+   await deps.repository.publishTrainerTest(testId, client)
+   const assignmentId = await deps.repository.createTrainerAssignment(testId, actorId, now, client)
+   const id = await startAttemptInTransactionService(actorId, assignmentId, client, deps.attempts, {
+      snapshotExtensions: cells.extensions,
+   })
+   await deps.auth.appendAuditEvent({
+      actorUserId: actorId,
+      subjectUserId: actorId,
+      code: 'trainer.attempt_created',
+      entityType: 'test_attempt',
+      entityId: id,
+      metadata: {
+         testId,
+         subjectId: String(subject.id),
+         mode: request.mode,
+         difficulty: generationFilters.difficulty,
+         count: request.count,
+         questionCount: questionIds.length,
+         ...(request.mode === 'unanswered' ? { sourceAttemptId: String(request.sourceAttemptId) } : {}),
+      },
+   }, client)
+   return id
+}
+
+// ------------------------------------------------------------------ mode unanswered
+
+// The source of a mode "unanswered" training: the student's own finished trainer attempt, its
+// subject and its blank questions that are still trainable, in the attempt's order.
+async function resolveUnanswered(deps, actorId, sourceAttemptId, db) {
+   const source = await deps.repository.findTrainerSourceAttempt(actorId, sourceAttemptId, db)
+   if (!source) throw new AppError(404, 'ATTEMPT_NOT_FOUND', 'Attempt was not found')
+   if (!finishedStatuses.includes(source.status)) {
+      throw new AppError(409, 'ATTEMPT_NOT_FINISHED', 'Finish the attempt first')
+   }
+   const filters = source.generation_filters
+   const subject = await deps.repository.findSubject({ id: filters.subjectId }, db)
+   if (!subject) throw new AppError(404, 'SUBJECT_NOT_FOUND', 'Subject was not found')
+   const questionIds = await deps.repository.listUnansweredQuestionIds(deps.config.bankCodePrefix, source.id, db)
+   return { filters, subject, questionIds }
+}
+
+// How many blank questions the training takes: up to the count ("all" = no count), never more
+// than maxQuestions.
+function unansweredTarget(config, available, count) {
+   return Math.min(available, config.maxQuestions, count === countAll ? Infinity : count)
+}
+
+function sameUnansweredRequest(stored, request) {
+   return stored.mode === 'unanswered'
+      && stored.sourceAttemptId === String(request.sourceAttemptId)
+      && stored.count === request.count
+      && (stored.timeLimitMinutes ?? null) === request.timeLimitMinutes
+}
+
+// Mode unanswered: a new trainer test of the questions an attempt left blank, in that attempt's
+// order. Subject, language, level, section and topics are copied from the source attempt.
+async function createUnansweredTraining(deps, actorId, request) {
+   const { attemptId, resumed, unanswered } = await deps.transaction(async (client) => {
+      const now = deps.clock()
+      await deps.repository.lockTrainerSlot(actorId, client)
+      await requireTrainerLearner(deps, actorId, client)
+      if (request.idempotencyKey) {
+         const existing = await deps.repository.findTrainerAttemptByKey(actorId, request.idempotencyKey, client)
+         if (existing) {
+            if (!sameUnansweredRequest(existing.generation_filters, request)) {
+               throw new AppError(409, 'IDEMPOTENCY_KEY_REUSED', 'This idempotencyKey was used for another request')
+            }
+            return {
+               attemptId: existing.id,
+               resumed: true,
+               unanswered: { available: existing.generation_filters.available, questionCount: existing.question_count },
+            }
+         }
+      }
+      const { filters, subject, questionIds: blank } = await resolveUnanswered(deps, actorId, request.sourceAttemptId, client)
+      const open = await deps.repository.findOpenTrainerAttempt(actorId, client)
+      if (open) {
+         throw new AppError(409, 'TRAINER_ATTEMPT_IN_PROGRESS', 'Finish the current training first', [
+            { field: 'attemptId', message: String(open.id) },
+         ])
+      }
+      if (blank.length === 0) {
+         throw new AppError(409, 'TRAINER_NO_UNANSWERED', 'This attempt has no unanswered questions')
+      }
+      const questionIds = blank.slice(0, unansweredTarget(deps.config, blank.length, request.count))
+      const topicCodes = storedTopicCodes(filters)
+      const generationFilters = {
+         subjectId: String(subject.id),
+         subjectCode: subject.code,
+         mode: 'unanswered',
+         sourceAttemptId: String(request.sourceAttemptId),
+         difficulty: filters.difficulty ?? 'mixed',
+         count: request.count,
+         language: filters.language ?? null,
+         sectionCode: filters.sectionCode ?? null,
+         topicCode: topicCodes.length === 1 ? topicCodes[0] : null,
+         topicCodes,
+         timeLimitMinutes: request.timeLimitMinutes,
+         available: blank.length,
+         ...(request.idempotencyKey ? { idempotencyKey: request.idempotencyKey } : {}),
+      }
+      const id = await storeTraining(deps, client, { actorId, subject, request, generationFilters, questionIds, now })
+      return { attemptId: id, resumed: false, unanswered: { available: blank.length, questionCount: questionIds.length } }
+   })
+   return {
+      ...await getAttemptService(actorId, attemptId, deps.attempts),
+      resumed,
+      unanswered: { sourceAttemptId: String(request.sourceAttemptId), ...unanswered },
+   }
+}
+
+async function getUnansweredAvailability(deps, actorId, request) {
+   const { filters, subject, questionIds } = await resolveUnanswered(deps, actorId, request.sourceAttemptId)
+   const available = questionIds.length
+   return {
+      mode: 'unanswered',
+      sourceAttemptId: String(request.sourceAttemptId),
+      subjectId: subject.id,
+      language: filters.language ?? null,
+      available,
+      questionCount: unansweredTarget(deps.config, available, countAll),
+      questionCounts: available > 0 ? [...deps.config.questionCounts] : [],
+      allowsAll: available > 0,
+   }
 }
 
 // ------------------------------------------------------------------ availability
@@ -532,6 +676,7 @@ async function getTrainerAvailabilityService(userId, query = {}, overrides) {
    const actorId = parseUserId(userId)
    const request = parseAvailabilityQuery(query, deps.config)
    await requireTrainerLearner(deps, actorId)
+   if (request.mode === 'unanswered') return getUnansweredAvailability(deps, actorId, request)
    const subject = await deps.repository.findSubject(request.subject)
    if (!subject) throw new AppError(404, 'SUBJECT_NOT_FOUND', 'Subject was not found')
    const filters = candidateFilters(deps, actorId, subject, request)
