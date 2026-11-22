@@ -131,7 +131,7 @@ test('NCT trainer: mistakes, topics, small choices and time limits', async (t) =
       assert.deepEqual(partA.languages.map((row) => [row.language, row.total]), [['en', 8], ['ru', 2]])
       assert.equal(entry.mistakes, 0)
       const { options } = await getTrainerCatalogService(studentId, deps)
-      assert.deepEqual(options.modes, ['standard', 'mistakes'])
+      assert.deepEqual(options.modes, ['standard', 'mistakes', 'unanswered'])
       assert.equal(options.countAll, 'all')
       assert.deepEqual(options.timeLimitMinutes, { min: 1, max: 1440 })
    })

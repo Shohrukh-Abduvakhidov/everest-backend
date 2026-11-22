@@ -112,26 +112,27 @@ const finishedTrainerSql = `attempt.user_id = $1 AND attempt.status IN ('graded'
    AND attempt.max_score > 0`
 
 // The last `window` finished trainings of every subject, newest first, numbered per subject.
-// total counts every finished training of the subject; mistakes trainings (only questions the
-// student got wrong) stay out of the window, so they do not pull readiness down.
+// total counts every finished training of the subject; repeat trainings (mode mistakes: questions
+// the student got wrong; mode unanswered: questions an attempt left blank) stay out of the window,
+// so they do not pull readiness down.
 async function listRecentFinishedBySubject(userId, window, db = pool) {
    const result = await db.query(
       `SELECT subject_id, score, max_score, submitted_at, total
        FROM (
           SELECT (test.generation_filters ->> 'subjectId')::bigint AS subject_id,
              attempt.score, attempt.max_score, attempt.submitted_at,
-             COALESCE(test.generation_filters ->> 'mode', 'standard') = 'mistakes' AS mistakes,
+             COALESCE(test.generation_filters ->> 'mode', 'standard') IN ('mistakes', 'unanswered') AS repeat_training,
              row_number() OVER subject_window AS position,
              count(*) OVER (PARTITION BY test.generation_filters ->> 'subjectId')::integer AS total
           ${trainerAttemptFrom}
           WHERE ${finishedTrainerSql}
           WINDOW subject_window AS (
              PARTITION BY test.generation_filters ->> 'subjectId',
-                COALESCE(test.generation_filters ->> 'mode', 'standard') = 'mistakes'
+                COALESCE(test.generation_filters ->> 'mode', 'standard') IN ('mistakes', 'unanswered')
              ORDER BY attempt.submitted_at DESC, attempt.id DESC
           )
        ) AS ranked
-       WHERE NOT mistakes AND position <= $2
+       WHERE NOT repeat_training AND position <= $2
        ORDER BY subject_id, submitted_at DESC`,
       [normalizeInternalId(userId), window],
    )
@@ -201,6 +202,36 @@ async function findTrainerAttemptByKey(userId, idempotencyKey, client) {
       [normalizeInternalId(userId), idempotencyKey],
    )
    return result.rows[0] || null
+}
+
+// The student's own trainer attempt a mode "unanswered" training repeats; another student's
+// attempt, a course test or a mock exam is not found.
+async function findTrainerSourceAttempt(userId, attemptId, db = pool) {
+   const result = await db.query(
+      `SELECT attempt.id, attempt.status, test.generation_filters ${trainerAttemptFrom}
+       WHERE attempt.id = $2 AND attempt.user_id = $1`,
+      [normalizeInternalId(userId), normalizeInternalId(attemptId)],
+   )
+   return result.rows[0] || null
+}
+
+// Questions of an attempt that got no answer (no answer row, or answer_data null), in the
+// attempt's order. Only questions still trainable (published, verified key, trainer bank).
+async function listUnansweredQuestionIds(bankCodePrefix, attemptId, db = pool) {
+   const result = await db.query(
+      `SELECT item.question_id AS id
+       FROM attempt_questions AS item
+       LEFT JOIN student_answers AS answer ON answer.attempt_question_id = item.id
+       JOIN questions AS question ON question.id = item.question_id AND question.status = 'published'
+       JOIN question_banks AS bank ON bank.id = question.bank_id AND starts_with(bank.code, $1)
+       JOIN question_answer_keys AS answer_key
+          ON answer_key.question_id = question.id AND answer_key.status = 'verified'
+       WHERE item.attempt_id = $2
+         AND (answer.answer_data IS NULL OR answer.answer_data = 'null'::jsonb)
+       ORDER BY item.position, item.id`,
+      [bankCodePrefix, normalizeInternalId(attemptId)],
+   )
+   return result.rows.map((row) => String(row.id))
 }
 
 async function findOpenTrainerAttempt(userId, client) {
@@ -441,6 +472,7 @@ export {
    findOpenTrainerAttempt,
    findSubject,
    findTrainerAttemptByKey,
+   findTrainerSourceAttempt,
    listSubjects,
    listTrainableCounts,
    listTrainableSections,
@@ -452,6 +484,7 @@ export {
    listTopicResults,
    listTrainableTopics,
    listTrainerStats,
+   listUnansweredQuestionIds,
    lockTrainerSlot,
    pickCandidates,
    publishTrainerTest,

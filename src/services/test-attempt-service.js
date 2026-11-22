@@ -590,6 +590,20 @@ async function saveAnswerService(userId, attemptIdValue, attemptQuestionIdValue,
    return outcome.saved
 }
 
+// Questions of a finished attempt by outcome. unanswered: no answer (answer_data null); correct:
+// full points; wrong: answered with fewer points (partial credit included); pending: answered
+// but not scored yet (manual review), always 0 in the trainer and the mock exam.
+function outcomeCounts(rows) {
+   const counts = { correct: 0, wrong: 0, unanswered: 0, pending: 0 }
+   for (const row of rows) {
+      if (row.answer_data === null || row.answer_data === undefined) counts.unanswered += 1
+      else if (row.awarded_points === null || row.awarded_points === undefined) counts.pending += 1
+      else if (Number(row.awarded_points) >= Number(row.max_points)) counts.correct += 1
+      else counts.wrong += 1
+   }
+   return counts
+}
+
 async function readResult(deps, attempt, now) {
    const policy = attempt.policy_snapshot.answerRevealPolicy
    const attempts = await deps.repository.listUserAttempts(attempt.user_id, [attempt.assignment_id])
@@ -605,6 +619,8 @@ async function readResult(deps, attempt, now) {
       ? await deps.repository.listAttemptQuestions(attempt.id, { withSnapshot: true })
       : []
    const percent = scorePercent(attempt.score, attempt.max_score)
+   // Counted from the revealed questions, so a hidden review hides the counts too.
+   const counts = revealed ? outcomeCounts(questions) : null
    // From the snapshot taken at start, so editing the test later cannot change this result.
    const passPercent = attempt.policy_snapshot.passPercent ?? null
    return {
@@ -616,6 +632,7 @@ async function readResult(deps, attempt, now) {
       revealed,
       revealsAt: policy !== 'never' && !revealed ? iso(attempt.closes_at) : null,
       remainingAttempts: remaining,
+      counts,
       questions: await withAttemptImages(deps, questions, questions.map(safeReviewQuestion)),
       serverNow: now.toISOString(),
    }
