@@ -1,5 +1,55 @@
 # Decisions
 
+## 2026-11-23 — M10 tail: standalone tests and the question generator
+
+**Owner's decisions:**
+1. **A new kind of test, `origin = 'standalone'`,** with `course_id = NULL`. `tests_course_required_check` is relaxed for this kind only. A student reaches it only through an active assignment, to their group or to them; no enrollment. Course tests work as before.
+2. **Question generation into a draft:** `POST /admin/tests/:testId/questions/generate { subject, sectionCode, topicCodes[], difficulty, count (a number or "all"), language }`.
+   - It reuses the trainer logic of PR #74.
+   - The parameters go to `generation_filters`.
+   - The question set is fixed in the test and is the same for every student.
+   - Manual add and remove stay.
+3. **Staff with `tests.manage`:** `GET /admin/trainer/catalog` and `GET /admin/trainer/availability`, the learner answers without personal mistakes.
+4. **Teachers publish their own tests** (`created_by`). They assign only to groups where they have `can_assign_tests` and to students of those groups. Owner and admin may do everything, as before.
+5. **Students and events:**
+   - standalone assignments appear in the home tests list;
+   - every M14 event works for them;
+   - teachers see results by `can_view_results`;
+   - standalone mistakes stay out of the trainer's mistakes (like course tests).
+
+**Migration `20261123010000000`:**
+- `origin` gets `standalone`;
+- `tests_course_required_check` allows a NULL course for it;
+- the new `tests_standalone_without_course_check` keeps standalone tests without course and module;
+- a partial index `(created_by, id) WHERE origin = 'standalone'`;
+- `tests.publish` is bound to `teacher`.
+- `down` refuses (`STANDALONE_TESTS_EXIST`) while standalone tests exist, because the restored checks would reject them. Otherwise it restores the checks and removes the binding.
+
+**Choices made without the owner:**
+1. **Creating.** `POST /admin/tests` makes a standalone test only for an explicit `courseId: null`. An omitted `courseId` stays `400`, so an old client cannot create one by accident. A `moduleId` on a standalone test is `400`.
+2. **Authoring scope.** A teacher reaches the standalone tests they created: list, read, edit, generate, publish, copy, assign. Other teachers get `404 TEST_NOT_FOUND`. Owner/admin reach all. A copy keeps the kind and belongs to whoever copied it.
+3. **Publishing.** The teacher's "own tests" rule also covers course tests they created. A course test someone else created still answers `403 ACTION_FORBIDDEN` from the service; the route check is now passed.
+4. **Personal assignment of a standalone test.**
+   - A teacher may assign only an active member of an active group where they have `can_assign_tests`. Anyone else answers `404 USER_NOT_FOUND`, without disclosing existence.
+   - Owner/admin may assign any account.
+   - A non-active account answers `409 STUDENT_NOT_ACTIVE` (a new code; course tests keep `STUDENT_NOT_ENROLLED`).
+   - Personal assignments of course tests are unchanged.
+5. **Access in attempts.** `requireContentAccess` treats a standalone test like the trainer: an active account. The assignment lookup checks the audience at start. A running attempt continues after the assignment is revoked or the student leaves the group, as for course tests.
+6. **The generator's question pool is the trainer's:** published, verified key, bank prefix `TRAINER_BANK_CODE_PREFIX`. There is no extra bank-readability check, because the staff catalog shows these questions to every author anyway.
+   - Each question gets 1 point. Trainer cells questions are ordinary numeric/short-text questions in a test, without the digit boxes and 2 points of the trainer.
+   - Questions the test already holds are excluded, both from the draw and from `count: "all"` and availability (`testId`).
+   - The error codes are the trainer's: `TRAINER_NOT_ENOUGH_QUESTIONS`, `TRAINER_COUNT_ALL_NOT_ALLOWED`. Then one client component handles both.
+7. **`generation_filters` of a test** holds the last generation: `subjectId`, `subjectCode`, `difficulty`, `count`, `language`, `sectionCode`, `topicCodes`, `addedQuestionCount`, `generatedAt`, `generations`. It is exposed as `generation`. `subjectId` is also the subject of a standalone attempt in `/me/attempts` (null for hand-picked tests).
+8. **Results and extra attempts of standalone tests.**
+   - Through group assignments, as for course tests.
+   - For personal assignments: a teacher with `can_view_results` on a group where the student is an active member. This mirrors the M12 D1 student scope.
+   - Course tests keep their rules.
+9. **M12 figures.**
+   - Recent results, `below_pass`, first-attempt statistics and `missed_deadline` count standalone tests. `missed_deadline` needs no enrollment for them.
+   - The course filter of the course view leaves them out, and so does the "courses" staff scope of `/admin/users/:id/attempts`.
+10. **M14.** No change was needed: the resolvers do not depend on the course. The target path is `/`, because the student app has no page for a test outside a course.
+11. **Not added:** a learner list of standalone assignments beyond `/me/home` (10 open, 10 upcoming), and parameter-based generation per student (every student gets the same set, by decision 2).
+
 ## 2026-11-22 — NCT trainer: mistakes mode, several topics, count "all", time limit
 
 Requested by the owner: `mode: 'mistakes'`, `topicCodes[]`, `count: "all"` for small choices, an optional `timeLimitMinutes`, exact counts per topic by language and level, and open mistakes in the catalog and overview. No migration: everything lives in `tests.generation_filters` and the existing `duration_seconds`.
@@ -404,7 +454,7 @@ Mapping and additions:
 - `resultPolicy` (`first`, default, `best`, `last`) is stored as the schema offers it; M11 applies it.
 - Points are `NUMERIC(10,2)`, so they are decimal strings in responses. Requests accept a number or a string, above 0, at most 9999.99, at most 2 decimals.
 - `counts_for_group_ranking` stays false: the ranking formula is not approved.
-- **Teacher scope is the same for read, manage and assign:** the `teacher` role plus `course_teachers.can_manage_tests`. Outside it the test returns `404 TEST_NOT_FOUND` and the course `404 COURSE_NOT_FOUND`. `tests.publish` is owner/admin only; a teacher gets `403 ACTION_FORBIDDEN`.
+- **Teacher scope is the same for read, manage and assign:** the `teacher` role plus `course_teachers.can_manage_tests`. Outside it the test returns `404 TEST_NOT_FOUND` and the course `404 COURSE_NOT_FOUND`. `tests.publish` is owner/admin only; a teacher gets `403 ACTION_FORBIDDEN`. (Changed on 2026-11-23: teachers publish their own tests, see that entry.)
 - **`tests.results.read` is seeded but no endpoint uses it yet**: results need attempts (M11). Its scope (`can_view_results`) is applied there.
 - **Extra rule, not requested:** a teacher can assign only to a group where `group_teachers.can_assign_tests` is true; otherwise `404 GROUP_NOT_FOUND`. The flag exists for this, and without the rule a teacher could reach any group.
 - **Question eligibility:** published, verified key, and in a bank the actor can read (same rule as M08). An unreadable question returns `404 QUESTION_NOT_FOUND`. The subject of the question is not compared with the subject of the course.

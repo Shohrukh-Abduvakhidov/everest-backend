@@ -16,7 +16,7 @@ import {
 import { isKnownTimeZoneService } from './timezone-service.js'
 import { getReadinessSummaryService } from './trainer-service.js'
 
-const origins = ['authored', 'trainer', 'mock_exam']
+const origins = ['authored', 'standalone', 'trainer', 'mock_exam']
 const homeListLimit = 10
 const recentResultsLimit = 5
 const weekDays = 7
@@ -49,9 +49,10 @@ async function requireActiveAccount(deps, actorId) {
 }
 
 // One finished attempt of any kind. Trainer and mock exam attempts have no visible title or
-// assignment: the client builds their titles from the origin and the subject.
+// assignment: the client builds their titles from the origin and the subject. A standalone test
+// is a real test with a title and an assignment, but no course (courseId null).
 function safeFinishedAttempt(row) {
-   const authored = row.origin === 'authored'
+   const authored = row.origin === 'authored' || row.origin === 'standalone'
    return {
       attemptId: row.id,
       origin: row.origin,
@@ -110,6 +111,8 @@ async function buildTests(deps, actorId, now, view = ownView) {
       const mine = attempts.filter((attempt) => attempt.assignment_id === row.id)
       const assignment = {
          ...safeLearnerAssignment(row, mine, now, extra.get(row.id) ?? 0),
+         // standalone: no course (courseId and courseTitle null); the assignment alone opens it.
+         origin: row.origin,
          courseId: row.course_id,
          courseTitle: row.course_title,
       }

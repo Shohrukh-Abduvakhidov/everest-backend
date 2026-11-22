@@ -156,6 +156,9 @@ import {
 } from '../controllers/question-import-controller.js'
 import {
    addTestQuestionsController,
+   generateTestQuestionsController,
+   getGeneratorAvailabilityController,
+   getStaffTrainerCatalogController,
    archiveTestController,
    copyTestController,
    createAssignmentController,
@@ -804,6 +807,24 @@ adminRouter.post(
    authenticatedCsrfMiddleware,
    adminMutationRateMiddleware,
    addTestQuestionsController,
+)
+adminRouter.post(
+   '/tests/:testId/questions/generate',
+   manageTestsAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   generateTestQuestionsController,
+)
+// The trainer's catalog and availability for authors of tests (M10 tail): no mistakes.
+adminRouter.get(
+   '/trainer/catalog',
+   manageTestsAuthorizationMiddleware,
+   getStaffTrainerCatalogController,
+)
+adminRouter.get(
+   '/trainer/availability',
+   manageTestsAuthorizationMiddleware,
+   getGeneratorAvailabilityController,
 )
 adminRouter.put(
    '/tests/:testId/questions/order',

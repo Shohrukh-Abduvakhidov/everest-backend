@@ -1058,7 +1058,7 @@ Three read-only routes for the signed-in student. Any active account may call th
 
 **`GET /me/attempts?origin&subjectId&limit&offset`**: finished attempts of every kind, newest first.
 
-- `origin`: `authored` (course tests), `trainer` or `mock_exam`. `subjectId`: course subject, trainer subject, or any subject inside a mock exam. `limit` 1–100 (default 20), `offset` 0–100000. Anything else is `400 VALIDATION_ERROR`.
+- `origin`: `authored` (course tests), `standalone` (tests outside courses, 2026-11-23; `title` set, `courseId` null), `trainer` or `mock_exam`. `subjectId`: course subject, trainer subject, or any subject inside a mock exam. `limit` 1–100 (default 20), `offset` 0–100000. Anything else is `400 VALIDATION_ERROR`.
 - Response: `{ "attempts": [FinishedAttempt], "pagination": { "limit": 20, "offset": 0, "total": 57, "hasMore": true } }`. `FinishedAttempt` is the `recentResults` item above.
 - Only `graded` and `expired` attempts are listed (a running attempt is not history). Open a result with `GET /tests/attempts/{attemptId}/result` (course tests and trainings) or `GET /trainer/exams/{attemptId}/result` (mock exam).
 
@@ -1310,16 +1310,19 @@ POST routes need CSRF (`X-CSRF-Token` + `Origin`) with the cookie session, like 
 
 | Method | Path | Permission | Purpose |
 |---|---|---|---|
-| GET | `/admin/tests` | `tests.read` | List in scope; `limit`, `offset`, `courseId`, `status`; `hasMore` |
-| POST | `/admin/tests` | `tests.manage` | Create a draft |
+| GET | `/admin/tests` | `tests.read` | List in scope; `limit`, `offset`, `courseId`, `status`, `origin`; `hasMore` |
+| POST | `/admin/tests` | `tests.manage` | Create a draft in a course, or a standalone test (`courseId: null`) |
 | GET | `/admin/tests/:testId` | `tests.read` | Test with questions |
 | PATCH | `/admin/tests/:testId` | `tests.manage` | Edit draft settings |
 | DELETE | `/admin/tests/:testId` | `tests.manage` | Delete a draft |
 | POST | `/admin/tests/:testId/questions` | `tests.manage` | Add up to 100 questions |
+| POST | `/admin/tests/:testId/questions/generate` | `tests.manage` | Add questions by parameters (trainer selection) |
+| GET | `/admin/trainer/catalog` | `tests.manage` | Subjects, sections, topics with exact counts (no mistakes) |
+| GET | `/admin/trainer/availability` | `tests.manage` | Exact count for one choice; `testId` leaves out what the test holds |
 | PUT | `/admin/tests/:testId/questions/order` | `tests.manage` | Replace the order (full list) |
 | DELETE | `/admin/tests/:testId/questions/:questionId` | `tests.manage` | Remove a question |
 | PUT | `/admin/tests/:testId/questions/:questionId/points` | `tests.manage` | Set points |
-| POST | `/admin/tests/:testId/publish` | `tests.publish` | Publish a draft |
+| POST | `/admin/tests/:testId/publish` | `tests.publish` | Publish a draft (a teacher: own tests only) |
 | POST | `/admin/tests/:testId/archive` | `tests.manage` | Archive a published test |
 | POST | `/admin/tests/:testId/copy` | `tests.manage` | Copy as a draft |
 | GET | `/admin/tests/:testId/assignments` | `tests.read` | List; `limit`, `offset`, `status`; `hasMore` |
@@ -1328,6 +1331,52 @@ POST routes need CSRF (`X-CSRF-Token` + `Origin`) with the cookie session, like 
 | DELETE | `/admin/tests/:testId/assignments/:assignmentId` | `tests.assign` | Revoke (the row stays) |
 
 Exact bodies and error codes are in Swagger and `docs/api.md`.
+
+#### Standalone tests and the question generator (M10 tail, 2026-11-23)
+
+**What it is.** A teacher can make a "test from the trainer" for a group, without a course: pick the parameters, the server fills the test with questions, and the teacher publishes and assigns it.
+
+**Test fields.** Every test now has:
+- `origin`: `authored` (inside a course) or `standalone` (no course: `courseId` and `moduleId` are `null`);
+- `generation`: the parameters of the last generation, or `null` when questions were only picked by hand.
+
+**Screen flow for a teacher:**
+
+1. **Create:** `POST /admin/tests` with `{ "courseId": null, "title": "Химия — 8 класс", "timeLimitMinutes": 40, "maxAttempts": 1, "passPercent": 60 }` (the settings table is the same as for course tests). Send `courseId: null` explicitly: omitting it is `400`. Do not send `moduleId`.
+2. **Load the parameters:** `GET /admin/trainer/catalog` has the same shape as the learner `/trainer/catalog`, without `mistakes`. Build the form from it: subject, language, section, topics (several), level (`easy`/`medium`/`hard`/`mixed`), count (`options.questionCounts`, plus `"all"` for small choices).
+3. **Show the exact number while the form changes:** `GET /admin/trainer/availability?subject=…&difficulty=mixed&topicCodes=a,b&testId=…`. Use `questionCounts` to enable counts and `allowsAll` to offer «Все доступные». With `testId`, questions already in the test are not counted.
+4. **Generate:** `POST /admin/tests/:testId/questions/generate`.
+
+   ```json
+   { "subject": "khimiya", "difficulty": "mixed", "count": 20, "topicCodes": ["khim_acids", "khim_salts"], "language": "tg" }
+   ```
+
+   The response is the test with its questions plus `addedQuestionIds`. Every added question has 1 point. They are appended in random order and never repeat a question of the test. Generating again adds more; a removed question can be drawn again.
+
+5. **Edit by hand if needed:** add, remove, reorder or set points with the usual routes, while the test is a draft.
+6. **Publish:** `POST /admin/tests/:testId/publish`. A teacher may publish only tests they created (`403 ACTION_FORBIDDEN` otherwise); owner/admin any.
+7. **Assign:** `POST /admin/tests/:testId/assignments` with `{ groupId }` (a group where the teacher has `canAssignTests`) or `{ userId }` (an active member of such a group; anyone else: `404 USER_NOT_FOUND`). The window fields are as usual; `closesAt` is the deadline.
+
+**Generator errors:**
+
+| Status | Code | UI |
+|---|---|---|
+| 400 | `VALIDATION_ERROR` | `details[0].field`: `count`, `difficulty`, `topicCodes`, … |
+| 404 | `TEST_NOT_FOUND`, `SUBJECT_NOT_FOUND` | Test not in scope / unknown subject |
+| 409 | `TEST_IMMUTABLE` | Only drafts; offer «Скопировать» |
+| 409 | `TEST_QUESTION_LIMIT` | 500 questions at most |
+| 409 | `TRAINER_NOT_ENOUGH_QUESTIONS` | `details[0].message` = how many are left; offer a smaller count or «Все» |
+| 409 | `TRAINER_COUNT_ALL_NOT_ALLOWED` | `"all"` is only for choices below the smallest count; offer a number |
+
+**Lists.** `GET /admin/tests?origin=standalone` returns standalone tests only. A teacher sees the ones they created; owner/admin see all. `?courseId=` returns course tests only.
+
+**Students.**
+- `GET /me/home` lists the assignments in `tests.open` / `tests.upcoming` with `origin: "standalone"` and `courseId`/`courseTitle` `null`. Show the test title and the deadline; there is no course to link to.
+- Start with `POST /tests/assignments/:assignmentId/start`, then use the usual attempt and result routes. No enrollment is needed.
+- `GET /me/attempts` returns `origin: "standalone"` (also a valid `origin` filter) with `title` and `courseId: null`.
+- Notifications about these tests point to `/`.
+
+**Results.** `GET /admin/tests/:testId/attempts` and the assignment results are open to owner/admin and to a teacher with `canViewResults` on the assigned group. For a personal assignment, the teacher needs `canViewResults` on a group of that student. Extra attempts follow the same rule.
 
 ---
 
@@ -1353,7 +1402,7 @@ As seeded by the migrations:
 | `questions.review` | ✓ | ✓ | — | — |
 | `tests.read`, `tests.manage`, `tests.assign`, `tests.results.read` | ✓ | ✓ | ✓ scoped | — |
 | `tests.results.regrade` | ✓ | ✓ | — | — |
-| `tests.publish` | ✓ | ✓ | — | — |
+| `tests.publish` | ✓ | ✓ | ✓ own tests only (2026-11-23) | — |
 | `progress.read` (staff progress views, M12 PR 3) | ✓ | ✓ | ✓ scoped | — |
 
 Notes:
@@ -1364,7 +1413,7 @@ Notes:
    - uploads: an assigned teacher with `canManageLessons`;
    - groups: assigned groups, and announcements only when the assignment allows publishing;
    - question banks: the teacher's own banks for writes; own and staff-visible banks for reads;
-   - tests: courses with `canManageTests`; a group assignment also needs `canAssignTests` on the group.
+   - tests: courses with `canManageTests`, plus the standalone tests the teacher created; a group assignment also needs `canAssignTests` on the group; a personal assignment of a standalone test needs the student to be an active member of such a group; publishing is limited to the teacher's own tests.
 - **Own rights for the UI:** `GET /me/staff-capabilities` returns the roles, permissions and the per-course and per-group flags above (see "My staff rights").
 - **Missing permission:** most routes return `403 ACTION_FORBIDDEN`; account-administration routes return `403 ADMIN_ROLE_REQUIRED`. A missing scope (resource not visible to the actor) returns the resource's `404`.
 

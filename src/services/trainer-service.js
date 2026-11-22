@@ -123,10 +123,9 @@ function mistakeIndex(rows) {
    return index
 }
 
-async function getTrainerCatalogService(userId, overrides) {
-   const deps = dependencies(overrides)
-   const actorId = parseUserId(userId)
-   await requireTrainerLearner(deps, actorId)
+// The catalog of trainable questions. mistakesOf: the student whose open mistakes are counted
+// (the learner catalog), or null for the staff catalog, which has no mistakes fields at all.
+async function buildCatalog(deps, mistakesOf) {
    const { config } = deps
    const counts = await deps.repository.listTrainableCounts(config.bankCodePrefix)
    const subjectIds = [...new Set(counts.map((row) => row.subject_id))]
@@ -134,41 +133,56 @@ async function getTrainerCatalogService(userId, overrides) {
       deps.repository.listSubjects(subjectIds),
       deps.repository.listTrainableSections(config.bankCodePrefix),
       deps.repository.listTrainableTopics(config.bankCodePrefix),
-      deps.repository.listMistakeCounts(actorId, config.bankCodePrefix),
+      mistakesOf === null ? [] : deps.repository.listMistakeCounts(mistakesOf, config.bankCodePrefix),
    ])
    const mistakes = mistakeIndex(mistakeRows)
+   const withMistakes = (entry, value) => (mistakesOf === null ? entry : { ...entry, mistakes: value ?? 0 })
    return {
       options: trainerOptions(config),
       subjects: subjects.map((subject) => {
          const subjectId = String(subject.id)
          return {
-            id: subject.id,
-            code: subject.code,
-            color: subject.color,
-            primaryLanguage: subject.primary_language,
-            titles: subject.titles,
-            languages: countsByLanguage(config, counts.filter((entry) => entry.subject_id === subject.id)),
-            mistakes: mistakes.subjects.get(subjectId) ?? 0,
+            ...withMistakes({
+               id: subject.id,
+               code: subject.code,
+               color: subject.color,
+               primaryLanguage: subject.primary_language,
+               titles: subject.titles,
+               languages: countsByLanguage(config, counts.filter((entry) => entry.subject_id === subject.id)),
+            }, mistakes.subjects.get(subjectId)),
             sections: groupRows(sections.filter((row) => row.subject_id === subject.id), (row) => row.code)
-               .map((rows) => ({
+               .map((rows) => withMistakes({
                   code: rows[0].code,
                   titles: rows[0].titles,
                   total: sumTotals(rows),
                   languages: countsByLanguage(config, rows),
-                  mistakes: mistakes.sections.get(`${subjectId}:${rows[0].code}`) ?? 0,
-               })),
+               }, mistakes.sections.get(`${subjectId}:${rows[0].code}`))),
             topics: groupRows(topics.filter((row) => row.subject_id === subject.id), (row) => row.code)
-               .map((rows) => ({
+               .map((rows) => withMistakes({
                   code: rows[0].code,
                   sectionCode: rows[0].section_code,
                   titles: rows[0].titles,
                   total: sumTotals(rows),
                   languages: countsByLanguage(config, rows),
-                  mistakes: mistakes.topics.get(`${subjectId}:${rows[0].code}`)?.total ?? 0,
-               })),
+               }, mistakes.topics.get(`${subjectId}:${rows[0].code}`)?.total)),
          }
       }),
    }
+}
+
+async function getTrainerCatalogService(userId, overrides) {
+   const deps = dependencies(overrides)
+   const actorId = parseUserId(userId)
+   await requireTrainerLearner(deps, actorId)
+   return buildCatalog(deps, actorId)
+}
+
+// GET /admin/trainer/catalog: the same catalog for authors of tests (tests.manage, checked by the
+// route), without anybody's mistakes. Options for modes and time limits are the trainer's own.
+async function getStaffTrainerCatalogService(userId, overrides) {
+   const deps = dependencies(overrides)
+   parseUserId(userId)
+   return buildCatalog(deps, null)
 }
 
 // ------------------------------------------------------------------ create
@@ -336,12 +350,13 @@ function splitByShares(count, shares) {
 // Picks target questions. A standard mixed training takes each level's share first and fills any
 // shortfall from every trainable question of the request, so a thin level does not block the
 // whole test. Mistakes and count "all" take the whole target from the filtered set at once.
+// filters.excludeIds (questions a test already holds) are never picked.
 async function pickQuestions(deps, client, actorId, request, filters, target) {
    const { config } = deps
    const pick = (difficulties, limit, excludeIds) => deps.repository.pickCandidates(
       config.bankCodePrefix,
       { ...filters, difficulties },
-      { userId: actorId, excludeIds, limit },
+      { userId: actorId, excludeIds: [...(filters.excludeIds ?? []), ...excludeIds], limit },
       client,
    )
    if (request.difficulty !== 'mixed' || request.mode === 'mistakes' || request.count === countAll) {
@@ -533,6 +548,77 @@ async function getTrainerAvailabilityService(userId, query = {}, overrides) {
          ? (available > 0 ? [...questionCounts] : [])
          : questionCounts.filter((count) => count <= available),
       allowsAll: mistakes ? available > 0 : available > 0 && available < Math.min(...questionCounts),
+   }
+}
+
+// ------------------------------------------------------------------ test constructor (M10 tail)
+
+// The selection fields the test constructor uses: the trainer's standard selection (no mode, no
+// time limit, no idempotency key) without anybody's mistakes.
+const constructorSelectionFields = ['subject', 'difficulty', 'language', 'sectionCode', 'topicCode', 'topicCodes']
+
+function parseConstructorQuery(query, config) {
+   validateBody(query, constructorSelectionFields)
+   return parseAvailabilityQuery(query, config)
+}
+
+async function findSelectionSubject(deps, request, db) {
+   const subject = await deps.repository.findSubject(request.subject, db)
+   if (!subject) throw new AppError(404, 'SUBJECT_NOT_FOUND', 'Subject was not found')
+   return subject
+}
+
+// GET /admin/trainer/availability (tests.manage, checked by the route): the learner availability
+// in standard mode. excludeIds: the questions a draft already holds (the route's testId), so the
+// number is what the generator could still add.
+async function getStaffTrainerAvailabilityService(userId, query = {}, { excludeIds = [] } = {}, overrides) {
+   const deps = dependencies(overrides)
+   const actorId = parseUserId(userId)
+   const request = parseConstructorQuery(query, deps.config)
+   const subject = await findSelectionSubject(deps, request)
+   const filters = { ...candidateFilters(deps, actorId, subject, request), excludeIds }
+   const available = await deps.repository.countCandidates(deps.config.bankCodePrefix, filters)
+   const { questionCounts } = deps.config
+   return {
+      mode: 'standard',
+      subjectId: subject.id,
+      language: filters.language,
+      available,
+      questionCounts: questionCounts.filter((count) => count <= available),
+      allowsAll: available > 0 && available < Math.min(...questionCounts),
+   }
+}
+
+/**
+ * The question generator of a draft test (POST /admin/tests/:testId/questions/generate), inside
+ * the caller's transaction: the trainer's standard selection over trainable questions the test
+ * does not hold yet. Same filters, 30/40/30 split, count rules ("all" only below the smallest
+ * count) and errors as a training. Returns the questions in random order and the parameters to
+ * keep in generation_filters.
+ */
+async function drawTrainableQuestionsService(client, { actorId, body, excludeIds }, overrides) {
+   const deps = dependencies(overrides)
+   validateBody(body, [...constructorSelectionFields, 'count'])
+   const request = { ...parseSelection({ ...body, mode: undefined }, deps.config), count: parseCount(body.count, deps.config) }
+   const subject = await findSelectionSubject(deps, request, client)
+   const filters = { ...candidateFilters(deps, actorId, subject, request), excludeIds }
+   const target = await plannedCount(deps, client, request, filters)
+   const picked = await pickQuestions(deps, client, actorId, request, filters, target)
+   const exact = request.count !== countAll
+   if (exact ? picked.length < target : picked.length === 0) {
+      throw notEnough(await deps.repository.countCandidates(deps.config.bankCodePrefix, filters, client))
+   }
+   return {
+      questionIds: shuffled(picked).map((row) => String(row.id)),
+      parameters: {
+         subjectId: String(subject.id),
+         subjectCode: subject.code,
+         difficulty: request.difficulty,
+         count: request.count,
+         language: filters.language,
+         sectionCode: request.sectionCode,
+         topicCodes: request.topicCodes,
+      },
    }
 }
 
@@ -728,7 +814,10 @@ function mistakeSummary(rows) {
 
 export {
    createTrainerAttemptService,
+   drawTrainableQuestionsService,
    getReadinessSummaryService,
+   getStaffTrainerAvailabilityService,
+   getStaffTrainerCatalogService,
    getTrainerAvailabilityService,
    getTrainerOverviewService,
    getTrainerCatalogService,

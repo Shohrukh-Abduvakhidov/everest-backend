@@ -301,8 +301,15 @@ This roadmap orders implementation; it does not replace the [current architectur
 ## M10 — Test constructor and assignments
 
 - **Status:** In progress. Merged (PR #31, follow-up PR #33) and deployed. Not Done until these two deliverables are built or removed from the list (see `docs/decisions.md`):
-   1. Parameter-based question selection in the test constructor (the NCT trainer selects by parameters for practice only).
-   2. Course and lesson audiences for assignments (only user and group audiences exist).
+   1. ~~Parameter-based question selection in the test constructor.~~ Built (2026-11-23, PR open, not deployed): `POST /admin/tests/:testId/questions/generate` with the trainer selection.
+   2. Course and lesson audiences for assignments (only user and group audiences exist). Still open.
+- **Standalone tests and the generator (2026-11-23, PR open, not deployed; decisions.md 2026-11-23):**
+   - `origin = 'standalone'`: tests without a course. A student reaches one only through an assignment to their group or to them; no enrollment.
+   - Generation into drafts by subject, section, topics, level, count (`"all"` for small choices) and language.
+   - `GET /admin/trainer/catalog` and `/admin/trainer/availability` for authors (`tests.manage`).
+   - Teachers publish their own tests (`tests.publish` bound to `teacher`) and assign standalone tests only to their `can_assign_tests` groups and their members.
+   - Home tests, `/me/attempts`, M12 figures, M14 events and results by `can_view_results` cover standalone tests.
+   - Migration `20261123010000000`, reversible while no standalone test exists.
 - **Goal:** Author, publish, and assign tests with explicit policies.
 - **Dependencies:** M04–M06 and M08.
 - **Deliverables:** Test creation, manual/parameter selection, publication, course/user/group audiences, timing, and attempt policies.

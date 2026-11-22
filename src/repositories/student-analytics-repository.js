@@ -27,7 +27,7 @@ async function listFirstAttempts(userId, db = pool) {
       `SELECT attempt.status, attempt.score, attempt.max_score, attempt.policy_snapshot
        FROM test_attempts AS attempt
        JOIN tests AS test ON test.id = attempt.test_id
-       WHERE attempt.user_id = $1 AND test.origin = 'authored' AND attempt.attempt_number = 1
+       WHERE attempt.user_id = $1 AND test.origin IN ('authored', 'standalone') AND attempt.attempt_number = 1
          AND attempt.status IN ('graded', 'expired') AND attempt.max_score > 0`,
       [normalizeInternalId(userId)],
    )

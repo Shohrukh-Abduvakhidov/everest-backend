@@ -204,7 +204,7 @@ async function listRecentTestResults(userIds, courseId, limit, db = pool) {
              row_number() OVER (PARTITION BY attempt.user_id ORDER BY attempt.submitted_at DESC, attempt.id DESC)
                 AS position
           FROM test_attempts AS attempt
-          JOIN tests AS test ON test.id = attempt.test_id AND test.origin = 'authored'
+          JOIN tests AS test ON test.id = attempt.test_id AND test.origin IN ('authored', 'standalone')
           WHERE attempt.user_id = ANY($1::bigint[]) AND ${finishedSql}
             AND ($2::bigint IS NULL OR test.course_id = $2)
        ) AS ranked
@@ -229,7 +229,7 @@ async function listPassThresholdResults(userIds, courseId, limit, db = pool) {
                 attempt.user_id, attempt.id, attempt.score, attempt.max_score,
                 attempt.policy_snapshot, attempt.submitted_at
              FROM test_attempts AS attempt
-             JOIN tests AS test ON test.id = attempt.test_id AND test.origin = 'authored'
+             JOIN tests AS test ON test.id = attempt.test_id AND test.origin IN ('authored', 'standalone')
              WHERE attempt.user_id = ANY($1::bigint[]) AND ${finishedSql}
                AND jsonb_typeof(attempt.policy_snapshot -> 'passPercent') = 'number'
                AND ($2::bigint IS NULL OR test.course_id = $2)
@@ -243,8 +243,9 @@ async function listPassThresholdResults(userIds, courseId, limit, db = pool) {
 }
 
 // missed_deadline (D5): assignments to the student or to a group they belonged to before the
-// window closed, closed by $2, not revoked, in a course the student is enrolled in, with no
-// finished attempt of the student. Optionally only tests of one course.
+// window closed, closed by $2, not revoked, in a course the student is enrolled in (a standalone
+// test has no course: the assignment is enough), with no finished attempt of the student.
+// Optionally only tests of one course (which leaves standalone tests out).
 // The personal and the group branch are separate so each uses its own index; finished attempts
 // are collected once for the candidate assignments and removed through a hashed NOT IN (both
 // columns are NOT NULL, so NOT IN is exact).
@@ -265,13 +266,13 @@ async function listMissedAssignments(userIds, now, courseId, db = pool) {
        ), candidates AS MATERIALIZED (
           SELECT assigned.*, test.title, test.course_id
           FROM assigned
-          JOIN tests AS test ON test.id = assigned.test_id AND test.origin = 'authored'
+          JOIN tests AS test ON test.id = assigned.test_id AND test.origin IN ('authored', 'standalone')
           WHERE ($3::bigint IS NULL OR test.course_id = $3)
-            AND EXISTS (
+            AND (test.origin = 'standalone' OR EXISTS (
                SELECT 1 FROM course_enrollments AS enrollment
                WHERE enrollment.user_id = assigned.user_id AND enrollment.course_id = test.course_id
                  AND enrollment.revoked_at IS NULL
-            )
+            ))
        ), finished AS MATERIALIZED (
           SELECT DISTINCT attempt.assignment_id, attempt.user_id
           FROM test_attempts AS attempt
@@ -328,12 +329,18 @@ async function findResultsAssignment(actorId, testId, assignmentId, db = pool) {
          assignment.lesson_id, test.title, test.course_id AS test_course_id, test.max_attempts,
          test.result_policy, test.grading_policy
        FROM test_assignments AS assignment JOIN tests AS test ON test.id = assignment.test_id
-       WHERE assignment.id = $3 AND assignment.test_id = $2 AND test.origin = 'authored'
+       WHERE assignment.id = $3 AND assignment.test_id = $2 AND test.origin IN ('authored', 'standalone')
          AND (${administratorSql} OR (${teacherSql} AND (
             EXISTS (SELECT 1 FROM course_teachers AS grant_row
                WHERE grant_row.course_id = test.course_id AND grant_row.user_id = $1 AND grant_row.can_view_results)
             OR EXISTS (SELECT 1 FROM group_teachers AS grant_row
                WHERE grant_row.group_id = assignment.group_id AND grant_row.user_id = $1 AND grant_row.can_view_results)
+            -- A personal assignment of a standalone test: a group of the student with the flag.
+            OR (test.origin = 'standalone' AND assignment.user_id IS NOT NULL AND EXISTS (
+               SELECT 1 FROM group_members AS member
+               JOIN group_teachers AS grant_row ON grant_row.group_id = member.group_id
+               WHERE member.user_id = assignment.user_id AND member.status = 'active'
+                  AND grant_row.user_id = $1 AND grant_row.can_view_results))
          )))`,
       [normalizeInternalId(actorId), normalizeInternalId(testId), normalizeInternalId(assignmentId)],
    )

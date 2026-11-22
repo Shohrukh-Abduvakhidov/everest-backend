@@ -397,7 +397,8 @@ test('test authoring, publication and assignment integration', async (t) => {
       assert.deepEqual(seeded.rows, [
          { code: 'admin', count: 7 },
          { code: 'owner', count: 7 },
-         { code: 'teacher', count: 5 },
+         // tests.publish since 2026-11-23: a teacher publishes only their own tests (service check).
+         { code: 'teacher', count: 6 },
       ])
    })
 

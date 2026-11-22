@@ -466,7 +466,7 @@ const schemas = {
    },
    FinishedAttempt: obj({
       attemptId: id(),
-      origin: enumOf(['authored', 'trainer', 'mock_exam']),
+      origin: enumOf(['authored', 'standalone', 'trainer', 'mock_exam']),
       title: nullable(str({ description: 'Course tests only; trainer and mock exam titles are built by the client' })),
       testId: nullable(id()),
       assignmentId: nullable(id()),
@@ -897,7 +897,8 @@ const schemas = {
    }),
    Test: obj({
       id: id(),
-      courseId: id(),
+      origin: enumOf(['authored', 'standalone'], { description: 'standalone: no course and no module; students reach it only through assignments' }),
+      courseId: nullable(id()),
       moduleId: nullable(id()),
       title: str(),
       mode: enumOf(testModes),
@@ -912,6 +913,7 @@ const schemas = {
       questionCount: int(),
       totalPoints: testPoints(),
       activeAssignmentCount: int(),
+      generation: nullable(anyObject('Parameters of the last question generation: subjectId, subjectCode, difficulty, count, language, sectionCode, topicCodes, addedQuestionCount, generatedAt, generations')),
       copiedFromId: nullable(id()),
       createdBy: id(),
       createdAt: dt(),
@@ -1894,12 +1896,14 @@ const routes = [
    // Admin: tests
    ['get', '/admin/tests', {
       tag: 'Admin: tests', ...adminRead('tests.read'), summary: 'Tests in scope',
-      query: [...limitQuery, { name: 'courseId', schema: id() }, { name: 'status', schema: enumOf(['draft', 'published', 'archived']) }],
+      description: 'Course tests of the actor\'s course scope and standalone tests (owner/admin: all; a teacher: the ones they created).',
+      query: [...limitQuery, { name: 'courseId', schema: id() }, { name: 'status', schema: enumOf(['draft', 'published', 'archived']) }, { name: 'origin', schema: enumOf(['authored', 'standalone']) }],
       response: page('tests', ref('Test')),
    }],
    ['post', '/admin/tests', {
-      tag: 'Admin: tests', ...admin('tests.manage'), created: true, summary: 'Create a draft test in a course',
-      body: body({ courseId: id(), ...testFields }, ['courseId', 'title']), response: ref('TestDetail'),
+      tag: 'Admin: tests', ...admin('tests.manage'), created: true, summary: 'Create a draft test in a course, or a standalone test',
+      description: 'courseId: a course of the actor\'s scope, or an explicit null for a standalone test (no course, no module; students reach it only through assignments). Omitting courseId is a validation error.',
+      body: body({ courseId: nullable(id()), ...testFields }, ['courseId', 'title']), response: ref('TestDetail'),
       errors: { 404: ['COURSE_NOT_FOUND'], 409: ['COURSE_ARCHIVED'] },
    }],
    ['get', '/admin/tests/:testId', {
@@ -1923,6 +1927,33 @@ const routes = [
       response: ref('TestDetail'),
       errors: { 400: ['VALIDATION_ERROR', 'INVALID_TEST_ID'], 404: ['TEST_NOT_FOUND', 'QUESTION_NOT_FOUND'], 409: ['TEST_IMMUTABLE', 'TEST_QUESTION_DUPLICATE', 'TEST_QUESTION_LIMIT', 'QUESTION_NOT_ELIGIBLE'] },
    }],
+   ['post', '/admin/tests/:testId/questions/generate', {
+      tag: 'Admin: tests', ...admin('tests.manage'), created: true, summary: 'Add questions to a draft by parameters (the trainer selection)',
+      description: 'Draws trainable NCT questions the test does not hold yet, with the trainer rules: difficulty easy/medium/hard or mixed (30/40/30), count from the trainer counts or "all" (only when fewer than the smallest count are available), language defaults to the subject\'s primary language. Each question gets 1 point and is appended in random order; the set is fixed in the test and the same for every student. The parameters are kept in generation. addedQuestionIds lists what was added.',
+      body: body({ subject: str({ description: 'Subject id or code' }), difficulty: str(), count: { anyOf: [int(), enumOf(['all'])] }, language: str(), sectionCode: str(), topicCode: str(), topicCodes: arr(str(), { minItems: 1, maxItems: 50 }) }, ['subject', 'difficulty', 'count']),
+      response: { allOf: [ref('TestDetail'), obj({ addedQuestionIds: arr(id()) }, ['addedQuestionIds'])] },
+      errors: { 400: ['VALIDATION_ERROR', 'INVALID_TEST_ID'], 404: ['TEST_NOT_FOUND', 'SUBJECT_NOT_FOUND'], 409: ['TEST_IMMUTABLE', 'TEST_QUESTION_LIMIT', 'TRAINER_NOT_ENOUGH_QUESTIONS', 'TRAINER_COUNT_ALL_NOT_ALLOWED'] },
+   }],
+   ['get', '/admin/trainer/catalog', {
+      tag: 'Admin: tests', ...adminRead('tests.manage'), summary: 'Trainable NCT questions for the question generator',
+      description: 'The learner catalog of GET /trainer/catalog without mistakes fields.',
+      response: obj({ options: anyObject(), subjects: arr(anyObject('id, code, color, primaryLanguage, titles, languages, sections[{code,titles,total,languages}], topics[{code,sectionCode,titles,total,languages}]')) }, ['options', 'subjects']),
+   }],
+   ['get', '/admin/trainer/availability', {
+      tag: 'Admin: tests', ...adminRead('tests.manage'), summary: 'Exact count for one generator choice',
+      description: 'GET /trainer/availability in standard mode. With testId (a test of the actor\'s scope) its questions are left out, so available is what generate could still add.',
+      query: [
+         { name: 'subject', required: true, schema: str({ description: 'Subject id or code' }) },
+         { name: 'difficulty', required: true, schema: str() },
+         { name: 'language', schema: enumOf(['tg', 'ru', 'en']) },
+         { name: 'sectionCode', schema: str() },
+         { name: 'topicCode', schema: str() },
+         { name: 'topicCodes', schema: str({ description: 'Comma-separated topic codes, or a repeated parameter' }) },
+         { name: 'testId', schema: id() },
+      ],
+      response: obj({ mode: str(), subjectId: id(), language: nullable(str()), available: int(), questionCounts: arr(int()), allowsAll: bool() }, ['mode', 'subjectId', 'language', 'available', 'questionCounts', 'allowsAll']),
+      errors: { 400: ['VALIDATION_ERROR', 'INVALID_TEST_ID'], 404: ['SUBJECT_NOT_FOUND', 'TEST_NOT_FOUND'] },
+   }],
    ['put', '/admin/tests/:testId/questions/order', {
       tag: 'Admin: tests', ...admin('tests.manage'), summary: 'Replace the question order (full list)',
       body: body({ questionIds: arr(id(), { minItems: 1 }) }, ['questionIds']), response: ref('TestDetail'),
@@ -1939,6 +1970,7 @@ const routes = [
    }],
    ['post', '/admin/tests/:testId/publish', {
       tag: 'Admin: tests', ...admin('tests.publish'), summary: 'Publish a draft', response: ref('TestDetail'),
+      description: 'Owner and admin publish any test of their scope; a teacher (tests.publish since 2026-11-23) only a test they created, otherwise 403 ACTION_FORBIDDEN.',
       errors: { 400: ['VALIDATION_ERROR', 'INVALID_TEST_ID'], 404: ['TEST_NOT_FOUND'], 409: ['INVALID_TEST_TRANSITION', 'TEST_NOT_PUBLISHABLE', 'COURSE_ARCHIVED'] },
    }],
    ['post', '/admin/tests/:testId/archive', {
@@ -1956,10 +1988,10 @@ const routes = [
       errors: { 400: ['VALIDATION_ERROR', 'INVALID_TEST_ID'], 404: ['TEST_NOT_FOUND'] },
    }],
    ['post', '/admin/tests/:testId/assignments', {
-      tag: 'Admin: tests', ...admin('tests.assign'), created: true, summary: 'Assign to one group or one enrolled student',
-      description: 'Send exactly one of groupId and userId. A group grants no course access.',
+      tag: 'Admin: tests', ...admin('tests.assign'), created: true, summary: 'Assign to one group or one student',
+      description: 'Send exactly one of groupId and userId. A group grants no course access. A course test: the student needs a current enrollment. A standalone test: no enrollment; a teacher assigns only groups where they have canAssignTests and active members of those groups (others: 404 USER_NOT_FOUND).',
       body: body({ groupId: id(), userId: id(), opensAt: dt(), closesAt: nullable(dt()), personalWindowMinutes: nullable(int({ minimum: 1 })) }), response: ref('TestAssignment'),
-      errors: { 400: ['VALIDATION_ERROR', 'INVALID_TEST_ID'], 404: ['TEST_NOT_FOUND', 'GROUP_NOT_FOUND', 'USER_NOT_FOUND'], 409: ['TEST_NOT_PUBLISHED', 'COURSE_ARCHIVED', 'GROUP_ARCHIVED', 'STUDENT_NOT_ENROLLED', 'ASSIGNMENT_DUPLICATE'] },
+      errors: { 400: ['VALIDATION_ERROR', 'INVALID_TEST_ID'], 404: ['TEST_NOT_FOUND', 'GROUP_NOT_FOUND', 'USER_NOT_FOUND'], 409: ['TEST_NOT_PUBLISHED', 'COURSE_ARCHIVED', 'GROUP_ARCHIVED', 'STUDENT_NOT_ENROLLED', 'STUDENT_NOT_ACTIVE', 'ASSIGNMENT_DUPLICATE'] },
    }],
    ['patch', '/admin/tests/:testId/assignments/:assignmentId', {
       tag: 'Admin: tests', ...admin('tests.assign'), summary: 'Change the window of an active assignment',
@@ -2027,7 +2059,7 @@ const routes = [
    ['get', '/admin/users/:userId/attempts', {
       tag: 'Admin: progress', ...adminRead('progress.read'), summary: 'Finished attempts of one student (course tests, trainer, mock exams)',
       description: 'The /me/attempts filters and paging within the scope of /admin/users/{userId}/analytics.',
-      query: [{ name: 'origin', schema: enumOf(['authored', 'trainer', 'mock_exam']) }, { name: 'subjectId', schema: id() }, { name: 'limit', schema: int({ minimum: 1, maximum: 100 }) }, { name: 'offset', schema: int({ minimum: 0 }) }],
+      query: [{ name: 'origin', schema: enumOf(['authored', 'standalone', 'trainer', 'mock_exam']) }, { name: 'subjectId', schema: id() }, { name: 'limit', schema: int({ minimum: 1, maximum: 100 }) }, { name: 'offset', schema: int({ minimum: 0 }) }],
       response: page('attempts', ref('FinishedAttempt')),
       errors: { 400: ['VALIDATION_ERROR', 'INVALID_USER_ID'], 404: ['USER_NOT_FOUND'] },
    }],
@@ -2080,7 +2112,7 @@ const routes = [
       tag: 'Student home', summary: 'My finished attempts of every kind, newest first',
       description: 'Course tests, trainer trainings and mock exams that are graded or closed by the timer. Running attempts are not listed. subjectId matches the course subject, the trainer subject and the subjects of a mock exam.',
       query: [
-         { name: 'origin', schema: enumOf(['authored', 'trainer', 'mock_exam']) },
+         { name: 'origin', schema: enumOf(['authored', 'standalone', 'trainer', 'mock_exam']) },
          { name: 'subjectId', schema: id() },
          { name: 'limit', schema: int({ minimum: 1, maximum: 100 }) },
          { name: 'offset', schema: int({ minimum: 0 }) },

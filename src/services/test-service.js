@@ -5,8 +5,11 @@ import AppError from '../utils/app-error.js'
 import { normalizeInternalId } from '../utils/internal-id.js'
 import { parsePagination, parseText, validateBody, validationError } from './course-service.js'
 import { enqueueAssignmentCloseEvents, enqueueTestAssigned } from './notification-service.js'
+import { drawTrainableQuestionsService, getStaffTrainerAvailabilityService } from './trainer-service.js'
 
 const testStatuses = ['draft', 'published', 'archived']
+// Tests of the constructor: in a course (authored) or outside courses (standalone, M10 tail).
+const testOrigins = ['authored', 'standalone']
 const assignmentStatuses = ['active', 'revoked', 'closed']
 const testModes = ['lesson', 'practice', 'exam']
 const resultPolicies = ['first', 'best', 'last']
@@ -49,6 +52,8 @@ function dependencies(overrides = {}) {
       repository: overrides.repository || testRepository,
       auth: overrides.auth || authRepository,
       transaction: overrides.transaction || withTransaction,
+      // Overrides of the trainer selection the question generator reuses (trainer config, repository).
+      trainer: overrides.trainer,
    }
 }
 
@@ -167,6 +172,7 @@ function requireNoLinkedLessons(lessons) {
 
 async function parseModuleForCourse(repository, value, courseId, client) {
    if (value === null) return null
+   if (courseId === null) throw validationError('moduleId', 'A standalone test has no course and no module')
    const moduleId = parseFieldId(value, 'moduleId')
    if (!(await repository.courseHasModule(courseId, moduleId, client))) {
       throw validationError('moduleId', 'moduleId must be a module of the test course')
@@ -238,9 +244,16 @@ function persistedSettings(settings, gradingPolicy = {}) {
    }
 }
 
+// generation_filters of a constructor test: the parameters of its last question generation, or
+// null when questions were only added by hand.
+function safeGeneration(filters) {
+   return filters && Object.keys(filters).length ? filters : null
+}
+
 function safeTest(row) {
    return {
       id: row.id,
+      origin: row.origin,
       courseId: row.course_id,
       moduleId: row.module_id,
       ...currentSettings(row),
@@ -248,6 +261,7 @@ function safeTest(row) {
       questionCount: row.question_count,
       totalPoints: row.total_points,
       activeAssignmentCount: row.active_assignment_count,
+      generation: safeGeneration(row.generation_filters),
       copiedFromId: row.copied_from_id,
       createdBy: row.created_by,
       createdAt: row.created_at,
@@ -314,11 +328,12 @@ async function loadTest(repository, client, actorId, testId) {
 
 async function listTestsService(userId, query = {}, overrides) {
    const { repository } = dependencies(overrides)
-   validateBody(query, ['limit', 'offset', 'courseId', 'status'])
+   validateBody(query, ['limit', 'offset', 'courseId', 'status', 'origin'])
    const filters = {
       ...parsePagination(query),
       courseId: query.courseId === undefined ? null : parseFieldId(query.courseId, 'courseId'),
       status: parseOptionalQueryEnum(query.status, 'status', testStatuses),
+      origin: parseOptionalQueryEnum(query.origin, 'origin', testOrigins),
    }
    const rows = await repository.listTests(normalizeInternalId(userId), filters)
    return {
@@ -339,13 +354,33 @@ async function getTestService(userId, testIdValue, overrides) {
    return readDetail(repository, actorId, testId)
 }
 
+// courseId: a course of the actor's scope (a course test), or an explicit null for a standalone
+// test (no course, no module; reached by students only through assignments). Omitting courseId
+// stays a validation error, so an old client cannot make a standalone test by accident.
 async function createTestService(userId, body, overrides) {
    const { repository, auth, transaction } = dependencies(overrides)
    const actorId = normalizeInternalId(userId)
    validateBody(body, ['courseId', 'moduleId', ...settingFields])
-   const courseId = parseFieldId(body.courseId, 'courseId')
+   const standalone = body.courseId === null
+   const courseId = standalone ? null : parseFieldId(body.courseId, 'courseId')
    if (!('title' in body)) throw validationError('title')
    const settings = mergeSettings(defaultSettings, body)
+   if (standalone) {
+      if (body.moduleId !== undefined && body.moduleId !== null) {
+         throw validationError('moduleId', 'A standalone test has no course and no module')
+      }
+      return transaction(async (client) => {
+         const testId = await repository.createTest({
+            ...persistedSettings(settings),
+            moduleId: null,
+            courseId: null,
+            origin: 'standalone',
+            createdBy: actorId,
+         }, client)
+         await audit(auth, client, actorId, 'test.created', 'test', testId, { courseId: null, origin: 'standalone' })
+         return readDetail(repository, actorId, testId, client)
+      })
+   }
    return transaction(async (client) => {
       const course = await repository.lockManageableCourse(actorId, courseId, client)
       if (!course) throw new AppError(404, 'COURSE_NOT_FOUND', 'Course was not found')
@@ -451,6 +486,56 @@ async function addTestQuestionsService(userId, testIdValue, body, overrides) {
    })
 }
 
+// POST /admin/tests/:testId/questions/generate: the trainer's selection by parameters fills a
+// draft (course or standalone) with questions it does not hold yet, 1 point each, appended in
+// random order. The set is then fixed in the test, the same for every student; questions can
+// still be added, removed and reordered by hand. The parameters of the last generation are kept
+// in generation_filters.
+async function generateTestQuestionsService(userId, testIdValue, body, overrides) {
+   const { repository, auth, transaction, trainer } = dependencies(overrides)
+   const actorId = normalizeInternalId(userId)
+   const testId = parseTestId(testIdValue)
+   return transaction(async (client) => {
+      const test = await loadTest(repository, client, actorId, testId)
+      requireDraft(test)
+      const existing = await repository.findTestQuestionIds(testId, client)
+      const { questionIds, parameters } = await drawTrainableQuestionsService(client, {
+         actorId,
+         body,
+         excludeIds: existing,
+      }, trainer)
+      if (existing.length + questionIds.length > maximumQuestionsPerTest) {
+         throw new AppError(409, 'TEST_QUESTION_LIMIT', `A test holds at most ${maximumQuestionsPerTest} questions`)
+      }
+      await repository.addTestQuestions(testId, questionIds.map((questionId) => ({ questionId, points: defaultPoints })), client)
+      const previous = safeGeneration(test.generation_filters)
+      await repository.setGenerationFilters(testId, {
+         ...parameters,
+         addedQuestionCount: questionIds.length,
+         generatedAt: new Date().toISOString(),
+         generations: (previous?.generations ?? 0) + 1,
+      }, client)
+      await audit(auth, client, actorId, 'test.questions_generated', 'test', testId, { ...parameters, questionIds })
+      return { ...await readDetail(repository, actorId, testId, client), addedQuestionIds: questionIds }
+   })
+}
+
+// GET /admin/trainer/availability: the trainer availability for authors. With testId (a test of
+// the actor's scope), the questions it already holds are left out, so the number is what
+// generate could still add.
+async function getGeneratorAvailabilityService(userId, query = {}, overrides) {
+   const { repository, trainer } = dependencies(overrides)
+   const actorId = normalizeInternalId(userId)
+   const { testId: testIdValue, ...selection } = query
+   let excludeIds = []
+   if (testIdValue !== undefined) {
+      const testId = parseTestId(testIdValue)
+      if (!(await repository.findTest(actorId, testId))) throw testNotFound()
+      excludeIds = await repository.findTestQuestionIds(testId)
+   }
+   return getStaffTrainerAvailabilityService(actorId, selection, { excludeIds }, trainer)
+}
+
 async function removeTestQuestionService(userId, testIdValue, questionIdValue, overrides) {
    const { repository, auth, transaction } = dependencies(overrides)
    const actorId = normalizeInternalId(userId)
@@ -516,6 +601,10 @@ async function publishTestService(userId, testIdValue, overrides) {
    const testId = parseTestId(testIdValue)
    return transaction(async (client) => {
       const test = await loadTest(repository, client, actorId, testId)
+      // tests.publish: owner and admin publish any test of their scope; a teacher only their own.
+      if (String(test.created_by) !== String(actorId) && !(await repository.isAdministrator(actorId, client))) {
+         throw new AppError(403, 'ACTION_FORBIDDEN', 'Only the author of this test or an administrator may publish it')
+      }
       if (test.status !== 'draft') {
          throw new AppError(409, 'INVALID_TEST_TRANSITION', 'Only draft tests can be published')
       }
@@ -616,6 +705,12 @@ async function createAssignmentService(userId, testIdValue, body, overrides) {
          const group = await repository.lockAssignableGroup(actorId, audience.groupId, client)
          if (!group) throw new AppError(404, 'GROUP_NOT_FOUND', 'Group was not found')
          if (group.status !== 'active') throw new AppError(409, 'GROUP_ARCHIVED', 'Group is archived')
+      } else if (test.origin === 'standalone') {
+         // No course to be enrolled in: a teacher assigns only students of the groups where they
+         // may assign tests; anyone else looks missing.
+         const student = await repository.findStandaloneAssignee(actorId, audience.userId, client)
+         if (!student || !student.in_scope) throw new AppError(404, 'USER_NOT_FOUND', 'User was not found')
+         if (student.status !== 'active') throw new AppError(409, 'STUDENT_NOT_ACTIVE', 'Student account is not active')
       } else {
          const student = await repository.findAssignableStudent(audience.userId, test.course_id, client)
          if (!student) throw new AppError(404, 'USER_NOT_FOUND', 'User was not found')
@@ -714,6 +809,8 @@ export {
    createAssignmentService,
    createTestService,
    deleteTestService,
+   generateTestQuestionsService,
+   getGeneratorAvailabilityService,
    getTestService,
    listAssignmentsService,
    listTestsService,
