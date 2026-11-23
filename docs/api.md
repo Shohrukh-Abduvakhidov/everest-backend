@@ -169,7 +169,7 @@ All mutations need CSRF for cookie sessions, use the administrative rate limit, 
 
 **Question generator (2026-11-23).** `POST /admin/tests/:testId/questions/generate`, body `{ subject, difficulty, count, language?, sectionCode?, topicCodes? | topicCode? }`.
 - It draws trainable NCT questions with the trainer's standard selection: published, verified key, bank code starting with `TRAINER_BANK_CODE_PREFIX`.
-- It uses the same filters, the 30/40/30 split for `mixed` and the same count rules: a number from the trainer counts, or `"all"` only when 1 to (smallest count − 1) questions are available.
+- It uses the same filters, the 30/40/30 split for `mixed` and its own count rule for staff: any whole number from 1 up to the questions still available (not only the trainer counts), or `"all"` = every one still available, with no minimum-size rule. Too few: `409 TRAINER_NOT_ENOUGH_QUESTIONS`, `details[0].message` = available. Students keep the trainer rules (`POST /trainer/attempts`). `GET /admin/trainer/availability` adds `maxCount` (= `available`) and `allowsAll` is true whenever `available > 0`.
 - `language` defaults to the subject's primary language. Questions the test already holds are left out.
 - Each question gets 1 point and is appended in random order. The set is then fixed in the test and is the same for every student. Manual add, remove, reorder and points stay available.
 - Works for drafts only (`409 TEST_IMMUTABLE`), course or standalone. The 500-question limit applies (`409 TEST_QUESTION_LIMIT`).

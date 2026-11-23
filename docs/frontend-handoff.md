@@ -1370,8 +1370,8 @@ Exact bodies and error codes are in Swagger and `docs/api.md`.
 **Screen flow for a teacher:**
 
 1. **Create:** `POST /admin/tests` with `{ "courseId": null, "title": "Химия — 8 класс", "timeLimitMinutes": 40, "maxAttempts": 1, "passPercent": 60 }` (the settings table is the same as for course tests). Send `courseId: null` explicitly: omitting it is `400`. Do not send `moduleId`.
-2. **Load the parameters:** `GET /admin/trainer/catalog` has the same shape as the learner `/trainer/catalog`, without `mistakes`. Build the form from it: subject, language, section, topics (several), level (`easy`/`medium`/`hard`/`mixed`), count (`options.questionCounts`, plus `"all"` for small choices).
-3. **Show the exact number while the form changes:** `GET /admin/trainer/availability?subject=…&difficulty=mixed&topicCodes=a,b&testId=…`. Use `questionCounts` to enable counts and `allowsAll` to offer «Все доступные». With `testId`, questions already in the test are not counted.
+2. **Load the parameters:** `GET /admin/trainer/catalog` has the same shape as the learner `/trainer/catalog`, without `mistakes`. Build the form from it: subject, language, section, topics (several), level (`easy`/`medium`/`hard`/`mixed`), count (any whole number from 1 to `available`, or `"all"`; `options.questionCounts` are only handy presets).
+3. **Show the exact number while the form changes:** `GET /admin/trainer/availability?subject=…&difficulty=mixed&topicCodes=a,b&testId=…`. Let the teacher type any count from 1 to `maxCount` (= `available`); `questionCounts` are ready-made presets that fit, `allowsAll` (true when `available > 0`) offers «Все доступные». This is for staff only; the student trainer keeps its counts. With `testId`, questions already in the test are not counted.
 4. **Generate:** `POST /admin/tests/:testId/questions/generate`.
 
    ```json
@@ -1392,8 +1392,8 @@ Exact bodies and error codes are in Swagger and `docs/api.md`.
 | 404 | `TEST_NOT_FOUND`, `SUBJECT_NOT_FOUND` | Test not in scope / unknown subject |
 | 409 | `TEST_IMMUTABLE` | Only drafts; offer «Скопировать» |
 | 409 | `TEST_QUESTION_LIMIT` | 500 questions at most |
-| 409 | `TRAINER_NOT_ENOUGH_QUESTIONS` | `details[0].message` = how many are left; offer a smaller count or «Все» |
-| 409 | `TRAINER_COUNT_ALL_NOT_ALLOWED` | `"all"` is only for choices below the smallest count; offer a number |
+| 409 | `TRAINER_NOT_ENOUGH_QUESTIONS` | `details[0].message` = how many are left; ask for at most that many, or «Все» |
+| 409 | `TRAINER_COUNT_ALL_NOT_ALLOWED` | Not returned by the generator any more (staff `"all"` has no minimum-size rule); still returned by `POST /trainer/attempts` |
 
 **Lists.** `GET /admin/tests?origin=standalone` returns standalone tests only. A teacher sees the ones they created; owner/admin see all. `?courseId=` returns course tests only.
 

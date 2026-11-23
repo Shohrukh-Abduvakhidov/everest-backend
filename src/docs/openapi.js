@@ -1936,10 +1936,10 @@ const routes = [
    }],
    ['post', '/admin/tests/:testId/questions/generate', {
       tag: 'Admin: tests', ...admin('tests.manage'), created: true, summary: 'Add questions to a draft by parameters (the trainer selection)',
-      description: 'Draws trainable NCT questions the test does not hold yet, with the trainer rules: difficulty easy/medium/hard or mixed (30/40/30), count from the trainer counts or "all" (only when fewer than the smallest count are available), language defaults to the subject\'s primary language. Each question gets 1 point and is appended in random order; the set is fixed in the test and the same for every student. The parameters are kept in generation. addedQuestionIds lists what was added.',
-      body: body({ subject: str({ description: 'Subject id or code' }), difficulty: str(), count: { anyOf: [int(), enumOf(['all'])] }, language: str(), sectionCode: str(), topicCode: str(), topicCodes: arr(str(), { minItems: 1, maxItems: 50 }) }, ['subject', 'difficulty', 'count']),
+      description: 'Draws trainable NCT questions the test does not hold yet, with the trainer rules: difficulty easy/medium/hard or mixed (30/40/30), count any whole number from 1 up to the questions still available, or "all" (every one still available, no minimum-size rule; fewer than asked is 409 TRAINER_NOT_ENOUGH_QUESTIONS with details[0].message = available), language defaults to the subject\'s primary language. Each question gets 1 point and is appended in random order; the set is fixed in the test and the same for every student. The parameters are kept in generation. addedQuestionIds lists what was added.',
+      body: body({ subject: str({ description: 'Subject id or code' }), difficulty: str(), count: { anyOf: [int({ minimum: 1 }), enumOf(['all'])] }, language: str(), sectionCode: str(), topicCode: str(), topicCodes: arr(str(), { minItems: 1, maxItems: 50 }) }, ['subject', 'difficulty', 'count']),
       response: { allOf: [ref('TestDetail'), obj({ addedQuestionIds: arr(id()) }, ['addedQuestionIds'])] },
-      errors: { 400: ['VALIDATION_ERROR', 'INVALID_TEST_ID'], 404: ['TEST_NOT_FOUND', 'SUBJECT_NOT_FOUND'], 409: ['TEST_IMMUTABLE', 'TEST_QUESTION_LIMIT', 'TRAINER_NOT_ENOUGH_QUESTIONS', 'TRAINER_COUNT_ALL_NOT_ALLOWED'] },
+      errors: { 400: ['VALIDATION_ERROR', 'INVALID_TEST_ID'], 404: ['TEST_NOT_FOUND', 'SUBJECT_NOT_FOUND'], 409: ['TEST_IMMUTABLE', 'TEST_QUESTION_LIMIT', 'TRAINER_NOT_ENOUGH_QUESTIONS'] },
    }],
    ['get', '/admin/trainer/catalog', {
       tag: 'Admin: tests', ...adminRead('tests.manage'), summary: 'Trainable NCT questions for the question generator',
@@ -1958,7 +1958,7 @@ const routes = [
          { name: 'topicCodes', schema: str({ description: 'Comma-separated topic codes, or a repeated parameter' }) },
          { name: 'testId', schema: id() },
       ],
-      response: obj({ mode: str(), subjectId: id(), language: nullable(str()), available: int(), questionCounts: arr(int()), allowsAll: bool() }, ['mode', 'subjectId', 'language', 'available', 'questionCounts', 'allowsAll']),
+      response: obj({ mode: str(), subjectId: id(), language: nullable(str()), available: int(), questionCounts: arr(int()), allowsAll: bool(), maxCount: int({ description: 'Largest count generate accepts (= available)' }) }, ['mode', 'subjectId', 'language', 'available', 'questionCounts', 'allowsAll', 'maxCount']),
       errors: { 400: ['VALIDATION_ERROR', 'INVALID_TEST_ID'], 404: ['SUBJECT_NOT_FOUND', 'TEST_NOT_FOUND'] },
    }],
    ['put', '/admin/tests/:testId/questions/order', {
