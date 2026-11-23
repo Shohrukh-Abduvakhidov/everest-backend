@@ -152,7 +152,9 @@ test('standalone tests and the question generator', async (t) => {
    })
 
    await t.test('generate fills the draft by parameters with the trainer rules; manual edits stay possible', async () => {
-      await assert.rejects(generate(teacherId, testId, { difficulty: 'mixed', count: 7 }), { code: 'VALIDATION_ERROR' })
+      for (const count of [0, -1, 1.5, '7', null]) {
+         await assert.rejects(generate(teacherId, testId, { difficulty: 'mixed', count }), { code: 'VALIDATION_ERROR' })
+      }
       await assert.rejects(generate(otherTeacherId, testId, { difficulty: 'mixed', count: 5 }), { code: 'TEST_NOT_FOUND' })
       const first = await generate(teacherId, testId, { difficulty: 'mixed', count: 5, topicCodes: ['beta', 'alpha'] })
       assert.equal(first.questions.length, 5)
@@ -162,21 +164,29 @@ test('standalone tests and the question generator', async (t) => {
          [first.generation.subjectCode, first.generation.difficulty, first.generation.count, first.generation.topicCodes, first.generation.language, first.generation.generations],
          [subject.code, 'mixed', 5, ['alpha', 'beta'], 'en', 1],
       )
-      // Five are left: "all" needs fewer than the smallest count (5), a number takes them.
-      assert.equal((await getGeneratorAvailabilityService(teacherId, { subject: subject.code, difficulty: 'mixed', testId }, deps)).available, 5)
+      // Five are left. Staff take any count from 1 up to that, or "all" (no minimum-size rule).
+      const left = await getGeneratorAvailabilityService(teacherId, { subject: subject.code, difficulty: 'mixed', testId }, deps)
+      assert.deepEqual([left.available, left.allowsAll, left.maxCount], [5, true, 5])
       await assert.rejects(
-         generate(teacherId, testId, { difficulty: 'mixed', count: 'all' }),
-         (error) => error.code === 'TRAINER_COUNT_ALL_NOT_ALLOWED' && error.details[0].message === '5',
+         generate(teacherId, testId, { difficulty: 'mixed', count: 6 }),
+         (error) => error.code === 'TRAINER_NOT_ENOUGH_QUESTIONS' && error.details[0].message === '5',
       )
-      const second = await generate(teacherId, testId, { difficulty: 'mixed', count: 5 })
-      assert.equal(new Set(second.questions.map((question) => String(question.questionId))).size, 10)
+      const second = await generate(teacherId, testId, { difficulty: 'mixed', count: 3 })
+      assert.equal(second.addedQuestionIds.length, 3)
       assert.equal(second.generation.generations, 2)
-      await assert.rejects(
-         generate(teacherId, testId, { difficulty: 'mixed', count: 5 }),
-         (error) => error.code === 'TRAINER_NOT_ENOUGH_QUESTIONS' && error.details[0].message === '0',
-      )
+      const third = await generate(teacherId, testId, { difficulty: 'mixed', count: 'all' })
+      assert.equal(third.addedQuestionIds.length, 2)
+      assert.equal(new Set(third.questions.map((question) => String(question.questionId))).size, 10)
+      for (const count of [5, 'all']) {
+         await assert.rejects(
+            generate(teacherId, testId, { difficulty: 'mixed', count }),
+            (error) => error.code === 'TRAINER_NOT_ENOUGH_QUESTIONS' && error.details[0].message === '0',
+         )
+      }
+      const empty = await getGeneratorAvailabilityService(teacherId, { subject: subject.code, difficulty: 'mixed', testId }, deps)
+      assert.deepEqual([empty.available, empty.allowsAll, empty.maxCount], [0, false, 0])
       // A removed question can come back through the generator ("all" with 1 left).
-      const removed = await removeTestQuestionService(teacherId, testId, second.questions[0].questionId)
+      const removed = await removeTestQuestionService(teacherId, testId, third.questions[0].questionId)
       assert.equal(removed.questions.length, 9)
       const back = await generate(teacherId, testId, { difficulty: 'mixed', count: 'all' })
       assert.equal(back.addedQuestionIds.length, 1)

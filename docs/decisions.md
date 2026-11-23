@@ -1,5 +1,13 @@
 # Decisions
 
+## 2026-11-23 — Question generator: any count for staff
+
+Requested by the owner. For staff (`POST /admin/tests/:testId/questions/generate`, `GET /admin/trainer/availability`):
+1. `count` is any whole number from 1, or `"all"`. The trainer counts (10/20/30/50) and the "all only below the smallest count" rule no longer apply there.
+2. The limit is what is still available (questions already in the test are left out). Fewer than asked: `409 TRAINER_NOT_ENOUGH_QUESTIONS`, `details[0].message` = available. `"all"` with nothing left: the same code with 0. `TRAINER_COUNT_ALL_NOT_ALLOWED` is no longer returned by the generator.
+3. Availability adds `maxCount` (= `available`); `allowsAll` is true when `available > 0`; `questionCounts` stays as the presets that fit.
+4. Students (`POST /trainer/attempts`) are unchanged. The 500-question test limit still applies (`TEST_QUESTION_LIMIT`).
+
 ## 2026-11-22 — Trainer: the mistakes rule and mode unanswered
 
 **Why.** A diagnosis of one student (user 2240) showed 160 "mistakes" in biology, of which 137 were questions the student never answered: 47 from mock exams where biology was left empty, the rest from trainings sent in blank. The 8 real mistakes of the last 10-question training were not in the mistakes training, because picking put questions not met in the trainer first, and those were the blank mock exam ones. "All mistakes (160)" then gave 50 questions (`TRAINER_MAX_QUESTIONS`).

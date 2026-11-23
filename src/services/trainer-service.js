@@ -294,6 +294,12 @@ function parseCount(value, config) {
    throw validationError('count', `count must be one of ${[...config.questionCounts, countAll].join(', ')}`)
 }
 
+// Staff (test generator): any whole number from 1, or "all"; the limit is what is available.
+function parseStaffCount(value) {
+   if (value === countAll || (Number.isSafeInteger(value) && value >= 1)) return value
+   throw validationError('count', `count must be a whole number from 1 or ${countAll}`)
+}
+
 function parseTimeLimit(value) {
    if (value === undefined || value === null) return null
    if (!Number.isSafeInteger(value) || value < 1 || value > maximumTimeLimitMinutes) {
@@ -748,24 +754,30 @@ async function getStaffTrainerAvailabilityService(userId, query = {}, { excludeI
       language: filters.language,
       available,
       questionCounts: questionCounts.filter((count) => count <= available),
-      allowsAll: available > 0 && available < Math.min(...questionCounts),
+      // Staff may take any count from 1 to maxCount, or "all".
+      allowsAll: available > 0,
+      maxCount: available,
    }
 }
 
 /**
  * The question generator of a draft test (POST /admin/tests/:testId/questions/generate), inside
  * the caller's transaction: the trainer's standard selection over trainable questions the test
- * does not hold yet. Same filters, 30/40/30 split, count rules ("all" only below the smallest
- * count) and errors as a training. Returns the questions in random order and the parameters to
+ * does not hold yet. Same filters and 30/40/30 split as a training. count: any whole number
+ * up to what is available, or "all" (no minimum-size rule); too few is 409
+ * TRAINER_NOT_ENOUGH_QUESTIONS with the number available. Returns the questions in random order and the parameters to
  * keep in generation_filters.
  */
 async function drawTrainableQuestionsService(client, { actorId, body, excludeIds }, overrides) {
    const deps = dependencies(overrides)
    validateBody(body, [...constructorSelectionFields, 'count'])
-   const request = { ...parseSelection({ ...body, mode: undefined }, deps.config), count: parseCount(body.count, deps.config) }
+   const request = { ...parseSelection({ ...body, mode: undefined }, deps.config), count: parseStaffCount(body.count) }
    const subject = await findSelectionSubject(deps, request, client)
    const filters = { ...candidateFilters(deps, actorId, subject, request), excludeIds }
-   const target = await plannedCount(deps, client, request, filters)
+   const target = request.count === countAll
+      ? await deps.repository.countCandidates(deps.config.bankCodePrefix, filters, client)
+      : request.count
+   if (target === 0) throw notEnough(0)
    const picked = await pickQuestions(deps, client, actorId, request, filters, target)
    const exact = request.count !== countAll
    if (exact ? picked.length < target : picked.length === 0) {
