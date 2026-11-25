@@ -1,10 +1,16 @@
 # EVEREST backend progress
 
-Updated: 2026-11-25. Branch `fix/course-progress-pg-errors-subject-code` (course/module progress, missed test-lesson completions, PostgreSQL error mapping, subject code) open for review, not deployed. Previously: M14 Done (PR 3 #73).
+Updated: 2026-11-25. M13 in progress: branch `feat/m13-group-ranking` (group ranking) open for review, not deployed. Deployed 2026-11-25: backend up to PR #79, frontend up to everestlc #66. Previously: M14 Done (PR 3 #73).
 
 ## Current increment
 
 M12 is Done: PR 3 (staff progress views, #64) and the 2026-11-20 follow-ups (#65 time zone cache, #66 `GET /me/staff-capabilities`, #67 cosmetic question text rules) are merged into main. Deployed on the temporary VPS on 2026-11-19: backend up to PR #62 (M12 PR 1 and PR 2, the question text repair applied to 2 rows, refresh resilience), frontend up to PR #47. Not deployed yet: PRs #63 to #67 (no migration, no new env variable). `fix-question-text.js --apply` with the new cosmetic rules has not been run on any database. Next milestone: M13 (group ranking), which waits for the owner to approve the formula.
+
+## 2026-11-25 — M13 group ranking (`feat/m13-group-ranking`)
+
+- **What:** `countsForGroupRanking` on group assignments (create, patch, responses); migration `20261125010000000_add-group-ranking` (`group_ranking_settings`, index `test_assignments_group_ranking_idx`); pure formulas in `src/utils/ranking-metrics.js`; one aggregate query per group in `src/repositories/stats/group-ranking-repository.js`; `GET /groups/:groupId/ranking`, `GET /admin/groups/:groupId/ranking`, `GET/PUT /admin/groups/:groupId/ranking-settings`. Rules and unattended decisions: `docs/decisions.md` 2026-11-25 (M13). No new env variable.
+- **Tests:** new `tests/unit/ranking-metrics.test.js` (12) and `tests/integration/group-ranking.test.js` (6 subtests). `npm test` (disposable database): 655 tests, 654 passed, 1 failed — the new integration test, in its own setup (it changed `difficulty` of a published question: `QUESTION_IMMUTABLE`); so `test:server` did not run in that chain. After the fix: the new file alone on a fresh disposable database 7/7, `npm run test:server` exit 0. `npm run test:migrations` (counts updated to 44 migrations / 96 tables; they were stale since `20261123010000000`): up, no-op up, down, re-up exit 0.
+- **Not done:** snapshots and achievements (next PR); `scripts/verify-database.js` counts (stale since `20261123010000000`, not part of `npm test`).
 
 ## 2026-11-25 — Course/module progress, missed test-lesson completions, PostgreSQL errors, subject code (`fix/course-progress-pg-errors-subject-code`)
 

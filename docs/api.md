@@ -186,6 +186,7 @@ All mutations need CSRF for cookie sessions, use the administrative rate limit, 
 - A standalone test: no enrollment. Owner/admin may assign any account. A teacher only active members of groups where they have `can_assign_tests`; anyone else answers `404 USER_NOT_FOUND`. A blocked or pending account answers `409 STUDENT_NOT_ACTIVE`.
 - A group must be active (`409 GROUP_ARCHIVED`) and grants no course access.
 - An audience has one active assignment per test (`409 ASSIGNMENT_DUPLICATE`). `after_window` tests need `closesAt`. Revoked assignments cannot change (`409 ASSIGNMENT_NOT_ACTIVE`).
+- `countsForGroupRanking` (M13, 2026-11-25): optional boolean on `POST` (default `false`) and `PATCH`, returned on every assignment. `true` only on a group assignment (`400 VALIDATION_ERROR` otherwise). On `PATCH` the flag needs the right to assign tests to that group: owner, admin, or a teacher of the group with `can_assign_tests` (anyone else: `404 GROUP_NOT_FOUND`). Marked assignments feed the «Успеваемость» board of the group ranking.
 
 **Standalone tests for students and staff (2026-11-23).**
 - Students see their open and upcoming standalone assignments on `GET /me/home` (`tests.open` / `tests.upcoming`, `origin: "standalone"`, `courseId` and `courseTitle` `null`). They start them with `POST /tests/assignments/:assignmentId/start`.
@@ -537,7 +538,7 @@ All group routes require a valid active-account session and derive the actor exc
 - `GET /api/v1/groups/:groupId/announcements` returns a paginated text-announcement feed. Students see published announcements in active memberships; assigned teachers and administrators may also see drafts. Optional `status` (`draft`|`published`|`archived`) returns only that status; drafts and archived items are returned only to owners/admins and teachers whose assignment allows publishing announcements. Students always receive published items only (an empty list for `draft`/`archived`).
 - `POST /api/v1/groups/:groupId/announcements`, `PATCH /api/v1/groups/:groupId/announcements/:announcementId`, and `DELETE` on the same resource create, update, and archive text announcements.
 
-Active members may read their groups; assigned teachers may read their groups; current owner/admin roles may read all groups. Missing and inaccessible group resources both return `404 GROUP_NOT_FOUND`. `limit` defaults to 20 and is bounded at 100; `offset` defaults to zero. Group membership never grants course or module access, and these responses contain no course, progress, or ranking data.
+Active members may read their groups; assigned teachers may read their groups; current owner/admin roles may read all groups. Missing and inaccessible group resources both return `404 GROUP_NOT_FOUND`. `limit` defaults to 20 and is bounded at 100; `offset` defaults to zero. Group membership never grants course or module access, and these responses contain no course, progress, or ranking data (the ranking has its own route, below). No group response carries a phone number or any other contact data.
 
 All mutations require live authentication, database-backed permission checks, cookie CSRF/origin protection where applicable, and atomic auditing. Owner/admin roles receive all five group permissions. A teacher receives only `groups.announcements.manage`, which is additionally restricted to an assignment with announcement-publishing permission in the target group. Announcement authors come only from the authenticated actor. Attachments are not accepted before M07.
 
@@ -936,6 +937,33 @@ Full contract with examples: `docs/frontend-handoff.md` → "Staff progress". Al
    - Scope: owner, admin, a teacher of the test's course or of the assignment's group with `canViewResults`.
    - Errors: `400 INVALID_TEST_ID` / `INVALID_ASSIGNMENT_ID` / `VALIDATION_ERROR`, `404 ASSIGNMENT_NOT_FOUND`.
 - Performance: a whole group or course is computed from a fixed number of aggregate queries (no query per student), then sorted and paged in the service. A group of 200 students with 79 000 lesson progress rows, 60 000 attempts and 110 000 activity events takes about 110 ms on a warm database (EXPLAIN in `docs/progress.md`). No new index was needed.
+
+## Group ranking (M13, 2026-11-25)
+
+Formula and decisions: `docs/decisions.md` → 2026-11-25. Pure functions in `src/utils/ranking-metrics.js`, the one aggregate query in `src/repositories/stats/group-ranking-repository.js`. Computed on every request, no cache, no stored table. `formulaVersion` is `1`.
+
+- Query of every ranking route: `board=performance|activity` (default `performance`), `period=week|month|all` (default `week`). Other values: `400 VALIDATION_ERROR`.
+   - `week`: Monday 00:00 to the next Monday 00:00; `month`: the calendar month; `all`: no bounds (`periodStart` and `periodEnd` are `null`). Bounds in Asia/Dushanbe.
+   - Every participant counts only from their current `joined_at`.
+- **Participants:** active members of the group with an active account.
+- **`performance` («Успеваемость»):** group assignments with `countsForGroupRanking`, not revoked, of authored or standalone tests.
+   - An assignment belongs to the period of its `closes_at`, or of the finish time of the counted attempt when it has none.
+   - Score per assignment: the percent of the attempt counted by the test result policy (first/best/last). Closed without a finished attempt: 0. Still open without one: not counted. A course test the member is not enrolled in counts only with an attempt.
+   - Score: the average percent (0–100, 2 decimals). No counted assignment: `score` and `rank` are `null` (listed last).
+- **`activity` («Активность»):** points, all parts added.
+   - Trainer (`origin=trainer`, finished attempts): +1 for each question first solved with full marks, ever (unique question). Multiplier by difficulty: 1–2 ×1, 3 ×1.5, 4–5 ×2 (none ×1). At most 60 points per local day. An attempt with fewer than half of its questions answered, or under 3 seconds per answered question on average, earns nothing (and does not use up its questions).
+   - Mock exam (`origin=mock_exam`): `score / 160 × 50`; per local week only the best counts.
+   - Lessons: +5 for each first completion, at most 10 lessons per local day.
+- **Places:** 1-2-2-4 on scores equal to the hundredth. Order inside a place: more assignments submitted on time (performance assignments of the period), then the earlier last counted attempt (performance: latest counted assignment attempt; activity: latest event that earned points), then last name, first name.
+- `GET /api/v1/groups/:groupId/ranking` (an active member of the group; anyone else, staff included, gets `404 GROUP_NOT_FOUND`)
+   - Returns `{ groupId, board, period, periodStart, periodEnd, visibility, participantsCount, formulaVersion, computedAt, items[{ rank, score, isMe, user { id, firstName, lastName, avatarUrl } }], me { rank, score } | null }`.
+   - `visibility` (from the group settings): `top10_self` (default) — `items` are places 1–10, everyone sharing place 10 included, plus `me`; `full` — everyone; `staff_only` — `items: []`, `me: null`, `participantsCount: 0` (200, not an error).
+   - `avatarUrl` is always `null` for now: there is no avatar upload yet.
+- `GET /api/v1/admin/groups/:groupId/ranking` (`progress.read`; owner, admin, or a teacher of the group with `canViewResults`; anything else `404 GROUP_NOT_FOUND`)
+   - Same query and envelope, always everyone, whatever the visibility; `me` is `null`.
+   - Each item adds `assignmentsOnTime`, `lastCountedAt` and `breakdown`: performance `{ assignments, submitted, missed }`; activity `{ trainerPoints, mockExamPoints, mockExamsCounted, lessonPoints, lessonsCounted, assignmentsOnTime }`.
+- `GET /api/v1/admin/groups/:groupId/ranking-settings` and `PUT` with `{ visibility: "full" | "top10_self" | "staff_only" }` (same scope; `PUT` is CSRF-protected, rate limited and audited as `group.ranking_settings_updated`). Returns `{ groupId, visibility, isDefault, updatedBy, updatedAt }`; without a saved row `visibility` is `top10_self` and `isDefault` is `true`.
+- Index: `test_assignments_group_ranking_idx (group_id, closes_at) WHERE counts_for_group_ranking`. Migration `20261125010000000_add-group-ranking` (also creates `group_ranking_settings`); `down` drops both.
 
 ## My staff rights (2026-11-20)
 

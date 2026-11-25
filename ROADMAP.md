@@ -2,8 +2,8 @@
 project: EVEREST Backend
 roadmap_version: 1
 current_milestone: M13
-current_status: planned
-updated_at: 2026-11-21
+current_status: in_progress
+updated_at: 2026-11-25
 architecture: docs/architecture.md
 ---
 
@@ -356,13 +356,15 @@ This roadmap orders implementation; it does not replace the [current architectur
 
 ## M13 — Group ranking
 
-- **Status:** Planned
+- **Status:** In progress. Formula approved by the owner (variant C of the M13 research, rules in `docs/decisions.md` 2026-11-25). Two PRs:
+   1. **Ranking** (branch `feat/m13-group-ranking`, open for review, not deployed): `countsForGroupRanking` on group assignments; migration `20261125010000000` (`group_ranking_settings`, partial index on marked assignments); boards «Успеваемость» and «Активность», periods week/month/all in Asia/Dushanbe, places 1-2-2-4; `GET /groups/:groupId/ranking` for members by visibility, `GET /admin/groups/:groupId/ranking` with breakdown, `GET/PUT /admin/groups/:groupId/ranking-settings`. Computed on read, one aggregate query per group.
+   2. **Next PR:** achievements (catalog, awarding through `worker:jobs`, `GET /me/achievements`) and weekly/monthly ranking snapshots for the «top 3» achievement.
 - **Goal:** Rank group performance using an approved transparent formula.
-- **Dependencies:** M04, M12, and user approval of formula.
+- **Dependencies:** M04, M12, and user approval of formula (given 2026-11-25).
 - **Deliverables:** Ranking inputs/period, tie handling, privacy, recalculation, and teacher/admin visibility.
 - **Verification:** Formula fixtures, ties, period boundaries, visibility, and recalculation tests.
 - **Documentation updates:** Decision, API, architecture, progress, roadmap.
-- **Exclusions:** Formula remains unresolved until user approval.
+- **Exclusions:** Snapshots and achievements (next PR); avatars in the ranking (`avatarUrl` stays `null` until avatar upload exists).
 
 ## M14 — Notifications
 

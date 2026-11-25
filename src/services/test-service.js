@@ -25,7 +25,8 @@ const settingFields = [
    'shuffleOptions',
    'passPercent',
 ]
-const assignmentFields = ['groupId', 'userId', 'opensAt', 'closesAt', 'personalWindowMinutes']
+const assignmentFields = ['groupId', 'userId', 'opensAt', 'closesAt', 'personalWindowMinutes', 'countsForGroupRanking']
+const assignmentUpdateFields = ['opensAt', 'closesAt', 'personalWindowMinutes', 'countsForGroupRanking']
 const maximumTitleLength = 200
 const maximumTimeLimitMinutes = 1440
 const maximumAttempts = 1000
@@ -283,6 +284,16 @@ function safeTestQuestion(row) {
    }
 }
 
+// countsForGroupRanking (M13): only an assignment to a group may count for its ranking.
+function parseRankingFlag(value, isGroup, fallback) {
+   if (value === undefined) return fallback
+   if (typeof value !== 'boolean') throw validationError('countsForGroupRanking')
+   if (value && !isGroup) {
+      throw validationError('countsForGroupRanking', 'Only an assignment to a group counts for the group ranking')
+   }
+   return value
+}
+
 function safeAssignment(row) {
    return {
       id: row.id,
@@ -296,6 +307,7 @@ function safeAssignment(row) {
       opensAt: row.opens_at,
       closesAt: row.closes_at,
       personalWindowMinutes: row.personal_window_minutes,
+      countsForGroupRanking: row.counts_for_group_ranking,
       assignedBy: row.assigned_by,
       createdAt: row.created_at,
    }
@@ -696,6 +708,7 @@ async function createAssignmentService(userId, testIdValue, body, overrides) {
    const personalWindowMinutes = body.personalWindowMinutes === undefined
       ? null
       : parseOptionalInteger(body.personalWindowMinutes, 'personalWindowMinutes', maximumPersonalWindowMinutes)
+   const countsForGroupRanking = parseRankingFlag(body.countsForGroupRanking, hasGroup, false)
    return transaction(async (client) => {
       const test = await loadTest(repository, client, actorId, testId)
       requirePublished(test)
@@ -728,10 +741,12 @@ async function createAssignmentService(userId, testIdValue, body, overrides) {
          opensAt,
          closesAt,
          personalWindowMinutes,
+         countsForGroupRanking,
       }, client)
       await audit(auth, client, actorId, 'test.assignment_created', 'test_assignment', assignmentId, {
          testId,
          groupId: audience.groupId,
+         countsForGroupRanking,
       }, audience.userId)
       await enqueueTestAssigned(client, { assignmentId, opensAt })
       await enqueueAssignmentCloseEvents(client, {
@@ -746,7 +761,7 @@ async function updateAssignmentService(userId, testIdValue, assignmentIdValue, b
    const actorId = normalizeInternalId(userId)
    const testId = parseTestId(testIdValue)
    const assignmentId = parseAssignmentId(assignmentIdValue)
-   validateBody(body, ['opensAt', 'closesAt', 'personalWindowMinutes'])
+   validateBody(body, assignmentUpdateFields)
    if (!Object.keys(body).length) throw validationError('body')
    return transaction(async (client) => {
       const test = await loadTest(repository, client, actorId, testId)
@@ -765,7 +780,20 @@ async function updateAssignmentService(userId, testIdValue, assignmentIdValue, b
       const personalWindowMinutes = body.personalWindowMinutes === undefined
          ? assignment.personal_window_minutes
          : parseOptionalInteger(body.personalWindowMinutes, 'personalWindowMinutes', maximumPersonalWindowMinutes)
-      await repository.updateAssignmentWindow(assignmentId, { opensAt, closesAt, personalWindowMinutes }, client)
+      const countsForGroupRanking = parseRankingFlag(
+         body.countsForGroupRanking,
+         Boolean(assignment.group_id),
+         assignment.counts_for_group_ranking,
+      )
+      // The flag is set by whoever may assign tests to the group: owner, admin, or a teacher of
+      // the group with canAssignTests. Anyone else looks like the group is missing.
+      if (body.countsForGroupRanking !== undefined && assignment.group_id
+         && !(await repository.lockAssignableGroup(actorId, assignment.group_id, client))) {
+         throw new AppError(404, 'GROUP_NOT_FOUND', 'Group was not found')
+      }
+      await repository.updateAssignmentWindow(assignmentId, {
+         opensAt, closesAt, personalWindowMinutes, countsForGroupRanking,
+      }, client)
       await audit(auth, client, actorId, 'test.assignment_updated', 'test_assignment', assignmentId, {
          testId,
          fields: Object.keys(body),
