@@ -1,5 +1,6 @@
 import * as courseAccessRepository from '../repositories/course-access-repository.js'
 import AppError from '../utils/app-error.js'
+import { lessonProgress, sumLessonProgress } from '../utils/lesson-progress.js'
 import { parseCourseId, parseId, parseUserId } from './course-service.js'
 
 function dependencies(overrides = {}) {
@@ -12,15 +13,13 @@ function iso(value) {
    return value === null ? null : new Date(value).toISOString()
 }
 
-// Rounded down, so 100 means every accessible lesson is completed.
+// Course and module progress share one rule (src/utils/lesson-progress.js) and one SQL
+// fragment; rounded down, so 100 means every accessible lesson is completed.
 function courseProgress(row) {
-   const totalLessons = row.total_lessons ?? 0
-   const completedLessons = row.completed_lessons ?? 0
-   return {
-      completedLessons,
-      totalLessons,
-      percent: totalLessons === 0 ? 0 : Math.floor((completedLessons * 100) / totalLessons),
-   }
+   return lessonProgress({
+      completedLessons: row.completed_lessons ?? 0,
+      totalLessons: row.total_lessons ?? 0,
+   })
 }
 
 function safeCardMetadata(row) {
@@ -52,7 +51,8 @@ function lockReason(enrollment, module) {
    return 'unavailable'
 }
 
-// Locked modules expose only published structure: no lessons, assets, tests or counts.
+// Locked modules expose only published structure: no lessons, assets, tests or counts, so
+// their progress is null; an open module reports the same counts the course card sums.
 function safeLearnerModule(enrollment, module) {
    return {
       id: module.id,
@@ -63,6 +63,7 @@ function safeLearnerModule(enrollment, module) {
       access: module.granted
          ? { granted: true, lockReason: null }
          : { granted: false, lockReason: lockReason(enrollment, module) },
+      progress: module.granted ? courseProgress(module) : null,
    }
 }
 
@@ -89,15 +90,19 @@ async function listLearnerCourseModulesService(userId, courseIdValue, overrides)
    const courseId = parseCourseId(courseIdValue)
    const enrollment = await repository.findLearnerCourse(actorId, courseId)
    if (!enrollment) throw new AppError(404, 'COURSE_NOT_FOUND', 'Course was not found')
-   const modules = await repository.listLearnerModules(actorId, courseId)
+   const rows = await repository.listLearnerModules(actorId, courseId)
+   const modules = rows.map((module) => safeLearnerModule(enrollment, module))
    return {
       course: {
          id: courseId,
          title: enrollment.title,
          ...safeCardMetadata(enrollment),
+         // The sum of the open modules below, so the course and its modules never disagree,
+         // even when a grant changes between the two reads of this request.
+         progress: sumLessonProgress(modules.map((module) => module.progress)),
          enrollment: safeEnrollmentWindow(enrollment),
       },
-      modules: modules.map((module) => safeLearnerModule(enrollment, module)),
+      modules,
    }
 }
 

@@ -299,8 +299,11 @@ test('course enrollments and module access grants integration', async (t) => {
          assert.deepEqual(first.access, { granted: true, lockReason: null })
          assert.deepEqual(secondModule.access, { granted: false, lockReason: 'not_granted' })
          assert.deepEqual(Object.keys(secondModule).sort(), [
-            'access', 'description', 'id', 'position', 'title', 'translations',
+            'access', 'description', 'id', 'position', 'progress', 'title', 'translations',
          ])
+         // A locked module shows no counts; an open one reports its progress.
+         assert.equal(secondModule.progress, null)
+         assert.equal(typeof first.progress.totalLessons, 'number')
          assert.equal(modules.body.data.modules.length, 2)
          const list = await api(port, 'GET', modulesUrl, sessions.admin)
          assert.equal(list.body.data.moduleGrants.length, 1)

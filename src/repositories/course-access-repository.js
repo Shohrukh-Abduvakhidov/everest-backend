@@ -278,6 +278,7 @@ async function listModuleGrants(courseId, userId, db = pool) {
 const learnerCardColumns = `
    CASE WHEN subject.id IS NULL THEN NULL ELSE jsonb_build_object(
       'id', subject.id::text,
+      'code', subject.code,
       'color', subject.color,
       'title', (SELECT title FROM subject_translations
          WHERE subject_id = subject.id AND language_code = subject.primary_language),
@@ -296,18 +297,24 @@ const learnerCardColumns = `
       AS lesson_count,
    course_progress.total_lessons, course_progress.completed_lessons`
 
-// Course progress counts the published lessons of published modules that can_access_module
-// grants right now (the M06 predicate); completion is lesson_progress, written by the player
-// and by test completion. One lateral subquery per course row of the same statement.
-const learnerProgressJoin = `LEFT JOIN LATERAL (
-   SELECT count(*)::integer AS total_lessons,
+// Progress counts the published lessons of published modules that can_access_module grants
+// right now (the M06 predicate); completion is lesson_progress, written by the player and by
+// test completion. The course card and every module use this one fragment, so a course is
+// always the sum of its open modules; src/utils/lesson-progress.js turns the counts into a
+// percent for both. $1 is the learner; scope is a fixed SQL condition, never user input.
+function lessonProgressCounts(scope) {
+   return `SELECT count(*)::integer AS total_lessons,
       count(*) FILTER (WHERE progress.status = 'completed')::integer AS completed_lessons
    FROM lessons AS progress_lesson
    JOIN course_modules AS progress_module ON progress_module.id = progress_lesson.module_id
    LEFT JOIN lesson_progress AS progress
       ON progress.lesson_id = progress_lesson.id AND progress.user_id = $1
-   WHERE progress_lesson.course_id = course.id AND progress_lesson.status = 'published'
-      AND progress_module.status = 'published' AND can_access_module($1, progress_module.id)
+   WHERE ${scope} AND progress_lesson.status = 'published'
+      AND progress_module.status = 'published' AND can_access_module($1, progress_module.id)`
+}
+
+const learnerProgressJoin = `LEFT JOIN LATERAL (
+   ${lessonProgressCounts('progress_lesson.course_id = course.id')}
 ) AS course_progress ON TRUE`
 
 async function listLearnerCourses(userId, db = pool) {
@@ -349,10 +356,14 @@ async function listLearnerModules(userId, courseId, db = pool) {
             AS onboarded,
          (module_grant.id IS NOT NULL AND module_grant.revoked_at IS NULL) AS has_grant,
          COALESCE(module_grant.begins_at > CURRENT_TIMESTAMP, false) AS grant_scheduled,
-         COALESCE(module_grant.expires_at <= CURRENT_TIMESTAMP, false) AS grant_expired
+         COALESCE(module_grant.expires_at <= CURRENT_TIMESTAMP, false) AS grant_expired,
+         module_progress.total_lessons, module_progress.completed_lessons
        FROM course_modules AS module
        LEFT JOIN module_access_grants AS module_grant
          ON module_grant.module_id = module.id AND module_grant.user_id = $1
+       LEFT JOIN LATERAL (
+          ${lessonProgressCounts('progress_lesson.module_id = module.id')}
+       ) AS module_progress ON TRUE
        WHERE module.course_id = $2 AND module.status = 'published'
        ORDER BY module.position, module.id`,
       [normalizeInternalId(userId), normalizeInternalId(courseId)],

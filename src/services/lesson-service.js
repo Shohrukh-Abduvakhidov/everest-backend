@@ -14,6 +14,7 @@ import {
    validateBody,
    validationError,
 } from './course-service.js'
+import { completeMissedTestLessonsService } from './lesson-completion-service.js'
 
 const languages = ['tg', 'ru', 'en']
 const lessonTypes = ['video', 'text', 'test', 'mixed']
@@ -54,6 +55,7 @@ function dependencies(overrides = {}) {
       transaction: overrides.transaction || withTransaction,
       storage: () => overrides.storage || getStorageProvider(),
       clock: overrides.clock || (() => new Date()),
+      completeMissed: overrides.completeMissed || completeMissedTestLessonsService,
    }
 }
 
@@ -517,7 +519,7 @@ async function getLessonProgressSummaryService(userId, courseIdValue, lessonIdVa
 }
 
 async function createLessonService(userId, courseIdValue, moduleIdValue, body, overrides) {
-   const { repository, auth, transaction } = dependencies(overrides)
+   const { repository, auth, transaction, completeMissed } = dependencies(overrides)
    const actorId = parseUserId(userId)
    const courseId = parseCourseId(courseIdValue)
    const moduleId = parseModuleId(moduleIdValue)
@@ -546,13 +548,15 @@ async function createLessonService(userId, courseIdValue, moduleIdValue, body, o
          position,
          actorId,
       }, client)
+      // Students who already passed the linked test complete the new lesson by the same rule.
+      if (values.testId) await completeMissed({ lessonId: lesson.id }, client)
       await audit(auth, actorId, 'lesson.created', lesson.id, { courseId, moduleId, position }, client)
       return loadLessonDetail(repository, lesson, client)
    })
 }
 
 async function updateLessonService(userId, courseIdValue, lessonIdValue, body, overrides) {
-   const { repository, offline, auth, transaction, storage } = dependencies(overrides)
+   const { repository, offline, auth, transaction, storage, completeMissed } = dependencies(overrides)
    const actorId = parseUserId(userId)
    const courseId = parseCourseId(courseIdValue)
    const lessonId = parseLessonId(lessonIdValue)
@@ -593,6 +597,10 @@ async function updateLessonService(userId, courseIdValue, lessonIdValue, body, o
          if (videoAssetId) await validateVideoAsset(repository, courseId, lessonId, videoAssetId, client)
       }
       const lesson = await repository.updateLesson(lessonId, values, client)
+      // A lesson linked to a test that students already passed completes for them now, by the
+      // owner's rule (2026-11-07); before this, such a lesson never completed. Nothing is undone
+      // when the link changes: a completed lesson is never moved back.
+      if (testChanged && testId) await completeMissed({ lessonId }, client)
       // Chapters are timestamps of one recording: a replaced video starts with no chapters
       // (the editor re-enters them). Removing a video with chapters is refused above.
       const chaptersCleared = videoChanged && videoAssetId ? chapters.length : 0

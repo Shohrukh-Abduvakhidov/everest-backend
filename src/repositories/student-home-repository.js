@@ -54,7 +54,8 @@ const subjectOfAttempt = `CASE test.origin
 
 const attemptColumns = `attempt.id, attempt.test_id, attempt.assignment_id, attempt.attempt_number,
    attempt.status, attempt.started_at, attempt.submitted_at, attempt.score, attempt.max_score,
-   attempt.policy_snapshot, test.origin, test.title, test.course_id, ${subjectOfAttempt} AS subject_id`
+   attempt.policy_snapshot, test.origin, test.title, test.course_id, ${subjectOfAttempt} AS subject_id,
+   (SELECT code FROM subjects WHERE id = ${subjectOfAttempt}) AS subject_code`
 
 const attemptFrom = `FROM test_attempts AS attempt
    JOIN tests AS test ON test.id = attempt.test_id

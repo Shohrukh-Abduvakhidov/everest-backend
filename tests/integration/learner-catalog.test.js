@@ -164,6 +164,7 @@ test('learner catalog subject, counts and profile telegram flag integration', as
       const card = list.body.data.courses.find((course) => course.id === courseId)
       assert.deepEqual(card.subject, {
          id: subject.id,
+         code: `chem-${suffix}`,
          title: 'Химия',
          translations: { tg: { title: 'Химия' }, ru: { title: 'Химия RU' } },
          color: 'green',
