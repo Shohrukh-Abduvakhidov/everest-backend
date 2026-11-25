@@ -9,6 +9,10 @@ import {
    addGroupMemberService,
    addGroupTeacherService,
    createGroupService,
+   getGroupService,
+   listGroupMembersService,
+   listGroupsService,
+   listGroupTeachersService,
 } from '../../src/services/group-service.js'
 import {
    getGroupRankingService,
@@ -354,9 +358,9 @@ test('M13 group ranking: assignments flag, both boards, periods, places, visibil
       assert.deepEqual(late.me, { rank: null, score: null })
       assert.equal(late.items.some((item) => item.isMe), false)
 
-      for (const actor of [outsider, adminId, viewer]) {
-         await assert.rejects(getGroupRankingService(actor, group.id, {}, deps), { code: 'GROUP_NOT_FOUND' })
-      }
+      assert.equal(own.viewerRole, 'student')
+      assert.equal(own.studentVisibility, 'top10_self')
+      await assert.rejects(getGroupRankingService(outsider, group.id, {}, deps), { code: 'GROUP_NOT_FOUND' })
       await assert.rejects(getGroupRankingService(s1, '999999999', {}, deps), { code: 'GROUP_NOT_FOUND' })
       await assert.rejects(getGroupRankingService(s1, 'x', {}, deps), { code: 'INVALID_GROUP_ID' })
       for (const query of [{ board: 'speed' }, { period: 'year' }]) {
@@ -373,6 +377,55 @@ test('M13 group ranking: assignments flag, both boards, periods, places, visibil
       assert.deepEqual([hidden.items, hidden.me, hidden.participantsCount, hidden.visibility], [[], null, 0, 'staff_only'])
       // Staff still see everyone.
       assert.equal((await getStaffGroupRankingService(viewer, group.id, {}, deps)).items.length, 6)
+   })
+
+   await t.test('staff open the group page ranking: everyone, whatever students see', async () => {
+      const otherTeacher = await createUser('teacher', 'Other')
+      const otherGroup = await createGroupService(adminId, { name: `Other ranking ${suffix}` })
+      await addGroupTeacherService(adminId, otherGroup.id, { userId: otherTeacher })
+      // Students currently see nothing (staff_only); staff still see all six, places included.
+      for (const actor of [viewer, blind, assigner, adminId]) {
+         const page = await getGroupRankingService(actor, group.id, {}, deps)
+         assert.equal(page.viewerRole, 'staff')
+         assert.equal(page.visibility, 'full')
+         assert.equal(page.studentVisibility, 'staff_only')
+         assert.equal(page.me, null)
+         assert.equal(page.participantsCount, 6)
+         assert.deepEqual(order(page), [
+            [s1, 1, 95], [s2, 2, 80], [s4, 2, 80], [s3, 4, 50], [s5, 5, 0], [s6, null, null],
+         ])
+         assert.equal(page.items.some((item) => item.isMe || 'breakdown' in item), false)
+      }
+      // Admin: any group, also one they do not teach.
+      assert.equal((await getGroupRankingService(adminId, otherGroup.id, {}, deps)).viewerRole, 'staff')
+      // A teacher of another group, and a student who is not a member: 404.
+      await assert.rejects(getGroupRankingService(otherTeacher, group.id, {}, deps), { code: 'GROUP_NOT_FOUND' })
+      await assert.rejects(getGroupRankingService(outsider, group.id, {}, deps), { code: 'GROUP_NOT_FOUND' })
+      // Students are unchanged.
+      const student = await getGroupRankingService(s1, group.id, {}, deps)
+      assert.deepEqual(
+         [student.viewerRole, student.visibility, student.studentVisibility, student.items, student.me],
+         ['student', 'staff_only', 'staff_only', [], null],
+      )
+
+      // "My groups": the viewer role, and the group pages open for the same people.
+      const mine = await listGroupsService(blind, {})
+      assert.deepEqual(mine.groups.map((item) => [item.id, item.viewerRole]), [[group.id, 'teacher']])
+      const searched = await listGroupsService(adminId, { q: `Other ranking ${suffix}`, status: 'active' })
+      assert.deepEqual(searched.groups.map((item) => [item.id, item.viewerRole]), [[otherGroup.id, 'admin']])
+      assert.equal((await getGroupService(s1, group.id)).viewerRole, 'member')
+      await client.query('UPDATE group_members SET is_representative = TRUE WHERE group_id = $1 AND user_id = $2', [group.id, s2])
+      assert.equal((await getGroupService(s2, group.id)).viewerRole, 'representative')
+      for (const actor of [blind, adminId]) {
+         assert.equal((await getGroupService(actor, group.id)).memberCount, 6)
+         const members = await listGroupMembersService(actor, group.id, {})
+         assert.equal(members.members.length, 6)
+         const teachers = await listGroupTeachersService(actor, group.id, {})
+         assert.equal(teachers.teachers.length, 3)
+         assert.equal(/phone/i.test(JSON.stringify([members, teachers])), false)
+      }
+      await assert.rejects(listGroupMembersService(otherTeacher, group.id, {}), { code: 'GROUP_NOT_FOUND' })
+      await assert.rejects(getGroupService(otherTeacher, group.id), { code: 'GROUP_NOT_FOUND' })
    })
 
    await t.test('staff scope and settings', async () => {

@@ -156,14 +156,35 @@ async function readVisibility(deps, groupId) {
    return (await deps.repository.findRankingSettings(groupId))?.visibility ?? defaultVisibility
 }
 
-// GET /groups/:groupId/ranking: an active member of the group only; anyone else gets 404.
+// GET /groups/:groupId/ranking, the ranking as the group page shows it.
+//   An active member: shaped by the group visibility (viewerRole student).
+//   Owner/admin (any group) or a teacher of the group (any flags): everyone, whatever the
+//   visibility, me null, no breakdown (viewerRole staff; studentVisibility says what students see).
+//   Anyone else: 404.
 async function getGroupRankingService(userId, groupIdValue, query, overrides) {
    const deps = dependencies(overrides)
    const actorId = parseActorId(userId)
    const groupId = parseGroupId(groupIdValue)
    const filters = parseRankingQuery(query)
-   if (!(await deps.repository.findMemberGroup(actorId, groupId))) throw groupNotFound()
-   const visibility = await readVisibility(deps, groupId)
+   const viewer = await deps.repository.findRankingViewer(actorId, groupId)
+   if (!viewer) throw groupNotFound()
+   const studentVisibility = await readVisibility(deps, groupId)
+   if (!viewer.is_member) {
+      const computed = await computeRanking(deps, groupId, filters)
+      return {
+         ...envelope(groupId, filters, computed, 'full'),
+         viewerRole: 'staff',
+         studentVisibility,
+         items: computed.ranked.map((row) => ({
+            rank: row.rank,
+            score: row.score,
+            isMe: false,
+            user: safeUser(row),
+         })),
+         me: null,
+      }
+   }
+   const visibility = studentVisibility
    let computed
    if (visibility === 'staff_only') {
       const now = deps.clock()
@@ -175,6 +196,8 @@ async function getGroupRankingService(userId, groupIdValue, query, overrides) {
    return {
       // staff_only hides the table and the count of participants alike (participantsCount 0).
       ...envelope(groupId, filters, computed, visibility),
+      viewerRole: 'student',
+      studentVisibility,
       items: visibleRows(computed.ranked, visibility).map((row) => ({
          rank: row.rank,
          score: row.score,

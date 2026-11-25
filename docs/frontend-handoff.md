@@ -1278,7 +1278,7 @@ Which flag opens which screen (`allAccess` opens all of them):
 
 Two boards shown as tabs, never mixed: **«Успеваемость»** (`board=performance`) and **«Активность»** (`board=activity`). Periods: `week` (default), `month`, `all`. Everything is computed on request (no cache), so a reload always shows the current state. Full rules: `docs/api.md` → "Group ranking".
 
-**Student: `GET /groups/:groupId/ranking?board=performance&period=week`** (an active member of the group only; anyone else, staff included, gets `404 GROUP_NOT_FOUND`).
+**Group page: `GET /groups/:groupId/ranking?board=performance&period=week`** (an active member of the group, or staff of the group: owner/admin for any group, a teacher assigned to it with any flags; anyone else gets `404 GROUP_NOT_FOUND`). The response has `viewerRole` (`student` | `staff`) and `studentVisibility` (what the students see). The example is a student's view:
 
 ```json
 {
@@ -1328,7 +1328,9 @@ Performance `breakdown`: `{ "assignments": 3, "submitted": 2, "missed": 1 }`.
 
 **Marking assignments:** `countsForGroupRanking` (boolean) on `POST /admin/tests/:testId/assignments` (default `false`) and `PATCH .../assignments/:assignmentId`, returned on every assignment. Only for a group assignment (a personal one with `true` is `400`). Show the checkbox «Учитывать в рейтинге группы» only when the audience is a group and the user may assign tests to it (`allAccess` or `groups[G].canAssignTests`); otherwise `PATCH` answers `404 GROUP_NOT_FOUND`.
 
-**Group page data** (already there): `GET /groups` / `GET /groups/:id` — `name`, `memberCount`, `teacherCount`, `relationship { member, representative, teacher, administrator }`; `GET /groups/:id/members` — `firstName`, `lastName`, `avatarAssetId`, `role` (`member` | `representative`), `joinedAt`; `GET /groups/:id/teachers` — names and `avatarAssetId`. No phone numbers anywhere.
+**Staff on the group page** (`viewerRole: "staff"`): always everyone, `visibility: "full"`, `me: null`, every `isMe` false. Show a note from `studentVisibility`, e.g. «Ученики видят: топ-10 и своё место» / «Ученики не видят рейтинг» for `staff_only`. The breakdown is only in `GET /admin/groups/:groupId/ranking`.
+
+**Group page data:** `GET /groups` / `GET /groups/:id` — `name`, `memberCount`, `teacherCount`, `relationship { member, representative, teacher, administrator }`, `viewerRole` (`admin` | `teacher` | `representative` | `member`; one value, staff first). For «Мои группы»: a student gets their groups, a teacher the groups they teach, owner/admin every group (`status=active`, `q` for search, `limit`/`offset`); `GET /groups/:id/members` — `firstName`, `lastName`, `avatarAssetId`, `role` (`member` | `representative`), `joinedAt`; `GET /groups/:id/teachers` — names and `avatarAssetId`. No phone numbers anywhere.
 
 ### Notifications inbox (M14, 2026-11-21)
 

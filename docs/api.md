@@ -525,7 +525,7 @@ Protected content (M07 onward) must call `requireModuleAccessService(userId, mod
 
 All group routes require a valid active-account session and derive the actor exclusively from that session.
 
-- `GET /api/v1/groups` returns only visible group summaries with `limit`/`offset` pagination, `pagination.total`, deterministic name/ID ordering, counts, and the actor's member/representative/teacher/administrator relationship. Optional filters: `status` (`active`|`archived`) and `q` (2–100 characters, case-insensitive name search, LIKE wildcards literal). Unknown query parameters return `400 VALIDATION_ERROR`; visibility is unchanged by filters.
+- `GET /api/v1/groups` returns only visible group summaries with `limit`/`offset` pagination, `pagination.total`, deterministic name/ID ordering, counts, and the actor's member/representative/teacher/administrator relationship plus `viewerRole` (`admin` for owner/admin, else `teacher`, `representative` or `member`; also on `GET /groups/:groupId`). Teachers see the groups they are assigned to, owner/admin every group (filter `status=active` for active ones only). Optional filters: `status` (`active`|`archived`) and `q` (2–100 characters, case-insensitive name search, LIKE wildcards literal). Unknown query parameters return `400 VALIDATION_ERROR`; visibility is unchanged by filters.
 - `GET /api/v1/groups/:groupId` returns safe group metadata and counts without embedding an unlimited roster.
 - `GET /api/v1/groups/:groupId/members` returns paginated active members with decimal-string user IDs, names, avatar asset references, member/representative role, membership status, and join time.
 - `GET /api/v1/groups/:groupId/teachers` returns paginated assigned teachers with decimal-string IDs, names, avatar references, assignment time, and group-scoped assignment permissions.
@@ -955,9 +955,10 @@ Formula and decisions: `docs/decisions.md` → 2026-11-25. Pure functions in `sr
    - Mock exam (`origin=mock_exam`): `score / 160 × 50`; per local week only the best counts.
    - Lessons: +5 for each first completion, at most 10 lessons per local day.
 - **Places:** 1-2-2-4 on scores equal to the hundredth. Order inside a place: more assignments submitted on time (performance assignments of the period), then the earlier last counted attempt (performance: latest counted assignment attempt; activity: latest event that earned points), then last name, first name.
-- `GET /api/v1/groups/:groupId/ranking` (an active member of the group; anyone else, staff included, gets `404 GROUP_NOT_FOUND`)
-   - Returns `{ groupId, board, period, periodStart, periodEnd, visibility, participantsCount, formulaVersion, computedAt, items[{ rank, score, isMe, user { id, firstName, lastName, avatarUrl } }], me { rank, score } | null }`.
+- `GET /api/v1/groups/:groupId/ranking` (the group page): an active member of the group (`viewerRole: "student"`), or staff of the group (`viewerRole: "staff"`): owner/admin for any group, a teacher assigned to the group with any flags. Anyone else, a teacher of another group included, gets `404 GROUP_NOT_FOUND`.
+   - Returns `{ groupId, board, period, periodStart, periodEnd, visibility, participantsCount, formulaVersion, computedAt, viewerRole, studentVisibility, items[{ rank, score, isMe, user { id, firstName, lastName, avatarUrl } }], me { rank, score } | null }`.
    - `visibility` (from the group settings): `top10_self` (default) — `items` are places 1–10, everyone sharing place 10 included, plus `me`; `full` — everyone; `staff_only` — `items: []`, `me: null`, `participantsCount: 0` (200, not an error).
+   - Staff (2026-11-25): always everyone (`visibility: "full"`, the visibility setting does not limit them), `me: null`, `isMe: false`, no `breakdown` (that stays on the admin route). `studentVisibility` is what the students of the group see (the setting); for a student it equals `visibility`.
    - `avatarUrl` is always `null` for now: there is no avatar upload yet.
 - `GET /api/v1/admin/groups/:groupId/ranking` (`progress.read`; owner, admin, or a teacher of the group with `canViewResults`; anything else `404 GROUP_NOT_FOUND`)
    - Same query and envelope, always everyone, whatever the visibility; `me` is `null`.

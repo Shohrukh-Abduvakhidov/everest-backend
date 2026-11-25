@@ -9,17 +9,30 @@ import { normalizeInternalId } from '../../utils/internal-id.js'
 const finishedAtSql = `COALESCE(attempt.submitted_at, attempt.graded_at, attempt.expires_at)`
 const finishedSql = `attempt.status IN ('graded', 'expired')`
 
-// The group as an active member sees it: missing, or not their group, is the same null.
-async function findMemberGroup(userId, groupId, db = pool) {
+// Who may open the student ranking page of a group, and as what: an active member (student
+// view), owner/admin (any group) or a teacher assigned to the group with any flags (staff
+// view). Missing, or none of these, is the same null.
+async function findRankingViewer(userId, groupId, db = pool) {
    const result = await db.query(
-      `SELECT grp.id, grp.status
+      `SELECT grp.id, grp.status,
+         EXISTS (
+            SELECT 1 FROM group_members AS member
+            WHERE member.group_id = grp.id AND member.user_id = $1 AND member.status = 'active'
+         ) AS is_member,
+         EXISTS (
+            SELECT 1 FROM group_teachers AS teacher
+            WHERE teacher.group_id = grp.id AND teacher.user_id = $1
+         ) AS is_teacher,
+         EXISTS (
+            SELECT 1 FROM user_roles AS membership JOIN roles AS role ON role.id = membership.role_id
+            WHERE membership.user_id = $1 AND role.code IN ('owner', 'admin')
+         ) AS administrator
        FROM groups AS grp
-       JOIN group_members AS member ON member.group_id = grp.id
-          AND member.user_id = $1 AND member.status = 'active'
        WHERE grp.id = $2`,
       [normalizeInternalId(userId), normalizeInternalId(groupId)],
    )
-   return result.rows[0] || null
+   const row = result.rows[0]
+   return row && (row.is_member || row.is_teacher || row.administrator) ? row : null
 }
 
 async function findRankingSettings(groupId, db = pool) {
@@ -145,4 +158,4 @@ async function listRankingFacts(groupId, { board, start, end }, db = pool) {
    return result.rows
 }
 
-export { findMemberGroup, findRankingSettings, listRankingFacts, saveRankingSettings }
+export { findRankingViewer, findRankingSettings, listRankingFacts, saveRankingSettings }

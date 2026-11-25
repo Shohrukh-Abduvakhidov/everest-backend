@@ -149,10 +149,12 @@ test('group read API integration', async (t) => {
          assert.deepEqual(student.body.data.groups[0].relationship, {
             member: true, representative: false, teacher: false, administrator: false,
          })
+         assert.equal(student.body.data.groups[0].viewerRole, 'member')
 
          const teacher = await api(port, '/api/v1/groups', sessions.teacher)
          assert.deepEqual(teacher.body.data.groups.map(({ id }) => id), [betaId])
          assert.equal(teacher.body.data.groups[0].relationship.teacher, true)
+         assert.equal(teacher.body.data.groups[0].viewerRole, 'teacher')
 
          assert.deepEqual(
             (await api(port, '/api/v1/groups', sessions.unrelatedStudent)).body.data.groups,
@@ -176,6 +178,7 @@ test('group read API integration', async (t) => {
             assert.deepEqual(second.body.data.groups.map(({ name }) => name), ['Empty Group'])
             assert.equal(second.body.data.pagination.hasMore, false)
             assert.equal(first.body.data.groups[0].relationship.administrator, true)
+            assert.equal(first.body.data.groups[0].viewerRole, 'admin')
          }
       })
 
