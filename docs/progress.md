@@ -1,10 +1,17 @@
 # EVEREST backend progress
 
-Updated: 2026-11-21. M14 is Done: PR 1 (#71) and PR 2 (#72) merged and deployed on 2026-11-21; PR 3 (#73) open for review, not deployed. Next: M13 (waits for the ranking formula).
+Updated: 2026-11-25. Branch `fix/course-progress-pg-errors-subject-code` (course/module progress, missed test-lesson completions, PostgreSQL error mapping, subject code) open for review, not deployed. Previously: M14 Done (PR 3 #73).
 
 ## Current increment
 
 M12 is Done: PR 3 (staff progress views, #64) and the 2026-11-20 follow-ups (#65 time zone cache, #66 `GET /me/staff-capabilities`, #67 cosmetic question text rules) are merged into main. Deployed on the temporary VPS on 2026-11-19: backend up to PR #62 (M12 PR 1 and PR 2, the question text repair applied to 2 rows, refresh resilience), frontend up to PR #47. Not deployed yet: PRs #63 to #67 (no migration, no new env variable). `fix-question-text.js --apply` with the new cosmetic rules has not been run on any database. Next milestone: M13 (group ranking), which waits for the owner to approve the formula.
+
+## 2026-11-25 — Course/module progress, missed test-lesson completions, PostgreSQL errors, subject code (`fix/course-progress-pg-errors-subject-code`)
+
+- **What:** module progress in `GET /courses/:id/modules` (`progress`, `null` when locked) by the same function and SQL fragment as the course; `course.progress` there is the sum of the modules. Lessons linked to a test after a passing attempt now complete on link; `scripts/recompute-test-lesson-completions.js` (`npm run recompute:test-lessons`, dry run by default) completes those missed before 2026-11-07. Error handler maps pg 23514/23502 → 400 `VALIDATION_ERROR`, 23505 → 409 `CONFLICT`, 23503 → 400 `REFERENCE_NOT_FOUND` / 409 `REFERENCE_IN_USE`, 23001 → 409, logging the constraint, method and path. `subject.code` on learner course cards, `subjectCode` on finished attempts. No migration, no env. Decisions: decisions.md 2026-11-25.
+- **Tests:** new `tests/unit/course-progress-errors.test.js` (4) and `tests/integration/course-progress-consistency.test.js` (5); `learner-catalog` and `course-access` assertions updated for the new fields. `npm test` (disposable database): 642/642, exit 0 (the first run failed 1 subtest because of a test helper that created a duplicate assignment; fixed in the test, second full run green).
+- **Local `everest_db` (read only):** dry run of the recompute script lists 1 completion (lesson 197, user 2240, attempt 184). `--apply` not run anywhere.
+- **Not verified:** the frontend using `module.progress`; the server.
 
 ## 2026-11-21 — M14 PR 3: scheduled notifications and retention (`feat/m14-scheduled-notifications`)
 

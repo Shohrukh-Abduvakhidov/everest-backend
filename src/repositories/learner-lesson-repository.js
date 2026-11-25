@@ -235,6 +235,53 @@ async function completeTestLessons({ userId, testId, completedAt }, client) {
    return result.rows.map((row) => row.lesson_id)
 }
 
+// Finished attempts on the test of a lesson whose learner has not completed that lesson: the
+// cases finalization could not reach, because the attempt finished before the lesson was
+// linked to the test or before the completion rule existed (2026-11-07). The rule itself is
+// applied by the service (attemptCompletesLesson); this read only gathers the facts it needs,
+// earliest attempt first. lessonId null scans every linked lesson.
+async function listMissedTestLessonCompletions({ lessonId = null } = {}, db = pool) {
+   const result = await db.query(
+      `SELECT lesson.id AS lesson_id, attempt.id AS attempt_id, attempt.user_id, attempt.test_id,
+         attempt.status, attempt.score, attempt.max_score, attempt.policy_snapshot,
+         COALESCE(attempt.submitted_at, attempt.graded_at, attempt.expires_at) AS finished_at,
+         EXISTS (
+            SELECT 1 FROM attempt_questions AS item
+            JOIN student_answers AS answer ON answer.attempt_question_id = item.id
+            WHERE item.attempt_id = attempt.id AND answer.answer_data IS NOT NULL
+         ) AS answered
+       FROM lessons AS lesson
+       JOIN test_attempts AS attempt ON attempt.test_id = lesson.test_id
+       WHERE lesson.test_id IS NOT NULL AND attempt.status IN ('graded', 'expired')
+         AND ($1::bigint IS NULL OR lesson.id = $1)
+         AND NOT EXISTS (
+            SELECT 1 FROM lesson_progress AS progress
+            WHERE progress.user_id = attempt.user_id AND progress.lesson_id = lesson.id
+               AND progress.status = 'completed'
+         )
+       ORDER BY lesson.id, attempt.user_id, finished_at, attempt.id`,
+      [lessonId === null ? null : normalizeInternalId(lessonId)],
+   )
+   return result.rows
+}
+
+// Completes one lesson for one learner, with the same idempotent write as completeTestLessons.
+async function completeLessonForUser({ userId, lessonId, completedAt }, client) {
+   const result = await client.query(
+      `INSERT INTO lesson_progress (user_id, lesson_id, status, completed_at, revision, updated_at)
+       VALUES ($1, $2, 'completed', $3, 1, CURRENT_TIMESTAMP)
+       ON CONFLICT (user_id, lesson_id) DO UPDATE SET
+         status = 'completed',
+         completed_at = COALESCE(lesson_progress.completed_at, EXCLUDED.completed_at),
+         revision = lesson_progress.revision + 1,
+         updated_at = EXCLUDED.updated_at
+       WHERE lesson_progress.status <> 'completed'
+       RETURNING lesson_id`,
+      [normalizeInternalId(userId), normalizeInternalId(lessonId), completedAt],
+   )
+   return result.rowCount === 1
+}
+
 async function addFavorite(userId, courseId, db = pool) {
    await db.query(
       `INSERT INTO course_favorites (user_id, course_id) VALUES ($1, $2)
@@ -313,6 +360,7 @@ async function listLessonProgressSummary(courseId, lessonId, db = pool) {
 
 export {
    addFavorite,
+   completeLessonForUser,
    completeTestLessons,
    countNotes,
    createNote,
@@ -325,6 +373,7 @@ export {
    listFavorites,
    listLearnerModuleLessons,
    listLessonProgressSummary,
+   listMissedTestLessonCompletions,
    listNotes,
    lockUser,
    removeFavorite,

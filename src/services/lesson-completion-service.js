@@ -57,4 +57,61 @@ async function completeTestLessonsService({ attempt, completedAt }, client, over
    return lessonIds
 }
 
-export { attemptCompletesLesson, completeTestLessonsService }
+// The earliest attempt per (lesson, learner) that completes the lesson by attemptCompletesLesson,
+// from rows of listMissedTestLessonCompletions (ordered earliest first). Pure.
+function pickMissedCompletions(rows) {
+   const picked = new Map()
+   for (const row of rows) {
+      const key = `${row.lesson_id}:${row.user_id}`
+      if (picked.has(key)) continue
+      const completes = attemptCompletesLesson({
+         status: row.status,
+         score: row.score,
+         maxScore: row.max_score,
+         passPercent: row.policy_snapshot?.passPercent ?? null,
+         answered: row.answered,
+      })
+      if (!completes) continue
+      picked.set(key, {
+         lessonId: row.lesson_id,
+         userId: row.user_id,
+         testId: row.test_id,
+         attemptId: row.attempt_id,
+         completedAt: row.finished_at,
+      })
+   }
+   return [...picked.values()]
+}
+
+// Completes the lessons that a finished attempt should have completed but did not: the lesson
+// was linked to the test after the attempt finished, or the attempt finished before the
+// completion rule existed. Same rule, same idempotent write; completed_at is the time the
+// attempt finished, so history stays true. With apply false only the plan is returned (the
+// recompute script's dry run). lessonId null covers every linked lesson.
+async function completeMissedTestLessonsService({ lessonId = null, apply = true } = {}, client, overrides) {
+   if (!client) throw new TypeError('completeMissedTestLessonsService requires a transaction client')
+   const deps = dependencies(overrides)
+   const planned = pickMissedCompletions(await deps.learner.listMissedTestLessonCompletions({ lessonId }, client))
+   if (!apply) return planned
+   const completed = []
+   for (const item of planned) {
+      if (!await deps.learner.completeLessonForUser(item, client)) continue
+      await deps.activity.recordActivityEvent({
+         userId: item.userId,
+         lessonId: item.lessonId,
+         code: 'lesson_completed',
+         sourceEventKey: `lesson_completed:${item.lessonId}`,
+         occurredAt: item.completedAt,
+         metadata: { by: 'test', attemptId: item.attemptId, recomputed: true },
+      }, client)
+      completed.push(item)
+   }
+   return completed
+}
+
+export {
+   attemptCompletesLesson,
+   completeMissedTestLessonsService,
+   completeTestLessonsService,
+   pickMissedCompletions,
+}

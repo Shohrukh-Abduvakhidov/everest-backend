@@ -512,11 +512,11 @@ Stable errors: `400 VALIDATION_ERROR`, `400 INVALID_COURSE_ID`/`INVALID_USER_ID`
 These routes need only a live active-account session and read the caller's own data.
 
 - `GET /api/v1/courses` returns `{ courses: [{ id, title, description, languageCode, translations, coverAssetId, subject, moduleCount, lessonCount, enrollment: { state, beginsAt, expiresAt } }] }` for the caller's non-revoked enrollments in `published` courses. Group membership never adds a course.
-   - `subject` = `{ id, title, translations: { tg|ru|en: { title } }, color: green|blue|orange|purple|neutral }`, or `null` when the course has no subject. `title` is the primary-language title. The frontend maps `color` to its design tokens.
+   - `subject` = `{ id, code, title, translations: { tg|ru|en: { title } }, color: green|blue|orange|purple|neutral }`, or `null` when the course has no subject. `code` is `subjects.code` as stored (for example `biologiya`, `fizika`, `khimiya`, `zaboni-tochiki`; added 2026-11-25 for subject icons). `title` is the primary-language title. The frontend maps `color` to its design tokens.
    - `moduleCount` counts published modules. `lessonCount` counts published lessons in published modules, whether or not the module is granted, matching the locked metadata learners already see. Draft and archived items are never counted. `testCount` will arrive after M10.
-   - `progress` = `{ completedLessons, totalLessons, percent }` (2026-11-07). `totalLessons` counts published lessons in published modules that `can_access_module` grants the caller now; `completedLessons` those with `lesson_progress.status = completed` (player or test completion). `percent` is rounded down, `0` when `totalLessons` is `0`. Locked modules add nothing, so an expired enrollment reports `0 / 0`. Computed in the same SQL statement as the list.
+   - `progress` = `{ completedLessons, totalLessons, percent }` (2026-11-07). `totalLessons` counts published lessons in published modules that `can_access_module` grants the caller now; `completedLessons` those with `lesson_progress.status = completed` (player or test completion). `percent` is rounded down, `0` when `totalLessons` is `0`. Locked modules add nothing, so an expired enrollment reports `0 / 0`. Computed in the same SQL statement as the list. Since 2026-11-25 a module's progress uses the same SQL fragment and the same function (`src/utils/lesson-progress.js`), so a course is always the sum of its open modules.
    - The course card in `GET /api/v1/courses/:courseId/modules` (`course`) carries the same `subject`, `moduleCount`, `lessonCount` and `progress`.
-- `GET /api/v1/courses/:courseId/modules` returns `{ course, modules }` where each published module is `{ id, position, title, description, translations, access: { granted, lockReason } }`. `lockReason` is `null` when granted, otherwise `onboarding_required`, `not_started`, `expired`, `not_granted` or `unavailable`. Locked modules expose no assets, tests, per-module counts or grant history. A course without a non-revoked enrollment, or an unpublished or unknown course, returns `404 COURSE_NOT_FOUND`.
+- `GET /api/v1/courses/:courseId/modules` returns `{ course, modules }` where each published module is `{ id, position, title, description, translations, access: { granted, lockReason }, progress }`. `lockReason` is `null` when granted, otherwise `onboarding_required`, `not_started`, `expired`, `not_granted` or `unavailable`. `progress` (2026-11-25) is `{ completedLessons, totalLessons, percent }` of the module's published lessons for a granted module, by the course rule above, and `null` for a locked one. `course.progress` in this response is the sum of the modules' `progress`, so the two always agree. Locked modules expose no assets, tests, per-module counts or grant history. A course without a non-revoked enrollment, or an unpublished or unknown course, returns `404 COURSE_NOT_FOUND`.
 
 Protected content (M07 onward) must call `requireModuleAccessService(userId, moduleId)`, which throws `403 MODULE_ACCESS_DENIED` unless the database predicate `can_access_module` allows it. No protected-content route exists yet.
 
@@ -735,6 +735,17 @@ Unexpected errors use the stable response shape below and do not expose SQL, cre
 {"error":{"code":"INTERNAL_ERROR","message":"Internal server error","details":[]}}
 ```
 
+PostgreSQL integrity errors that no service turned into a specific code (2026-11-25) answer with the same shape and `details: []`, never the SQL, the constraint or the values:
+
+| SQLSTATE | Status | `error.code` |
+|---|---|---|
+| `23514` check violation, `23502` not-null violation | 400 | `VALIDATION_ERROR` |
+| `23505` unique violation | 409 | `CONFLICT` |
+| `23503` foreign key: the row names a record that does not exist | 400 | `REFERENCE_NOT_FOUND` |
+| `23503` foreign key on update/delete (or any `DELETE` request), `23001` restrict | 409 | `REFERENCE_IN_USE` |
+
+The server log line `Database constraint violation` keeps `code`, `constraint`, `table`, `column`, `method` and `path` (without the query string). Other unexpected errors still log `Unhandled request error` with `code`, `method` and `path`, and answer `500 INTERNAL_ERROR`. Specific codes a service already returns (for example `409 ENROLLMENT_ALREADY_EXISTS`) are unchanged.
+
 ## Phone and password authentication
 
 ### `POST /api/v1/auth/register`
@@ -883,6 +894,7 @@ Missing messaging permission returns `409 TELEGRAM_CONNECTION_UNAVAILABLE`. Tele
 ## Lesson and test links
 
 - `lessons.test_id` links a lesson to one test of its course; several lessons may share a test. `Lesson` DTOs have `testId`.
+- Since 2026-11-25, creating a lesson with `testId` or changing its `testId` completes it, in the same transaction, for every student whose earlier finished attempt on that test meets the completion rule (decision 2026-11-07); `completed_at` is when that attempt finished. Nothing is ever moved back. `npm run recompute:test-lessons` (`scripts/recompute-test-lesson-completions.js`, `--dry-run` by default, `--apply` to write, `--lesson <id>` to limit) does the same for attempts that finished before the rule existed.
 - `tests.module_id` is optional: `POST`/`PATCH /admin/tests` accept `moduleId` (draft only, a module of the test's course, otherwise `400`), and `Test` has `moduleId`. A test copy keeps it. A module with tests cannot be deleted (`409 COURSE_MODULE_NOT_DELETABLE`).
 - Archiving a test used by a published lesson, or deleting a draft test used by any lesson, returns `409 TEST_LINKED_TO_LESSON`; `details[].message` holds the lesson ids. Copying a test changes no lesson. Publishing a test never depends on lessons.
 - `POST /admin/courses/:id/copy` does not copy tests, so copied lessons have no link; `copied.clearedTestLinks` counts them.
@@ -893,7 +905,7 @@ Missing messaging permission returns `409 TELEGRAM_CONNECTION_UNAVAILABLE`. Tele
 Full contract with examples: `docs/frontend-handoff.md` → "Student home". Both routes are read-only, use the signed-in student's own data and need only an active account (`403 ACCOUNT_NOT_ACTIVE`).
 
 - `GET /api/v1/me/home`: `continueLesson` (or `null`), `courses[]` (the `GET /courses` shape plus `lastActivityAt`, most recently active first), `tests.open[]` and `tests.upcoming[]` (the learner assignment shape plus `courseId`, `courseTitle`, `deadlineAt`; at most 10 each), `readiness` (trainer readiness plus `lastMockExam`; `subjects` lists every trainable subject, `readinessPercent: null` for those without trainings), `recentResults[]` (last 5 finished attempts of any kind), `week` (seven local days of watch seconds, completed lessons and finished attempts) and `serverNow`.
-- `GET /api/v1/me/attempts?origin&subjectId&limit&offset`: finished attempts of every kind, newest first. `origin` is `authored`, `trainer` or `mock_exam`; `limit` 1–100 (default 20). Response `{ attempts[], pagination: { limit, offset, total, hasMore } }`. `400 VALIDATION_ERROR` for a bad filter or page.
+- `GET /api/v1/me/attempts?origin&subjectId&limit&offset`: finished attempts of every kind, newest first. Each attempt (also in `recentResults[]`) has `subjectId` and, since 2026-11-25, `subjectCode` (`subjects.code`, `null` for a mock exam) for subject icons. `origin` is `authored`, `trainer` or `mock_exam`; `limit` 1–100 (default 20). Response `{ attempts[], pagination: { limit, offset, total, hasMore } }`. `400 VALIDATION_ERROR` for a bad filter or page.
 - `GET /api/v1/me/analytics` (PR 2): `windowDays` (90), `since`, `totals { watchSeconds, lessonsCompleted, attemptsFinished }` (all-time; watch time = merged `watched_ranges`), `firstAttempt { count, averagePercent, withPassPercent, passed, passRate }` (all-time first attempts of course tests; `passRate` only over tests with a `passPercent`, `null` without), `topics { minQuestions, weakBelowPercent, strongFromPercent, strong[], weak[] }` (finished attempts of every kind in the window; points ÷ possible points, unanswered = 0; at least 5 questions; weak < 60, strong ≥ 85; 5 per list). Formulas live in `src/utils/learning-metrics.js`.
 - Learning activity events (`lesson_completed`, `attempt_finished`, `watch_hour`) are written by the player, the attempt finalization and lesson completion by test; they have no API. The permission `progress.read` (owner, admin, teacher) opens the staff views below.
 

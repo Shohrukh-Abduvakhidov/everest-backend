@@ -61,6 +61,8 @@ function safeFinishedAttempt(row) {
       assignmentId: authored ? row.assignment_id : null,
       courseId: row.course_id ?? null,
       subjectId: row.subject_id ?? null,
+      // For subject icons; a mock exam has no single subject, so both are null for it.
+      subjectCode: row.subject_code ?? null,
       attemptNumber: row.attempt_number,
       status: row.status,
       score: row.score,

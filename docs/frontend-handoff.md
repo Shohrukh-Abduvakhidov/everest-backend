@@ -41,6 +41,7 @@ Where this document and the code disagree, the code wins. Please report the diff
 
 - Switch on `error.code`, never on `message`.
 - Unexpected server errors are always `500` with code `INTERNAL_ERROR` and `details: []`; no internals leak.
+- Database integrity errors that no endpoint maps to its own code (2026-11-25): `400 VALIDATION_ERROR` (check or not-null violation), `409 CONFLICT` (duplicate), `400 REFERENCE_NOT_FOUND` (a referenced record does not exist), `409 REFERENCE_IN_USE` (the record is still used). `details` is empty; show a generic message for these codes. Before this they were `500 INTERNAL_ERROR`.
 - An unknown route returns `404 ROUTE_NOT_FOUND`.
 - `429 AUTH_RATE_LIMITED` carries a `Retry-After` header (seconds).
 
@@ -126,7 +127,14 @@ Validation errors are `400` with `code: "VALIDATION_ERROR"` and one entry in `de
 | GET | `/courses/favorites` | session | — | — | 200 { courses?: { id?: Id, title?: string, translations?: CourseTranslations, coverAssetId?: Id or null, favoritedAt?: string }[] } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED |
 | PUT | `/courses/{courseId}/favorite` | session + CSRF | — | — | 200 { courseId?: Id, favorite?: boolean } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED; 404: COURSE_NOT_FOUND |
 | DELETE | `/courses/{courseId}/favorite` | session + CSRF | — | — | 200 { courseId?: Id, favorite?: boolean } | 400: VALIDATION_ERROR; 401: AUTHENTICATION_REQUIRED; 403: CSRF_TOKEN_INVALID, CSRF_ORIGIN_REJECTED |
-| GET | `/courses/{courseId}/modules` | session | — | — | 200 { course?: { id?: Id, title?: string, subject?: SubjectCard or null, moduleCount?: integer, lessonCount?: integer, enrollment?: EnrollmentWindow }, modules?: LearnerModule[] } | 400: INVALID_COURSE_ID; 401: AUTHENTICATION_REQUIRED; 404: COURSE_NOT_FOUND |
+| GET | `/courses/{courseId}/modules` | session | — | — | 200 { course?: { id?: Id, title?: string, subject?: SubjectCard or null, moduleCount?: integer, lessonCount?: integer, progress?: CourseProgress, enrollment?: EnrollmentWindow }, modules?: LearnerModule[] } | 400: INVALID_COURSE_ID; 401: AUTHENTICATION_REQUIRED; 404: COURSE_NOT_FOUND |
+
+#### Module and course progress (2026-11-25)
+
+- `GET /courses/{courseId}/modules` now returns `progress` on every module: `{ completedLessons, totalLessons, percent }` for a granted module, `null` for a locked one. `course.progress` in the same response is the sum of the modules, and `GET /courses` (and `/me/home` → `courses[]`) uses the same rule, so the course and its modules always agree.
+- **Use `module.progress.percent` for the module bar** instead of counting lessons in the client. The client rule "`progress.status === 'completed'` or the test outcome is `passed`" disagreed with the course whenever a passed test had not completed its lesson on the server (attempts from before 2026-11-07, or a lesson linked to the test after the attempt). The server now completes such lessons itself (on link, and by the recompute script for old attempts), so `lesson.progress.status` is the single source of truth for "done".
+- A lesson counts when it is published, in a published module the student can open now. `percent` is rounded down; `100` means every counted lesson is completed.
+- Subject icons: `subject.code` is in `GET /courses`, `GET /courses/{courseId}/modules`, `/me/home` → `courses[]`, and `subjectCode` in `/me/home` → `recentResults[]` and `/me/attempts` (null for a mock exam). The trainer (`/trainer/catalog`, readiness, attempts) and the mock exam already carried `code` / `subjectCode`.
 
 ### Learner lessons
 
@@ -517,7 +525,7 @@ Session-bound licenses (POST without `deviceId`) still work as before (no key, `
 - **LanguageCode**: tg/ru/en
 - **LearnerCourse**: { id?: Id, title?: string, description?: string?, languageCode?: LanguageCode, translations?: CourseTranslations, coverAssetId?: Id or null, subject?: SubjectCard or null, moduleCount?: integer, lessonCount?: integer, enrollment?: EnrollmentWindow }
 - **LearnerLesson**: { id: Id, moduleId?: Id, title?: string, position?: integer, lessonType?: string, translations?: TitleTranslations, access: { granted?: boolean }, content?: RichContent, allowOffline?: boolean, video?: { durationSeconds?: integer?, playable?: boolean }, chapters?: Chapter[], resources?: { id?: Id, title?: string?, position?: integer, fileName?: string?, mimeType?: string, sizeBytes?: integer }[], progress?: Progress }
-- **LearnerModule**: { id?: Id, position?: integer, title?: string, description?: string?, translations?: CourseTranslations, access?: { granted?: boolean, lockReason?: onboarding_required/not_started/expired/not_granted/unavailable } }
+- **LearnerModule**: { id?: Id, position?: integer, title?: string, description?: string?, translations?: CourseTranslations, access?: { granted?: boolean, lockReason?: onboarding_required/not_started/expired/not_granted/unavailable }, progress?: CourseProgress or null }
 - **LessonDetail**: any
 - **LessonResource**: { id?: Id, assetId?: Id, title?: string?, position?: integer, fileName?: string?, mimeType?: string, sizeBytes?: integer }
 - **LessonSummary**: { id?: Id, moduleId?: Id, courseId?: Id, title?: string, position?: integer, lessonType?: video/text/test/mixed, translations?: TitleTranslations, videoAssetId?: Id or null, testId?: Id or null, allowOffline?: boolean, status?: draft/published/archived, createdAt?: string, updatedAt?: string }
@@ -548,7 +556,7 @@ Session-bound licenses (POST without `deviceId`) still work as before (no key, `
 - **SourceMetadata**: { book?: string, edition?: string, page?: integer, number?: string, note?: string, year?: integer, sourceFile?: string, printedPage?: string, sequence?: integer, bookSectionTitle?: string, bookRubric?: string, isSample?: boolean, reviewRequired?: boolean, examPart?: string[] }
 - **StatusResult**: { status: string }
 - **Subject**: { id?: Id, code?: string, primaryLanguage?: LanguageCode, title?: string?, translations?: TitleTranslations, color?: green/blue/orange/purple/neutral }
-- **SubjectCard**: { id?: Id, title?: string?, translations?: TitleTranslations, color?: green/blue/orange/purple/neutral }
+- **SubjectCard**: { id?: Id, code?: string, title?: string?, translations?: TitleTranslations, color?: green/blue/orange/purple/neutral } — `code` (2026-11-25) is `subjects.code` as stored (`biologiya`, `fizika`, `khimiya`, `zaboni-tochiki`, …); match icons by stem as `subject-visual.ts` does.
 - **TitleTranslations**: object
 - **Topic**: { id?: Id, subjectId?: Id, sectionId?: Id or null, parentId?: Id or null, code?: string, primaryLanguage?: LanguageCode, title?: string?, translations?: TitleTranslations }
 - **Upload**: { id?: Id, assetId?: Id, courseId?: Id, kind?: video/material, fileName?: string, mimeType?: string, sizeBytes?: integer, partSizeBytes?: integer, partCount?: integer, status?: initiated/completed/aborted/rejected/expired, rejectionCode?: string?, createdAt?: string, expiresAt?: string, completedAt?: string?, abortedAt?: string? }
@@ -1063,7 +1071,7 @@ Three read-only routes for the signed-in student. Any active account may call th
       "lastMockExam": { "attemptId": "9", "score": "112.00", "maxScore": "160.00", "percent": 70, "submittedAt": "…" }
     },
     "recentResults": [{ "attemptId": "31", "origin": "authored", "title": "…", "testId": "70", "assignmentId": "88",
-      "courseId": "12", "subjectId": "3", "attemptNumber": 1, "status": "graded", "score": "16.00", "maxScore": "20.00",
+      "courseId": "12", "subjectId": "3", "subjectCode": "biologiya", "attemptNumber": 1, "status": "graded", "score": "16.00", "maxScore": "20.00",
       "percent": 80, "passPercent": 60, "passed": true, "startedAt": "…", "submittedAt": "…" }],
     "week": {
       "timeZone": "Asia/Dushanbe",
@@ -1079,7 +1087,7 @@ Three read-only routes for the signed-in student. Any active account may call th
 - **`courses`** is the `GET /courses` item plus `lastActivityAt` (`null` until a lesson is opened), most recently active first. Scheduled and expired courses are included with their `enrollment.state`.
 - **`tests`**: course tests across every course. `open` = the window is open and the student has a running attempt or attempts left. `upcoming` = not open yet. Each list has at most 10 items. `deadlineAt` is the earliest of the window end, the personal window end and the running attempt deadline; show a countdown from `serverNow`, not from the device clock. Trainer and mock exam tests are never listed.
 - **`readiness`**: the NCT trainer figures (same formula as `GET /trainer/overview`) for any account. `readiness.subjects` lists **every trainable subject** (the subjects of `GET /trainer/catalog`), ordered by title in the subject's primary language, then id; a subject without finished trainings has `readinessPercent: null`, `trainings: 0`, `lastSubmittedAt: null` and keeps `subjectId`, `subjectCode`, `titles`, `color`. A subject the student already trained stays listed even if its questions were withdrawn. `readinessPercent` (overall) is the mean of the subjects that have a value; subjects with `null` do not enter it. `empty: true` and overall `readinessPercent: null` when the student has no finished trainings. `GET /trainer/overview` is unchanged (only trained subjects). `lastMockExam` is separate and is not part of `readinessPercent`.
-- **`recentResults`**: the last 5 finished attempts of every kind. For `trainer` and `mock_exam` the `title`, `testId` and `assignmentId` are `null`; build the title from `origin` and `subjectId` (subject names come from `/trainer/catalog`). `passed` is `null` without a pass threshold. No answers or keys are ever included.
+- **`recentResults`**: the last 5 finished attempts of every kind. For `trainer` and `mock_exam` the `title`, `testId` and `assignmentId` are `null`; build the title from `origin` and `subjectId` (subject names come from `/trainer/catalog`). `subjectCode` (2026-11-25) is the subject code for the icon, `null` for a mock exam. `passed` is `null` without a pass threshold. No answers or keys are ever included.
 - **`week`**: seven local days, oldest first, the last one is today in the profile time zone (`UTC` when the zone is unknown). `watchSeconds` is unique watched time reported by the player. Activity is recorded from this release on (completed lessons and finished attempts from before it are filled in once; watch time before it is 0).
 
 **`GET /me/attempts?origin&subjectId&limit&offset`**: finished attempts of every kind, newest first.

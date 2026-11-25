@@ -22,6 +22,7 @@
     "import:answer-keys": "node scripts/import-answer-keys.js",
     "verify:keys": "node scripts/verify-answer-keys.js",
     "publish:questions": "node scripts/publish-questions.js",
+    "recompute:test-lessons": "node scripts/recompute-test-lesson-completions.js",
     "worker:imports": "node scripts/question-import-worker.js",
     "worker:attempts": "node scripts/attempt-sweep-worker.js",
     "worker:jobs": "node scripts/job-worker.js",

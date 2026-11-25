@@ -16,6 +16,7 @@ import {
    laggingCourses,
    overallReadiness,
 } from '../utils/learning-metrics.js'
+import { lessonPercent } from '../utils/lesson-progress.js'
 import { parseCourseId, parseId, parsePagination, parseUserId, validationError } from './course-service.js'
 import { parseGroupId } from './group-service.js'
 import {
@@ -65,10 +66,6 @@ function groupBy(rows, key = 'user_id') {
    const map = new Map()
    for (const row of rows) map.set(row[key], [...(map.get(row[key]) ?? []), row])
    return map
-}
-
-function lessonPercent(completed, total) {
-   return total === 0 ? 0 : Math.floor((completed * 100) / total)
 }
 
 function notFound(code, message) {

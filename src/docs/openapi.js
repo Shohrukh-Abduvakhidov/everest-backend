@@ -300,6 +300,7 @@ const schemas = {
    },
    SubjectCard: obj({
       id: id(),
+      code: str({ description: 'subjects.code as stored (for example biologiya, fizika, khimiya, zaboni-tochiki); for subject icons' }),
       title: nullable(str()),
       translations: ref('TitleTranslations'),
       color: enumOf(['green', 'blue', 'orange', 'purple', 'neutral']),
@@ -313,7 +314,7 @@ const schemas = {
       completedLessons: int(),
       totalLessons: int(),
       percent: int({ description: 'floor(completedLessons * 100 / totalLessons); 0 when totalLessons is 0.' }),
-   }, ['completedLessons', 'totalLessons', 'percent'], { description: 'Published lessons of published modules the learner can open now (can_access_module); completed by lesson_progress.' }),
+   }, ['completedLessons', 'totalLessons', 'percent'], { description: 'Published lessons of published modules the learner can open now (can_access_module); completed by lesson_progress. One rule for a module and a course: a course is the sum of its open modules.' }),
    LearnerCourse: obj({
       id: id(),
       title: str(),
@@ -337,6 +338,7 @@ const schemas = {
          granted: bool(),
          lockReason: nullable(enumOf(['onboarding_required', 'not_started', 'expired', 'not_granted', 'unavailable'])),
       }),
+      progress: nullable(ref('CourseProgress')),
    }),
    Chapter: obj({
       id: id(),
@@ -472,6 +474,7 @@ const schemas = {
       assignmentId: nullable(id()),
       courseId: nullable(id()),
       subjectId: nullable(id()),
+      subjectCode: nullable(str({ description: 'subjects.code; null for a mock exam' })),
       attemptNumber: int(),
       status: enumOf(['graded', 'expired']),
       score: nullable(testPoints()),
@@ -481,7 +484,7 @@ const schemas = {
       passed: nullable(bool()),
       startedAt: dt(),
       submittedAt: dt(),
-   }, ['attemptId', 'origin', 'title', 'testId', 'assignmentId', 'courseId', 'subjectId', 'attemptNumber', 'status', 'score', 'maxScore', 'percent', 'passPercent', 'passed', 'startedAt', 'submittedAt']),
+   }, ['attemptId', 'origin', 'title', 'testId', 'assignmentId', 'courseId', 'subjectId', 'subjectCode', 'attemptNumber', 'status', 'score', 'maxScore', 'percent', 'passPercent', 'passed', 'startedAt', 'submittedAt']),
    StudentHome: obj({
       continueLesson: nullable(obj({
          courseId: id(), courseTitle: str(), moduleId: id(), lessonId: id(), title: str(),

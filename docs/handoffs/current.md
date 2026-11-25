@@ -4,10 +4,16 @@ current_milestone: M13
 status: planned
 branch: main
 base_commit: f4bb6f6
-updated_at: 2026-11-20
+updated_at: 2026-11-25
 ---
 
 # Current handoff
+
+## Course/module progress fix (branch `fix/course-progress-pg-errors-subject-code`, not merged, not deployed)
+
+- **Built:** module `progress` in `GET /courses/:id/modules` (same rule as the course); completion of test lessons missed by the 2026-11-07 rule (on lesson link, and `npm run recompute:test-lessons`, dry run by default); pg integrity errors → 400/409 with stable codes; `subject.code` / `subjectCode` for icons. No migration. Details: `docs/decisions.md` 2026-11-25, `docs/api.md`, `docs/frontend-handoff.md` → "Module and course progress".
+- **Verified:** `npm test` 642/642 (disposable database); recompute dry run on local `everest_db`: 1 completion (lesson 197, user 2240).
+- **After merge (operator):** deploy; run `npm run recompute:test-lessons` (dry run) on the server, review, then `--apply` after a backup. Frontend: use `module.progress` for the module bar.
 
 ## M12 is Done (PR 3 merged in PR #64, not deployed)
 
