@@ -49,6 +49,7 @@ const testColumns = `test.id, test.origin, test.course_id, test.module_id, test.
 
 const assignmentColumns = `assignment.id, assignment.test_id, assignment.group_id, assignment.user_id,
    assignment.status, assignment.opens_at, assignment.closes_at, assignment.personal_window_minutes,
+   assignment.counts_for_group_ranking,
    assignment.assigned_by,
    assignment.created_at,
    (SELECT title FROM groups WHERE id = assignment.group_id) AS group_title,
@@ -419,8 +420,9 @@ async function hasActiveAssignment(testId, audience, client) {
 
 async function createAssignment(assignment, client) {
    const result = await client.query(
-      `INSERT INTO test_assignments (test_id, group_id, user_id, assigned_by, opens_at, closes_at, personal_window_minutes)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO test_assignments (test_id, group_id, user_id, assigned_by, opens_at, closes_at,
+          personal_window_minutes, counts_for_group_ranking)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING id`,
       [
          normalizeInternalId(assignment.testId),
@@ -430,6 +432,7 @@ async function createAssignment(assignment, client) {
          assignment.opensAt,
          assignment.closesAt,
          assignment.personalWindowMinutes ?? null,
+         assignment.countsForGroupRanking ?? false,
       ],
    )
    return result.rows[0].id
@@ -437,8 +440,16 @@ async function createAssignment(assignment, client) {
 
 async function updateAssignmentWindow(assignmentId, window, client) {
    await client.query(
-      'UPDATE test_assignments SET opens_at = $2, closes_at = $3, personal_window_minutes = $4 WHERE id = $1',
-      [normalizeInternalId(assignmentId), window.opensAt, window.closesAt, window.personalWindowMinutes],
+      `UPDATE test_assignments SET opens_at = $2, closes_at = $3, personal_window_minutes = $4,
+         counts_for_group_ranking = $5
+       WHERE id = $1`,
+      [
+         normalizeInternalId(assignmentId),
+         window.opensAt,
+         window.closesAt,
+         window.personalWindowMinutes,
+         window.countsForGroupRanking,
+      ],
    )
 }
 

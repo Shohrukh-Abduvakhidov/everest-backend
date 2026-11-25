@@ -142,6 +142,15 @@ function relationship(row) {
    }
 }
 
+// The one role the viewer has in the group, for the group pages: staff roles first (an owner or
+// admin is "admin" everywhere), then the student roles.
+function viewerRole(row) {
+   if (row.administrator) return 'admin'
+   if (row.is_teacher) return 'teacher'
+   if (row.is_representative) return 'representative'
+   return 'member'
+}
+
 function safeGroup(row) {
    return {
       id: row.id,
@@ -152,6 +161,7 @@ function safeGroup(row) {
       memberCount: row.member_count,
       teacherCount: row.teacher_count,
       relationship: relationship(row),
+      viewerRole: viewerRole(row),
       createdAt: row.created_at,
       updatedAt: row.updated_at,
    }

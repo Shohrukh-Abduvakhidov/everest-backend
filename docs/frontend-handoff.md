@@ -1269,9 +1269,68 @@ Which flag opens which screen (`allAccess` opens all of them):
 | Course settings of course X | `courses[X].canEditCourse` |
 | Course progress `GET /admin/courses/:id/progress` | `permissions` has `progress.read` and `courses[X].canViewResults` |
 | Group progress `GET /admin/groups/:id/progress` | `permissions` has `progress.read` and `groups[G].canViewResults` |
+| Group ranking (staff) and its visibility settings | `permissions` has `progress.read` and `groups[G].canViewResults` |
 | Assignment results | `canViewResults` on the test's course or on the assignment's group |
 | Tests of course X | `courses[X].canManageTests`; assigning to a group also needs `groups[G].canAssignTests` |
 | Group announcements | `groups[G].canPublishAnnouncements` |
+
+### Group ranking (M13, 2026-11-25)
+
+Two boards shown as tabs, never mixed: **«Успеваемость»** (`board=performance`) and **«Активность»** (`board=activity`). Periods: `week` (default), `month`, `all`. Everything is computed on request (no cache), so a reload always shows the current state. Full rules: `docs/api.md` → "Group ranking".
+
+**Group page: `GET /groups/:groupId/ranking?board=performance&period=week`** (an active member of the group, or staff of the group: owner/admin for any group, a teacher assigned to it with any flags; anyone else gets `404 GROUP_NOT_FOUND`). The response has `viewerRole` (`student` | `staff`) and `studentVisibility` (what the students see). The example is a student's view:
+
+```json
+{
+  "data": {
+    "groupId": "5",
+    "board": "performance",
+    "period": "week",
+    "periodStart": "2026-11-22T19:00:00.000Z",
+    "periodEnd": "2026-11-29T19:00:00.000Z",
+    "visibility": "top10_self",
+    "participantsCount": 24,
+    "formulaVersion": 1,
+    "computedAt": "2026-11-25T10:00:00.000Z",
+    "items": [
+      { "rank": 1, "score": 95, "isMe": false, "user": { "id": "41", "firstName": "Ali", "lastName": "Karimov", "avatarUrl": null } },
+      { "rank": 2, "score": 80, "isMe": true, "user": { "id": "42", "firstName": "Zarina", "lastName": "Nazarova", "avatarUrl": null } },
+      { "rank": 2, "score": 80, "isMe": false, "user": { "id": "43", "firstName": "Firuz", "lastName": "Saidov", "avatarUrl": null } },
+      { "rank": 4, "score": 50, "isMe": false, "user": { "id": "44", "firstName": "Madina", "lastName": "Rahimova", "avatarUrl": null } }
+    ],
+    "me": { "rank": 2, "score": 80 }
+  }
+}
+```
+
+- **`score`:** performance = average percent (0–100, 2 decimals); activity = points (2 decimals). Show it with up to 2 decimals.
+- **Places** are shared: 1, 2, 2, 4. Show `rank` as is; do not number rows yourself.
+- **`rank` and `score` may be `null`** (performance only): the member has no counted assignment in the period. Such rows come last; `me` can be `{ "rank": null, "score": null }` — show "нет засчитанных заданий за период".
+- **`visibility`:**
+   - `top10_self` (default): `items` are places 1–10 (more than 10 rows when places are shared). If `me.rank` is above 10 or `null`, show the student's own row separately from `me`; the student is not in `items` then.
+   - `full`: everyone.
+   - `staff_only`: `items: []`, `me: null`, `participantsCount: 0`. Show "Рейтинг скрыт преподавателем" (it is a normal 200).
+- **`periodStart` / `periodEnd`** are instants (local midnights in Asia/Dushanbe); for `all` both are `null`.
+- **`avatarUrl`** is always `null` for now (no avatar upload yet); show initials.
+- An empty performance board (no marked assignments in the period) has every `score` `null`; the UI may switch to the «Активность» tab.
+
+**Staff: `GET /admin/groups/:groupId/ranking`** (same query; owner, admin, or a teacher of the group with `canViewResults` — use `groups[G].canViewResults` from `/me/staff-capabilities`). Always everyone, whatever the visibility; `me` is `null`. Each item adds:
+
+```json
+{ "rank": 1, "score": 36.5, "isMe": false, "user": { "id": "41", "firstName": "Ali", "lastName": "Karimov", "avatarUrl": null },
+  "assignmentsOnTime": 1, "lastCountedAt": "2026-11-25T10:00:00.000Z",
+  "breakdown": { "trainerPoints": 1.5, "mockExamPoints": 30, "mockExamsCounted": 1, "lessonPoints": 5, "lessonsCounted": 1, "assignmentsOnTime": 1 } }
+```
+
+Performance `breakdown`: `{ "assignments": 3, "submitted": 2, "missed": 1 }`.
+
+**Visibility settings:** `GET /admin/groups/:groupId/ranking-settings` → `{ groupId, visibility, isDefault, updatedBy, updatedAt }`; `PUT` the same path with `{ "visibility": "full" | "top10_self" | "staff_only" }` (CSRF header as for every cookie mutation). Same scope as the staff ranking. Labels: `full` — «Все видят весь рейтинг», `top10_self` — «Топ-10 и своё место», `staff_only` — «Только преподаватели».
+
+**Marking assignments:** `countsForGroupRanking` (boolean) on `POST /admin/tests/:testId/assignments` (default `false`) and `PATCH .../assignments/:assignmentId`, returned on every assignment. Only for a group assignment (a personal one with `true` is `400`). Show the checkbox «Учитывать в рейтинге группы» only when the audience is a group and the user may assign tests to it (`allAccess` or `groups[G].canAssignTests`); otherwise `PATCH` answers `404 GROUP_NOT_FOUND`.
+
+**Staff on the group page** (`viewerRole: "staff"`): always everyone, `visibility: "full"`, `me: null`, every `isMe` false. Show a note from `studentVisibility`, e.g. «Ученики видят: топ-10 и своё место» / «Ученики не видят рейтинг» for `staff_only`. The breakdown is only in `GET /admin/groups/:groupId/ranking`.
+
+**Group page data:** `GET /groups` / `GET /groups/:id` — `name`, `memberCount`, `teacherCount`, `relationship { member, representative, teacher, administrator }`, `viewerRole` (`admin` | `teacher` | `representative` | `member`; one value, staff first). For «Мои группы»: a student gets their groups, a teacher the groups they teach, owner/admin every group (`status=active`, `q` for search, `limit`/`offset`); `GET /groups/:id/members` — `firstName`, `lastName`, `avatarAssetId`, `role` (`member` | `representative`), `joinedAt`; `GET /groups/:id/teachers` — names and `avatarAssetId`. No phone numbers anywhere.
 
 ### Notifications inbox (M14, 2026-11-21)
 
@@ -1362,7 +1421,7 @@ POST routes need CSRF (`X-CSRF-Token` + `Origin`) with the cookie session, like 
 | POST | `/admin/tests/:testId/copy` | `tests.manage` | Copy as a draft |
 | GET | `/admin/tests/:testId/assignments` | `tests.read` | List; `limit`, `offset`, `status`; `hasMore` |
 | POST | `/admin/tests/:testId/assignments` | `tests.assign` | Assign to one group or one student |
-| PATCH | `/admin/tests/:testId/assignments/:assignmentId` | `tests.assign` | Change `opensAt`, `closesAt` |
+| PATCH | `/admin/tests/:testId/assignments/:assignmentId` | `tests.assign` | Change `opensAt`, `closesAt`, `personalWindowMinutes`, `countsForGroupRanking` |
 | DELETE | `/admin/tests/:testId/assignments/:assignmentId` | `tests.assign` | Revoke (the row stays) |
 
 Exact bodies and error codes are in Swagger and `docs/api.md`.

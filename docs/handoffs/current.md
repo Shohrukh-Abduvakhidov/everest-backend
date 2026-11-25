@@ -1,13 +1,19 @@
 ---
 project: EVEREST Backend
 current_milestone: M13
-status: planned
+status: in_progress
 branch: main
 base_commit: f4bb6f6
 updated_at: 2026-11-25
 ---
 
 # Current handoff
+
+## M13 group ranking (branch `feat/m13-group-ranking`, not merged, not deployed)
+
+- **Built:** ranking PR of M13: assignment flag `countsForGroupRanking`, `group_ranking_settings` + partial index (migration `20261125010000000`), boards performance/activity, periods week/month/all, student route by visibility, staff route with breakdown, settings GET/PUT. Contract: `docs/api.md` and `docs/frontend-handoff.md` → "Group ranking"; decisions 2026-11-25 (M13).
+- **After merge (operator):** deploy the backend with `migrate:up` (one new table, one index; no env). Frontend: group page tabs, settings, the assignment checkbox.
+- **Next:** achievements and ranking snapshots (second M13 PR).
 
 ## Course/module progress fix (branch `fix/course-progress-pg-errors-subject-code`, not merged, not deployed)
 
@@ -56,7 +62,7 @@ updated_at: 2026-11-25
 ## Next concrete task
 
 1. Deploy PRs #63 to #67 (no migration). The frontend can build the teacher screens (staff progress, rights) from `docs/frontend-handoff.md`.
-2. M13 group ranking needs the owner's approved formula (decision first, then code). M10 stays open until its two listed deliverables are built or dropped.
+2. M13: review and merge the ranking PR, then achievements and snapshots. M10 stays open until its two listed deliverables are built or dropped.
 3. A teacher still has to fix 1907 and 1917 (stem rebuilt from the book) and review the remaining findings of `audit-question-text.js`.
 4. Known gaps: `scripts/verify-database.js` counts must be updated with every migration; `tests/integration/real-storage.test.js` keeps the test process alive for hours (close the S3 client).
 5. Operations, not code: stage 2c hardening, off-site backups, alerts, k6 load test, `docker builder prune` only with the owner's approval.

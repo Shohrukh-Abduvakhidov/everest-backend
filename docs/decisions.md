@@ -1,5 +1,32 @@
 # Decisions
 
+## 2026-11-25 — M13: group ranking (owner's variant C)
+
+The owner chose variant C of the M13 research: two boards that are never mixed, «Успеваемость» (`performance`) and «Активность» (`activity`). The rules the owner set are in `docs/api.md` → "Group ranking"; the points below are what the owner fixed, then what was decided while building it unattended (please review the second list).
+
+Fixed by the owner:
+1. `countsForGroupRanking` on assignments, for group assignments only; set by whoever may assign tests to the group (owner/admin, or a teacher with `can_assign_tests`); returned on assignments.
+2. `group_ranking_settings (group_id PK, visibility full|top10_self|staff_only, updated_by, updated_at)`; no row = `top10_self`. Reversible migration `20261125010000000_add-group-ranking`.
+3. Performance: marked assignments, period by `closes_at` (else the counted attempt's finish), percent of the attempt counted by `result_policy`, closed without attempt = 0, open without attempt not counted, average 0–100 with 2 decimals.
+4. Activity: trainer +1 per question first solved with full marks ever, ×1/×1.5/×2 by difficulty, 60 per day; attempts with less than half answered or under 3 s per question earn 0; mock exam `score/160×50`, best per week; lesson +5 per first completion, 10 lessons per day. Only finished attempts, origins filtered explicitly.
+5. Periods week (from Monday 00:00), month, all (from `joined_at`), Asia/Dushanbe. Participants: active members. Places 1-2-2-4 on hundredths; order inside a place: more on-time assignments, earlier last counted attempt, name.
+6. Student view by visibility (`top10_self`: places 1–10 with shared places + `me`; `full`; `staff_only`: `items: []`, `me: null`, 200). Staff view always full with a breakdown. Settings GET/PUT. Scope: owner/admin or a group teacher with `can_view_results`. Computed on read, no cache, one aggregate query per group; index `(group_id, closes_at) WHERE counts_for_group_ranking`.
+
+Decided unattended:
+1. **The participant's own start.** In every period a member counts only from their current `joined_at` (not only for `all`). An assignment whose period time is before joining is left out; the same rule as `missed_deadline` (D5). Re-joining resets `joined_at`, as it does everywhere.
+2. **Active account.** Participants are active members whose account is `active`; a blocked student drops out of the table.
+3. **No counted assignment = no place.** `score` and `rank` are `null`, the row goes last; with `top10_self` it is not in `items`, and the student's own `me` is `{ rank: null, score: null }`. In the activity board everybody has a score (0 included).
+4. **Assignment details.** Revoked assignments never count. Only `authored` and `standalone` tests. A course test the member is not enrolled in (no non-revoked enrollment) counts only when the member has an attempt, so a member who could not start it is not given 0. An assignment with `closes_at` later in the period and an attempt already counts this period (its time is `closes_at`); one that closes next week counts next week, as the owner's rule says.
+5. **"On time".** A start after `closes_at` is impossible (`409 ASSIGNMENT_CLOSED`, timer capped at `closes_at`), so every finished attempt on a counted assignment is on time. The activity board uses the same on-time count of the period for its tie order. "Last counted attempt": performance — the latest finish among counted assignment attempts; activity — the latest event that earned points. Name order: last name, then first name (`ru` collation), then user id.
+6. **Trainer anti-cheat.** "Answered" = a saved answer (`answer_data` not null), as for the completion rule. The 3-second rule is per answered question: `(finish − start − paused_seconds) / answered < 3`. A rejected attempt does not use up its questions: a later valid solve still earns. Finish time = `COALESCE(submitted_at, graded_at, expires_at)`. A daily cap that falls in the middle of a ×1.5/×2 question gives only what is left (60 is never passed).
+7. **Mock exam weeks** are local Monday-to-Monday weeks; in a month or all-time period every week's best inside the period counts. The constant 160 is the `nct-a5` template maximum; another template would change `formulaVersion`.
+8. **Who opens the group page ranking.** First built for active members only; changed the same day at the owner's request: `GET /groups/:id/ranking` also opens for owner/admin (any group) and for a teacher assigned to the group with any flags (no `canViewResults` needed: the page shows places and scores, not results). Staff get everyone whatever the visibility, `visibility: "full"` (what they see), `studentVisibility` (the setting), `me: null`, no breakdown; `viewerRole` tells the two apart. A member always gets the student view. Anyone else: 404. `staff_only` returns `participantsCount: 0` to students.
+13. **`viewerRole` on groups.** `GET /groups` and `GET /groups/:id` add one role: `admin` (owner/admin) before `teacher` before `representative` before `member`. Owner/admin still list every group, archived included, as before (the admin screens use this list); `status=active` gives active ones only. Search and pagination were already there. `/members` and `/teachers` already open for the same people (any assigned teacher, owner/admin) and carry no phones; nothing changed there.
+9. **Settings PUT scope** is the read scope (owner/admin or a teacher with `can_view_results`), behind `progress.read`, CSRF and the admin mutation rate limit; audited as `group.ranking_settings_updated` with the previous value. Archived groups keep their ranking and settings.
+10. **Avatars.** `user.avatarUrl` is always `null`: there is no avatar upload or delivery yet (`avatar_asset_id` is never set). The field is there so the frontend does not change later.
+11. **No snapshots yet.** Weekly/monthly snapshots (for "top 3" achievements and stable history) from the research plan are not built; they come with achievements in the next PR. A regrade therefore changes past periods too.
+12. **Group pages.** `GET /groups`, `/groups/:id`, `/groups/:id/members`, `/groups/:id/teachers` already give a student the name, member count, own role (`relationship.member` / `representative`), member roles, avatar references (`avatarAssetId`) and teachers, and never a phone; nothing was added.
+
 ## 2026-11-25 — Course and module progress, missed test-lesson completions, PostgreSQL errors, subject code
 
 Made without the user (the task ran unattended); please review.

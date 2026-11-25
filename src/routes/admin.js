@@ -199,12 +199,27 @@ import {
    getStaffStudentAnalyticsController,
    listStaffStudentAttemptsController,
 } from '../controllers/staff-progress-controller.js'
+import {
+   getRankingSettingsController,
+   getStaffGroupRankingController,
+   updateRankingSettingsController,
+} from '../controllers/group-ranking-controller.js'
 
 const adminRouter = express.Router()
 
 adminRouter.use(authMiddleware)
 // Staff progress views (M12 PR 3); scope by decision D1 in the service.
 adminRouter.get('/groups/:groupId/progress', readProgressAuthorizationMiddleware, getGroupProgressController)
+// M13 group ranking: owner, admin or a teacher of the group with canViewResults (scope in the service).
+adminRouter.get('/groups/:groupId/ranking', readProgressAuthorizationMiddleware, getStaffGroupRankingController)
+adminRouter.get('/groups/:groupId/ranking-settings', readProgressAuthorizationMiddleware, getRankingSettingsController)
+adminRouter.put(
+   '/groups/:groupId/ranking-settings',
+   readProgressAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   updateRankingSettingsController,
+)
 adminRouter.get('/courses/:courseId/progress', readProgressAuthorizationMiddleware, getCourseProgressController)
 adminRouter.get('/users/:userId/analytics', readProgressAuthorizationMiddleware, getStaffStudentAnalyticsController)
 adminRouter.get('/users/:userId/attempts', readProgressAuthorizationMiddleware, listStaffStudentAttemptsController)

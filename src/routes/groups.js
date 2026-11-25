@@ -10,6 +10,7 @@ import {
    listGroupAnnouncementsController,
    updateGroupAnnouncementController,
 } from '../controllers/group-controller.js'
+import { getGroupRankingController } from '../controllers/group-ranking-controller.js'
 import { authMiddleware } from '../middleware/auth-middleware.js'
 import { authenticatedCsrfMiddleware } from '../middleware/auth-protection-middleware.js'
 import { manageGroupAnnouncementsAuthorizationMiddleware } from '../middleware/group-admin-middleware.js'
@@ -21,6 +22,8 @@ groupsRouter.get('/', listGroupsController)
 groupsRouter.get('/:groupId', getGroupController)
 groupsRouter.get('/:groupId/members', listGroupMembersController)
 groupsRouter.get('/:groupId/teachers', listGroupTeachersController)
+// M13: an active member of the group only; visibility by group_ranking_settings.
+groupsRouter.get('/:groupId/ranking', getGroupRankingController)
 groupsRouter.get('/:groupId/announcements', listGroupAnnouncementsController)
 groupsRouter.post(
    '/:groupId/announcements',

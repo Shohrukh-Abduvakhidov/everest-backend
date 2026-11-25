@@ -363,7 +363,7 @@ The initial permission set exactly preserves account administration: `accounts.p
 | Taxonomy | subjects/sections/topics and translations | None | Planned (schema only) |
 | Question bank | banks/imports/errors/questions/options/matching/keys/topics/assets/duplicates | None | Planned (schema + immutability guards) |
 | Tests/attempts | tests/questions/assignments/attempts/attempt questions/answers/revisions | None | Planned (schema + constraints/guards) |
-| Analytics/ranking | activity events; attempt/progress source data | None; no ranking table/formula | Planned/decision required |
+| Analytics/ranking | activity events; attempt/progress source data; `group_ranking_settings` | Group ranking computed on read (`src/utils/ranking-metrics.js`), no snapshot table yet | M13 ranking built (2026-11-25); snapshots and achievements next |
 | Notifications | settings/preferences/campaigns/notifications/deliveries | In-app inbox, Telegram delivery, settings, quiet hours, close-time reminders and 180-day retention (M14); `broadcast_campaigns` and `push_subscriptions` unused until after the launch | Done (M14) |
 | Telegram | identities, OIDC states, connections | Five routes, service/repository/providers | Done |
 | Web Push | `push_subscriptions`, deliveries | None; VAPID key unused | Planned |
