@@ -1,6 +1,10 @@
 import express from 'express'
 
 import {
+   getMyAchievementsController,
+   markAchievementsSeenController,
+} from '../controllers/achievement-controller.js'
+import {
    countUnreadNotificationsController,
    getNotificationSettingsController,
    updateNotificationSettingsController,
@@ -18,7 +22,8 @@ import { authMiddleware } from '../middleware/auth-middleware.js'
 import { authenticatedCsrfMiddleware } from '../middleware/auth-protection-middleware.js'
 
 // The signed-in user's own data: home page, finished attempts, analytics, the staff rights the
-// frontend uses to decide which staff screens to open, and the in-app notification inbox.
+// frontend uses to decide which staff screens to open, the in-app notification inbox and the
+// achievements (M13).
 const meRouter = express.Router()
 
 meRouter.use(authMiddleware)
@@ -26,6 +31,8 @@ meRouter.get('/home', getStudentHomeController)
 meRouter.get('/attempts', listStudentAttemptsController)
 meRouter.get('/analytics', getStudentAnalyticsController)
 meRouter.get('/staff-capabilities', getStaffCapabilitiesController)
+meRouter.get('/achievements', getMyAchievementsController)
+meRouter.post('/achievements/seen', authenticatedCsrfMiddleware, markAchievementsSeenController)
 meRouter.get('/notifications', listNotificationsController)
 meRouter.get('/notifications/unread-count', countUnreadNotificationsController)
 meRouter.post('/notifications/read-all', authenticatedCsrfMiddleware, markAllNotificationsReadController)

@@ -2,8 +2,8 @@
 project: EVEREST Backend
 roadmap_version: 1
 current_milestone: M13
-current_status: in_progress
-updated_at: 2026-11-25
+current_status: done
+updated_at: 2026-11-26
 architecture: docs/architecture.md
 ---
 
@@ -356,15 +356,15 @@ This roadmap orders implementation; it does not replace the [current architectur
 
 ## M13 — Group ranking
 
-- **Status:** In progress. Formula approved by the owner (variant C of the M13 research, rules in `docs/decisions.md` 2026-11-25). Two PRs:
-   1. **Ranking** (branch `feat/m13-group-ranking`, open for review, not deployed): `countsForGroupRanking` on group assignments; migration `20261125010000000` (`group_ranking_settings`, partial index on marked assignments); boards «Успеваемость» and «Активность», periods week/month/all in Asia/Dushanbe, places 1-2-2-4; `GET /groups/:groupId/ranking` for members by visibility, `GET /admin/groups/:groupId/ranking` with breakdown, `GET/PUT /admin/groups/:groupId/ranking-settings`. Computed on read, one aggregate query per group.
-   2. **Next PR:** achievements (catalog, awarding through `worker:jobs`, `GET /me/achievements`) and weekly/monthly ranking snapshots for the «top 3» achievement.
+- **Status:** Done after the achievements PR (branch `feat/m13-achievements-snapshots`; not deployed). Formula approved by the owner (variant C of the M13 research, rules in `docs/decisions.md` 2026-11-25). Two PRs:
+   1. **Ranking** (merged in PR #80, not deployed): `countsForGroupRanking` on group assignments; migration `20261125010000000` (`group_ranking_settings`, partial index on marked assignments); boards «Успеваемость» and «Активность», periods week/month/all in Asia/Dushanbe, places 1-2-2-4; `GET /groups/:groupId/ranking` for members by visibility, `GET /admin/groups/:groupId/ranking` with breakdown, `GET/PUT /admin/groups/:groupId/ranking-settings`. Computed on read, one aggregate query per group.
+   2. **Achievements and snapshots** (branch `feat/m13-achievements-snapshots`, open for review, not deployed): migration `20261126010000000` (catalog of 17 achievements with ru/tg/en texts and thresholds in `criteria`, `user_achievements.metadata/seen_at`, `group_ranking_snapshots`); pure checks in `src/utils/achievement-rules.js`; `achievements.evaluate` queued in the transaction of an attempt finish, regrade, lesson completion and assignment close-time change; scheduled streak run and weekly/monthly snapshots in `worker:jobs`; `achievement.unlocked` (Telegram off by default); `GET /me/achievements`, `POST /me/achievements/seen`, `recentAchievements` on `/me/home`, `GET /admin/users/:userId/achievements`; `npm run backfill:achievements` (dry run by default). Achievements moved here from M16 (owner, 2026-11-26). Decisions: `docs/decisions.md` 2026-11-26. Verification: `docs/progress.md` (2026-11-26).
 - **Goal:** Rank group performance using an approved transparent formula.
 - **Dependencies:** M04, M12, and user approval of formula (given 2026-11-25).
 - **Deliverables:** Ranking inputs/period, tie handling, privacy, recalculation, and teacher/admin visibility.
 - **Verification:** Formula fixtures, ties, period boundaries, visibility, and recalculation tests.
 - **Documentation updates:** Decision, API, architecture, progress, roadmap.
-- **Exclusions:** Snapshots and achievements (next PR); avatars in the ranking (`avatarUrl` stays `null` until avatar upload exists).
+- **Exclusions:** Avatars in the ranking (`avatarUrl` stays `null` until avatar upload exists); a read API for past snapshots; catching up snapshot periods missed while `worker:jobs` was down for more than a week/month.
 
 ## M14 — Notifications
 
@@ -389,12 +389,12 @@ This roadmap orders implementation; it does not replace the [current architectur
 - **Documentation updates:** API, provider/model decisions, architecture, progress, roadmap.
 - **Exclusions:** Selecting or integrating a paid provider without user approval.
 
-## M16 — Bonuses and achievements
+## M16 — Bonuses
 
-- **Status:** Planned
+- **Status:** Planned (achievements moved to M13 on 2026-11-26; `achievements`/`user_achievements` are in use)
 - **Goal:** Maintain auditable rewards and redemptions.
 - **Dependencies:** M02F, M11–M12; M15 for AI credits.
-- **Deliverables:** Accounts, append-only transactions, earning rules, achievements, offers, AI credits, idempotency, and audited manual adjustments.
+- **Deliverables:** Accounts, append-only transactions, earning rules (may reuse achievement awards as events), offers, AI credits, idempotency, and audited manual adjustments.
 - **Verification:** Concurrency, append-only, balance, duplicate-event, redemption, and audit tests.
 - **Documentation updates:** API, decisions, architecture, progress, roadmap.
 - **Exclusions:** Credits bypassing the provider cash budget.

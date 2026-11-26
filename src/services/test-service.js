@@ -3,6 +3,7 @@ import * as testRepository from '../repositories/test-repository.js'
 import { withTransaction } from '../repositories/transaction-repository.js'
 import AppError from '../utils/app-error.js'
 import { normalizeInternalId } from '../utils/internal-id.js'
+import { enqueueAssignmentAchievementEvents } from './achievement-service.js'
 import { parsePagination, parseText, validateBody, validationError } from './course-service.js'
 import { enqueueAssignmentCloseEvents, enqueueTestAssigned } from './notification-service.js'
 import { drawTrainableQuestionsService, getStaffTrainerAvailabilityService } from './trainer-service.js'
@@ -752,6 +753,7 @@ async function createAssignmentService(userId, testIdValue, body, overrides) {
       await enqueueAssignmentCloseEvents(client, {
          assignmentId, closesAt, answerRevealPolicy: test.answer_reveal_policy, now,
       })
+      await enqueueAssignmentAchievementEvents(client, { assignmentId, groupId: audience.groupId, closesAt })
       return safeAssignment(await repository.findAssignment(testId, assignmentId, client))
    })
 }
@@ -804,6 +806,9 @@ async function updateAssignmentService(userId, testIdValue, assignmentIdValue, b
       if (body.closesAt !== undefined) {
          await enqueueAssignmentCloseEvents(client, {
             assignmentId, closesAt, answerRevealPolicy: test.answer_reveal_policy,
+         })
+         await enqueueAssignmentAchievementEvents(client, {
+            assignmentId, groupId: assignment.group_id, closesAt, changed: true,
          })
       }
       return safeAssignment(await repository.findAssignment(testId, assignmentId, client))

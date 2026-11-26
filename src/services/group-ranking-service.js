@@ -104,9 +104,10 @@ function collectFacts(rows) {
    return [...members.values()]
 }
 
-async function computeRanking(deps, groupId, { board, period }) {
+// bounds: the period's bounds; given for a finished period (snapshots), computed from now otherwise.
+async function computeRanking(deps, groupId, { board, period }, fixedBounds = null) {
    const now = deps.clock()
-   const bounds = periodBounds(period, now)
+   const bounds = fixedBounds ?? periodBounds(period, now)
    const rows = await deps.repository.listRankingFacts(groupId, { board, start: bounds.start, end: bounds.end })
    const participants = collectFacts(rows).map((member) => {
       const window = participantWindow(bounds, member.joinedAt)
@@ -280,7 +281,18 @@ async function updateRankingSettingsService(userId, groupIdValue, body, override
    })
 }
 
+// The ranking of one finished period (week or month) with fixed bounds, for the snapshots of
+// worker:jobs. Same facts, formula and places as the live ranking.
+async function computeGroupRankingForPeriodService(groupIdValue, { board, period, bounds }, overrides) {
+   const deps = dependencies(overrides)
+   const groupId = parseGroupId(groupIdValue)
+   if (!rankingBoards.includes(board)) throw validationError('board')
+   const computed = await computeRanking(deps, groupId, { board, period }, bounds)
+   return computed.ranked
+}
+
 export {
+   computeGroupRankingForPeriodService,
    getGroupRankingService,
    getRankingSettingsService,
    getStaffGroupRankingService,

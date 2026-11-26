@@ -2,18 +2,20 @@ import env from '../src/configs/env.js'
 import pool from '../src/configs/db.js'
 import { startJobWorker } from '../src/jobs/job-worker.js'
 import { TelegramRateLimiter } from '../src/jobs/telegram-rate-limiter.js'
+import { achievementJobHandlers, scheduleAchievementJobsService } from '../src/services/achievement-service.js'
 import {
    notificationJobHandlers,
    scheduleNotificationRetentionService,
 } from '../src/services/notification-service.js'
 import { startTelegramSender } from '../src/services/telegram-delivery-service.js'
 
-// General background runner: background_jobs (notification fan-out) and, when the bot is
+// General background runner: background_jobs (notification fan-out, achievements and ranking
+// snapshots) and, when the bot is
 // configured, the Telegram sender (20 messages/s for the bot, 1/s per chat). Run exactly one
 // replica: the rate limits are kept in this process. Output has codes only, never payloads,
 // chat ids, texts or tokens.
 const log = (message, details) => console.log(message, details)
-const worker = startJobWorker({ handlers: { ...notificationJobHandlers }, log })
+const worker = startJobWorker({ handlers: { ...notificationJobHandlers, ...achievementJobHandlers }, log })
 const telegramConfigured = Boolean(env.telegram.clientId && env.telegram.botToken)
 const sender = telegramConfigured
    ? startTelegramSender({ limiter: new TelegramRateLimiter({ perSecond: 20, perChatIntervalMs: 1000 }), log })
@@ -25,6 +27,14 @@ const scheduleRetention = () => scheduleNotificationRetentionService()
 scheduleRetention()
 const retentionTimer = setInterval(scheduleRetention, 3600000)
 retentionTimer.unref()
+// M13: the daily streak run (00:01), the weekly snapshot (Monday 00:05) and the monthly one (the
+// 1st, 00:10), Asia/Dushanbe. Checked at start and every 5 minutes; the period in each job key
+// queues it once, and a job becomes due at its time even when queued earlier.
+const scheduleAchievements = () => scheduleAchievementJobsService()
+   .catch((error) => log('achievement scheduling failed', { code: error.code }))
+scheduleAchievements()
+const achievementTimer = setInterval(scheduleAchievements, 300000)
+achievementTimer.unref()
 
 console.log('Job worker started', {
    workerId: worker.workerId,
@@ -35,6 +45,7 @@ console.log('Job worker started', {
 async function shutdown(signal) {
    console.log(`Received ${signal}; stopping the job worker`)
    clearInterval(retentionTimer)
+   clearInterval(achievementTimer)
    await Promise.all([worker.stop(), sender?.stop()])
    await pool.end()
 }

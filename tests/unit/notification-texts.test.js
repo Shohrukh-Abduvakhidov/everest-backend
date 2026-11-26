@@ -22,7 +22,7 @@ test('notification language: database tg and API tj both select Tajik; unknown f
 })
 
 test('every event has a title and a body in ru, tg and en', () => {
-   const params = { test: 'T', closesAt: '2030-01-15T10:00:00Z', group: 'G', title: 'A', count: 2, course: 'C', module: 'M' }
+   const params = { test: 'T', closesAt: '2030-01-15T10:00:00Z', group: 'G', title: 'A', count: 2, course: 'C', module: 'M', achievement: 'X' }
    for (const eventCode of notificationEventCodes) {
       const bodies = new Set()
       for (const languageCode of ['ru', 'tg', 'en']) {

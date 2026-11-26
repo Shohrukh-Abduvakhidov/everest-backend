@@ -20,6 +20,7 @@ import {
 import { effectiveMaxAttempts } from '../utils/attempt-policy.js'
 import { mergeRanges, normalizeRanges, totalSeconds } from '../utils/watched-ranges.js'
 import { watermarkLabel } from '../utils/watermark.js'
+import { enqueueAchievementEvaluation } from './achievement-service.js'
 import { attemptStateSummary, finalizeExpiredAttemptsForUserService } from './test-attempt-service.js'
 
 const maximumNoteLength = 10000
@@ -39,6 +40,8 @@ function dependencies(overrides = {}) {
       progressMinIntervalSeconds: overrides.progressMinIntervalSeconds ?? env.progressMinIntervalSeconds,
       requireAccess: overrides.requireAccess || requireModuleAccessService,
       attemptOverrides: overrides.attemptOverrides,
+      // M13: queues the achievement evaluation in the progress transaction.
+      enqueueAchievements: overrides.enqueueAchievements || enqueueAchievementEvaluation,
    }
 }
 
@@ -477,6 +480,7 @@ async function saveLessonProgressService(userId, courseIdValue, lessonIdValue, b
             occurredAt: now,
             metadata: { by: hasVideo ? 'video' : 'manual' },
          }, client)
+         await deps.enqueueAchievements(client, { userId: actorId, source: `lesson:${lesson.id}` })
       }
       return row
    })

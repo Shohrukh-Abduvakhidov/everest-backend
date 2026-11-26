@@ -1332,6 +1332,48 @@ Performance `breakdown`: `{ "assignments": 3, "submitted": 2, "missed": 1 }`.
 
 **Group page data:** `GET /groups` / `GET /groups/:id` — `name`, `memberCount`, `teacherCount`, `relationship { member, representative, teacher, administrator }`, `viewerRole` (`admin` | `teacher` | `representative` | `member`; one value, staff first). For «Мои группы»: a student gets their groups, a teacher the groups they teach, owner/admin every group (`status=active`, `q` for search, `limit`/`offset`); `GET /groups/:id/members` — `firstName`, `lastName`, `avatarAssetId`, `role` (`member` | `representative`), `joinedAt`; `GET /groups/:id/teachers` — names and `avatarAssetId`. No phone numbers anywhere.
 
+### Achievements (M13, 2026-11-26)
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/me/achievements` | The whole catalog, earned or not, with progress |
+| POST | `/me/achievements/seen` | `{ "codes": ["first_step"] }`: congratulations shown. CSRF with the cookie session |
+| GET | `/admin/users/:userId/achievements` | Same response, for staff who may open the student's progress (`/admin/users/:userId/analytics` scope; otherwise 404) |
+
+```json
+{
+  "data": {
+    "summary": { "earned": 2, "total": 17 },
+    "items": [
+      {
+        "code": "first_step", "family": "first_step", "category": "start", "tier": null, "icon": "first-step",
+        "translations": {
+          "ru": { "title": "Первый шаг", "description": "Завершите первый тест или тренировку" },
+          "tg": { "title": "Қадами аввал", "description": "Аввалин санҷиш ё машқро анҷом диҳед" },
+          "en": { "title": "First step", "description": "Finish your first test or training" }
+        },
+        "earnedAt": "2026-11-19T05:00:00.000Z", "seen": false, "progress": { "current": 1, "target": 1 }
+      },
+      { "code": "solver_bronze", "family": "solver", "category": "trainer", "tier": "bronze", "icon": "solver", "translations": { "...": "..." },
+        "earnedAt": null, "seen": false, "progress": { "current": 37, "target": 100 } },
+      { "code": "solver_silver", "family": "solver", "category": "trainer", "tier": "silver", "icon": "solver", "translations": { "...": "..." },
+        "earnedAt": null, "seen": false, "progress": { "current": 37, "target": 500 } }
+    ]
+  }
+}
+```
+
+- **Order** is the catalog order (`position`); show it as is. Tiers (`solver`, `streak`) come as three rows with the same `family`; the UI may group them into one card with three medals.
+- **`icon`** is a key, not a URL: `first-step`, `first-mock`, `solver`, `mistakes-fixed`, `subject-ready`, `perfect-score`, `first-try`, `on-time`, `mock-120`, `lessons`, `course-completed`, `streak`, `group-top3`. Map them to local icons; colour tiers bronze/silver/gold. Use `category` (`start | trainer | tests | mock | courses | streak | group`) for sections or filters.
+- **Texts:** `translations[lang]` with `lang` = `ru | tg | en` (the UI language `tj` is `tg` here).
+- **`progress`:** `{ current, target }` for count achievements (current never above target; an earned one shows target/target); `null` for yes/no ones (`subject_ready`, `perfect_score`, `mock_120`, `course_completed`, `group_top3`). For a streak, `current` is the running streak (0 once a day was missed).
+- **Congratulation:** show it for items with `earnedAt` and `seen: false` (e.g. on `/achievements` or after `/me/home`), then send their codes to `POST /me/achievements/seen` → `{ "updated": 1 }`. Repeating is harmless; unknown or not earned codes are ignored; 1–100 codes, `[a-z0-9_]` only, else `400 VALIDATION_ERROR`.
+- **When they arrive:** the server awards a few seconds after the attempt, regrade or lesson that earns them (`worker:jobs`); streaks from video watch time alone and «Тройка лучших» come after midnight / on Monday. Each new one also sends an in-app notification `achievement.unlocked` with `targetPath: "/achievements"`. Awards are never taken back.
+- **What does not count** (tell students in a tooltip): unfinished attempts, and attempts with fewer than half of the questions answered or less than 3 seconds per answered question.
+- **`GET /me/home`** adds `recentAchievements`: up to 3 latest earned items, newest first, same shape with `progress: null`.
+
+**Telegram:** `achievement.unlocked` is listed in `GET /me/notification-settings` → `events`, and is **off by default** for Telegram (`{ "telegram": false }` until the student turns it on). On the site it always appears.
+
 ### Notifications inbox (M14, 2026-11-21)
 
 In-app notifications of the signed-in user. They are written by `worker:jobs` a few seconds after the event (not inside the request that caused it), so poll the count (for example every 60 s and on window focus) instead of expecting it right after an action.
@@ -1388,13 +1430,14 @@ POST routes need CSRF (`X-CSRF-Token` + `Origin`) with the cookie session, like 
       "account.approved": { "telegram": true },
       "account.unblocked": { "telegram": true },
       "course.enrolled": { "telegram": true },
-      "module.opened": { "telegram": false }
+      "module.opened": { "telegram": false },
+      "achievement.unlocked": { "telegram": false }
     }
   }
 }
 ```
 
-- In-app notifications are always on; only Telegram can be switched, as a whole (`telegramEnabled`) or per event (`events`). Show the event list from the GET response; new events may appear.
+- In-app notifications are always on; only Telegram can be switched, as a whole (`telegramEnabled`) or per event (`events`). Show the event list from the GET response; new events may appear. Every event is on for Telegram until switched off, except `achievement.unlocked` (off until switched on).
 - `quietHours`: `HH:MM` in `timeZone` (the profile time zone); `end` earlier than `start` crosses midnight; `null` turns them off. During quiet hours Telegram messages wait; the in-app notification appears at once.
 - `messagingConnected: false`: Telegram copies are not sent. Offer to link Telegram (`POST /auth/telegram/link`). The switches are still saved.
 - PUT body examples: `{ "telegramEnabled": false }`, `{ "quietHours": null }`, `{ "quietHours": { "start": "23:00", "end": "07:00" } }`, `{ "events": { "group.announcement": { "telegram": false } } }`. Unknown fields, an event that is not listed, `start` equal to `end` or a non-`HH:MM` time → `400 VALIDATION_ERROR`.
@@ -1776,7 +1819,7 @@ The script prints pass or fail for the secrets, `CORS_ORIGINS`, `/health` and `/
 16. Staff progress views (M12 PR 3: group and course reports) and an activity API. The student home (`GET /me/home`), finished-attempt history (`GET /me/attempts`) and profile analytics (`GET /me/analytics`) exist. Notes and favorites have endpoints (see §2).
 17. Notifications and inbox, broadcast campaigns, Web Push.
 18. AI chat and budgets.
-19. Bonuses and achievements.
+19. Bonuses (achievements exist since M13, see "Achievements").
 20. Invitations.
 21. Platform settings.
 

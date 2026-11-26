@@ -189,6 +189,18 @@ async function findAttemptSource(attemptId, db = pool) {
    return result.rows[0] || null
 }
 
+// An award of an achievement (M13): who has it and the catalog titles per language.
+async function findAchievementAwardSource(userId, achievementId, db = pool) {
+   const result = await db.query(
+      `SELECT award.user_id, achievement.id, achievement.code, achievement.translations, achievement.is_active
+       FROM user_achievements AS award
+       JOIN achievements AS achievement ON achievement.id = award.achievement_id
+       WHERE award.user_id = $1 AND award.achievement_id = $2`,
+      [normalizeInternalId(String(userId)), normalizeInternalId(String(achievementId))],
+   )
+   return result.rows[0] || null
+}
+
 // ---------------------------------------------------------------- retention
 
 // One batch: notifications older than `days` and their deliveries (RESTRICT foreign key, so
@@ -287,6 +299,7 @@ async function isActiveAccount(userId, db = pool) {
 
 export {
    countUnread,
+   findAchievementAwardSource,
    deleteOldNotifications,
    filterUsersToRemind,
    findAnnouncementSource,

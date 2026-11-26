@@ -486,6 +486,25 @@ const schemas = {
       startedAt: dt(),
       submittedAt: dt(),
    }, ['attemptId', 'origin', 'title', 'testId', 'assignmentId', 'courseId', 'subjectId', 'subjectCode', 'attemptNumber', 'status', 'score', 'maxScore', 'percent', 'passPercent', 'passed', 'startedAt', 'submittedAt']),
+   Achievement: obj({
+      code: str({ examples: ['solver_bronze'] }),
+      family: str({ description: 'Tiers of one achievement share a family (solver, streak)' }),
+      category: enumOf(['start', 'trainer', 'tests', 'mock', 'courses', 'streak', 'group']),
+      tier: nullable(enumOf(['bronze', 'silver', 'gold'])),
+      icon: str({ description: 'Icon key for the frontend' }),
+      translations: obj({
+         ru: obj({ title: str(), description: str() }, ['title', 'description']),
+         tg: obj({ title: str(), description: str() }, ['title', 'description']),
+         en: obj({ title: str(), description: str() }, ['title', 'description']),
+      }, ['ru', 'tg', 'en']),
+      earnedAt: nullable(dt()),
+      seen: bool({ description: 'The congratulation was shown (POST /me/achievements/seen); false when not earned' }),
+      progress: nullable(obj({ current: int(), target: int() }, ['current', 'target'], { description: 'For count achievements; null for yes/no ones and in recentAchievements' })),
+   }, ['code', 'family', 'category', 'tier', 'icon', 'translations', 'earnedAt', 'seen', 'progress']),
+   AchievementList: obj({
+      summary: obj({ earned: int(), total: int() }, ['earned', 'total']),
+      items: arr(ref('Achievement'), { description: 'The whole active catalog by position; every tier is its own row' }),
+   }, ['summary', 'items']),
    StudentHome: obj({
       continueLesson: nullable(obj({
          courseId: id(), courseTitle: str(), moduleId: id(), lessonId: id(), title: str(),
@@ -511,6 +530,7 @@ const schemas = {
          totalWatchSeconds: int(),
       }, ['timeZone', 'days', 'totalWatchSeconds']),
       serverNow: dt(),
+      recentAchievements: arr(ref('Achievement'), { description: 'Up to 3 latest earned, newest first (GET /me/home only; progress null)' }),
    }, ['continueLesson', 'courses', 'tests', 'readiness', 'recentResults', 'week', 'serverNow']),
    TopicResult: obj({
       topicId: id(),
@@ -2133,6 +2153,12 @@ const routes = [
       response: page('attempts', ref('FinishedAttempt')),
       errors: { 400: ['VALIDATION_ERROR', 'INVALID_USER_ID'], 404: ['USER_NOT_FOUND'] },
    }],
+   ['get', '/admin/users/:userId/achievements', {
+      tag: 'Admin: progress', ...adminRead('progress.read'), summary: 'Achievements of one student, as the student sees them',
+      description: 'Same response as GET /me/achievements. Scope as GET /admin/users/{userId}/analytics (full or courses); no scope: 404.',
+      response: ref('AchievementList'),
+      errors: { 400: ['INVALID_USER_ID'], 404: ['USER_NOT_FOUND'] },
+   }],
    ['get', '/courses/:courseId/test-assignments', {
       tag: 'Learner tests', summary: 'My test assignments in a course, optionally for one lesson',
       query: [{ name: 'lessonId', schema: id() }],
@@ -2202,6 +2228,19 @@ const routes = [
       response: ref('StaffCapabilities'),
       errors: { 400: ['INVALID_USER_ID'], 403: ['ACCOUNT_NOT_ACTIVE'] },
    }],
+   ['get', '/me/achievements', {
+      tag: 'Achievements', summary: 'My achievements: the whole catalog, earned or not, with progress',
+      description: 'Awards are written by worker:jobs a few seconds after the attempt, regrade or lesson that earns them, and are never taken back. Only finished attempts count, and not ones with fewer than half of the questions answered or under 3 s per answered question.',
+      response: ref('AchievementList'),
+      errors: { 400: ['INVALID_USER_ID'], 403: ['ACCOUNT_NOT_ACTIVE'] },
+   }],
+   ['post', '/me/achievements/seen', {
+      tag: 'Achievements', summary: 'Mark congratulations shown',
+      description: 'codes: 1 to 100 achievement codes. Unknown, unearned or already seen codes are ignored; updated is how many became seen.',
+      body: body({ codes: arr(str(), { minItems: 1, maxItems: 100 }) }, ['codes']),
+      response: obj({ updated: int() }, ['updated']),
+      errors: { 400: ['VALIDATION_ERROR', 'INVALID_USER_ID'], 403: ['ACCOUNT_NOT_ACTIVE'] },
+   }],
    ['get', '/me/notifications', {
       tag: 'Notifications', summary: 'My in-app notifications, newest first',
       description: 'Own notifications only. Cursor paging: pass pagination.nextBefore as before for the next page. unread=true lists only unread ones. Notifications are written by worker:jobs a few seconds after the event.',
@@ -2229,7 +2268,7 @@ const routes = [
    }],
    ['get', '/me/notification-settings', {
       tag: 'Notifications', summary: 'My notification settings: Telegram switches and quiet hours',
-      description: 'In-app notifications are always on. Without saved settings: Telegram on for every event, quiet hours 22:00–08:00 in the profile time zone. Telegram copies are sent only while messagingConnected is true.',
+      description: 'In-app notifications are always on. Without saved settings: Telegram on for every event except achievement.unlocked (off until turned on), quiet hours 22:00–08:00 in the profile time zone. Telegram copies are sent only while messagingConnected is true.',
       response: ref('NotificationSettings'),
       errors: { 403: ['ACCOUNT_NOT_ACTIVE'], 404: ['PROFILE_NOT_FOUND'] },
    }],
