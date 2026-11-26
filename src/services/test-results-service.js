@@ -13,6 +13,7 @@ import {
 import { normalizeInternalId } from '../utils/internal-id.js'
 import { parsePagination, parseText, validateBody, validationError } from './course-service.js'
 import { completeTestLessonsService } from './lesson-completion-service.js'
+import { enqueueAchievementEvaluation } from './achievement-service.js'
 import { enqueueExtraAttempts, enqueueResultUpdated } from './notification-service.js'
 import { safeAttempt, safeQuestionBase } from './test-attempt-service.js'
 
@@ -217,6 +218,8 @@ async function regradeAttemptService(userId, testIdValue, attemptIdValue, body, 
          entityId: attemptId,
          metadata: { testId, previousScore: attempt.score, newScore },
       }, client)
+      // A regrade can earn an achievement (never take one back); one evaluation per regrade.
+      await enqueueAchievementEvaluation(client, { userId: attempt.user_id, source: `regrade:${auditEvent.id}` })
       // The student is told only when the score really changed (in-app only, D1).
       if (attempt.score === null || toHundredths(attempt.score) !== toHundredths(newScore)) {
          await enqueueResultUpdated(client, { attemptId, auditId: auditEvent.id })

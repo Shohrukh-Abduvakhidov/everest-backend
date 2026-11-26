@@ -5,7 +5,7 @@ import * as telegramDeliveryRepository from '../repositories/telegram-delivery-r
 import { withTransaction } from '../repositories/transaction-repository.js'
 import AppError from '../utils/app-error.js'
 import { normalizeInternalId } from '../utils/internal-id.js'
-import { telegramEventCodes } from '../utils/notification-texts.js'
+import { telegramDefaultEnabled, telegramEventCodes } from '../utils/notification-texts.js'
 import { formatTime, parseTime } from '../utils/quiet-hours.js'
 
 // D4/D5 (decisions.md 2026-11-21): in-app notifications are always on; the user controls only
@@ -88,7 +88,7 @@ async function readSettings(deps, userId, db) {
       timeZone: row.timezone,
       messagingConnected: row.messaging_connected,
       events: Object.fromEntries(telegramEventCodes.map((eventCode) => [
-         eventCode, { telegram: preferences.get(eventCode) ?? true },
+         eventCode, { telegram: preferences.get(eventCode) ?? telegramDefaultEnabled(eventCode) },
       ])),
    }
 }

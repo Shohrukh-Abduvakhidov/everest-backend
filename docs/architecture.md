@@ -363,13 +363,13 @@ The initial permission set exactly preserves account administration: `accounts.p
 | Taxonomy | subjects/sections/topics and translations | None | Planned (schema only) |
 | Question bank | banks/imports/errors/questions/options/matching/keys/topics/assets/duplicates | None | Planned (schema + immutability guards) |
 | Tests/attempts | tests/questions/assignments/attempts/attempt questions/answers/revisions | None | Planned (schema + constraints/guards) |
-| Analytics/ranking | activity events; attempt/progress source data; `group_ranking_settings` | Group ranking computed on read (`src/utils/ranking-metrics.js`), no snapshot table yet | M13 ranking built (2026-11-25); snapshots and achievements next |
+| Analytics/ranking | activity events; attempt/progress source data; `group_ranking_settings`, `group_ranking_snapshots` | Group ranking computed on read (`src/utils/ranking-metrics.js`); finished weeks/months stored by `worker:jobs` (`ranking.snapshot`) | M13 Done (ranking 2026-11-25, snapshots 2026-11-26) |
 | Notifications | settings/preferences/campaigns/notifications/deliveries | In-app inbox, Telegram delivery, settings, quiet hours, close-time reminders and 180-day retention (M14); `broadcast_campaigns` and `push_subscriptions` unused until after the launch | Done (M14) |
 | Telegram | identities, OIDC states, connections | Five routes, service/repository/providers | Done |
 | Web Push | `push_subscriptions`, deliveries | None; VAPID key unused | Planned |
 | AI | conversations/messages/policies/budgets/usage/requests/reservations/ledger/analyses | None; AI key unused | Planned (schema only) |
-| Bonuses/achievements | accounts/rules/transactions/offers/redemptions/credits/achievements | None | Planned (schema + append-only guard) |
-| Background jobs | `background_jobs` | `worker:jobs` with leases, retries and dead letter; first job type `notification.fanout` | Partial |
+| Bonuses/achievements | accounts/rules/transactions/offers/redemptions/credits/achievements | Achievements (M13, 2026-11-26): pure checks `src/utils/achievement-rules.js`, `src/services/achievement-service.js`, `src/repositories/stats/achievement-repository.js`, `achievements.evaluate` jobs; bonuses none | Achievements done; bonuses planned (schema + append-only guard) |
+| Background jobs | `background_jobs` | `worker:jobs` with leases, retries and dead letter; job types `notification.fanout`, `notification.retention`, `achievements.evaluate`, `achievements.assignment`, `achievements.streaks`, `ranking.snapshot` (scheduled by date keys) | Partial |
 | Idempotency | `idempotency_keys` plus domain unique keys | No generic service | Planned (schema support only) |
 | Platform settings | `platform_settings` | None | Planned (schema only) |
 

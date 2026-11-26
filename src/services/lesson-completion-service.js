@@ -3,6 +3,7 @@ import * as learnerLessonRepository from '../repositories/learner-lesson-reposit
 import * as attemptRepository from '../repositories/test-attempt-repository.js'
 import { scorePercent, toHundredths } from '../utils/attempt-grading.js'
 import { isFinished } from '../utils/attempt-policy.js'
+import { enqueueAchievementEvaluation } from './achievement-service.js'
 
 function dependencies(overrides = {}) {
    return {
@@ -104,6 +105,7 @@ async function completeMissedTestLessonsService({ lessonId = null, apply = true 
          occurredAt: item.completedAt,
          metadata: { by: 'test', attemptId: item.attemptId, recomputed: true },
       }, client)
+      await enqueueAchievementEvaluation(client, { userId: item.userId, source: `lesson:${item.lessonId}` })
       completed.push(item)
    }
    return completed

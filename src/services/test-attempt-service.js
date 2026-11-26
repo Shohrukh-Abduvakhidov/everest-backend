@@ -21,6 +21,7 @@ import {
 } from '../utils/attempt-policy.js'
 import { normalizeInternalId } from '../utils/internal-id.js'
 import { trainingSummary } from '../utils/trainer-training.js'
+import { enqueueAchievementEvaluation } from './achievement-service.js'
 import { parseCourseId, parseUserId, validateBody, validationError } from './course-service.js'
 import { completeTestLessonsService } from './lesson-completion-service.js'
 import { enqueueAttemptExpired } from './notification-service.js'
@@ -273,6 +274,8 @@ async function finalizeAttempt(deps, client, attempt, { status, submittedAt, act
    }, client)
    // In-app notice that the timer closed the attempt (D1); keyed by attempt, so once.
    if (status === 'expired') await enqueueAttemptExpired(client, { attemptId: attempt.id })
+   // M13 achievements: evaluated by worker:jobs once this transaction commits.
+   await enqueueAchievementEvaluation(client, { userId: attempt.user_id, source: `attempt:${attempt.id}` })
 }
 
 function expiredFinish(attempt, now) {

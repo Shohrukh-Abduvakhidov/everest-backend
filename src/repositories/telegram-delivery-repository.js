@@ -1,5 +1,6 @@
 import pool from '../configs/db.js'
 import { normalizeInternalId as normalizeId } from '../utils/internal-id.js'
+import { telegramOffByDefault } from '../utils/notification-texts.js'
 
 const normalizeInternalId = (value) => normalizeId(String(value))
 
@@ -18,7 +19,7 @@ async function findTelegramTargets(userIds, botId, eventCode, db = pool) {
    if (!userIds.length) return []
    const result = await db.query(
       `SELECT account.id AS user_id, connection.id AS connection_id, ${settingsColumns},
-          COALESCE(preference.enabled, TRUE) AS event_enabled
+          COALESCE(preference.enabled, NOT ($3 = ANY($4::text[]))) AS event_enabled
        FROM users AS account
        JOIN telegram_connections AS connection
          ON connection.user_id = account.id AND connection.bot_id = $2 AND connection.status = 'active'
@@ -31,7 +32,7 @@ async function findTelegramTargets(userIds, botId, eventCode, db = pool) {
             SELECT 1 FROM auth_identities AS identity
             WHERE identity.user_id = account.id AND identity.provider = 'telegram'
          )`,
-      [userIds.map(normalizeInternalId), botId, eventCode],
+      [userIds.map(normalizeInternalId), botId, eventCode, telegramOffByDefault],
    )
    return result.rows
 }
@@ -99,7 +100,7 @@ async function claimTelegramDeliveries({ limit, leaseSeconds, botId }, db = pool
           connection.chat_id, connection.status AS connection_status, connection.connected_at,
           notification.user_id, notification.event_code, notification.title, notification.body,
           notification.target_path, notification.dedupe_key, account.status AS account_status, ${settingsColumns},
-          COALESCE(preference.enabled, TRUE) AS event_enabled
+          COALESCE(preference.enabled, NOT (notification.event_code = ANY($4::text[]))) AS event_enabled
        FROM claimed
        JOIN telegram_connections AS connection ON connection.id = claimed.telegram_connection_id
        JOIN notifications AS notification ON notification.id = claimed.notification_id
@@ -110,7 +111,7 @@ async function claimTelegramDeliveries({ limit, leaseSeconds, botId }, db = pool
          ON preference.user_id = account.id AND preference.event_code = notification.event_code
          AND preference.channel = 'telegram'
        ORDER BY claimed.next_attempt_at, claimed.id`,
-      [limit, leaseSeconds, botId],
+      [limit, leaseSeconds, botId, telegramOffByDefault],
    )
    return result.rows
 }

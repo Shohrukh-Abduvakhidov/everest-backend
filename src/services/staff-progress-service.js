@@ -573,4 +573,5 @@ export {
    getGroupProgressService,
    getStaffStudentAnalyticsService,
    listStaffStudentAttemptsService,
+   requireStudentScope,
 }

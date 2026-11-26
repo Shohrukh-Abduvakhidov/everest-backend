@@ -1,5 +1,6 @@
 import express from 'express'
 
+import { getStaffStudentAchievementsController } from '../controllers/achievement-controller.js'
 import {
    approveUserController,
    blockUserController,
@@ -223,6 +224,7 @@ adminRouter.put(
 adminRouter.get('/courses/:courseId/progress', readProgressAuthorizationMiddleware, getCourseProgressController)
 adminRouter.get('/users/:userId/analytics', readProgressAuthorizationMiddleware, getStaffStudentAnalyticsController)
 adminRouter.get('/users/:userId/attempts', readProgressAuthorizationMiddleware, listStaffStudentAttemptsController)
+adminRouter.get('/users/:userId/achievements', readProgressAuthorizationMiddleware, getStaffStudentAchievementsController)
 adminRouter.get(
    '/tests/:testId/assignments/:assignmentId/results',
    readTestResultsAuthorizationMiddleware,

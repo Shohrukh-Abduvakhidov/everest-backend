@@ -6,6 +6,7 @@ import { scorePercent } from '../utils/attempt-grading.js'
 import { attemptPassed } from '../utils/attempt-policy.js'
 import { normalizeInternalId } from '../utils/internal-id.js'
 import { classifyTopics, firstAttemptStats, topicRules } from '../utils/learning-metrics.js'
+import { listRecentAchievementsService } from './achievement-service.js'
 import { parseUserId, validationError } from './course-service.js'
 import { listLearnerCoursesService } from './learner-course-service.js'
 import {
@@ -35,6 +36,7 @@ function dependencies(overrides = {}) {
       courses: overrides.courses,
       trainer: overrides.trainer,
       attemptServices: overrides.attemptServices,
+      achievements: overrides.achievements,
    }
 }
 
@@ -254,7 +256,12 @@ async function getStudentHomeService(userId, overrides) {
    const deps = dependencies(overrides)
    const actorId = parseUserId(userId)
    await requireActiveAccount(deps, actorId)
-   return buildStudentHome(deps, actorId, deps.clock())
+   const [home, recentAchievements] = await Promise.all([
+      buildStudentHome(deps, actorId, deps.clock()),
+      listRecentAchievementsService(actorId, deps.achievements),
+   ])
+   // M13: the last three achievements earned (newest first), same item shape as /me/achievements.
+   return { ...home, recentAchievements }
 }
 
 function parseAttemptsQuery(query) {

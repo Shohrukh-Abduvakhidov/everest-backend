@@ -966,6 +966,40 @@ Formula and decisions: `docs/decisions.md` → 2026-11-25. Pure functions in `sr
 - `GET /api/v1/admin/groups/:groupId/ranking-settings` and `PUT` with `{ visibility: "full" | "top10_self" | "staff_only" }` (same scope; `PUT` is CSRF-protected, rate limited and audited as `group.ranking_settings_updated`). Returns `{ groupId, visibility, isDefault, updatedBy, updatedAt }`; without a saved row `visibility` is `top10_self` and `isDefault` is `true`.
 - Index: `test_assignments_group_ranking_idx (group_id, closes_at) WHERE counts_for_group_ranking`. Migration `20261125010000000_add-group-ranking` (also creates `group_ranking_settings`); `down` drops both.
 
+- **Snapshots (2026-11-26):** finished weeks and months are stored in `group_ranking_snapshots` by `worker:jobs` (below). The routes above still compute every period on request; the snapshots feed the «Тройка лучших» achievement and keep the places of past periods fixed.
+
+## Achievements and ranking snapshots (M13, 2026-11-26)
+
+Decisions: `docs/decisions.md` → 2026-11-26. Pure checks in `src/utils/achievement-rules.js`, facts in `src/repositories/stats/achievement-repository.js`, flow in `src/services/achievement-service.js`. Migration `20261126010000000_add-achievements`.
+
+- `GET /api/v1/me/achievements` (own data; inactive account `403 ACCOUNT_NOT_ACTIVE`) → `{ summary { earned, total }, items[] }`. `items` is the whole active catalog by `position`, every tier a separate row: `{ code, family, category, tier, icon, translations { ru, tg, en: { title, description } }, earnedAt | null, seen, progress { current, target } | null }`. `progress` is given for count achievements (capped at `target`; target/target once earned), `null` for yes/no ones.
+- `POST /api/v1/me/achievements/seen` `{ codes: [] }` (CSRF): 1–100 codes matching `[a-z0-9_]{1,64}`, else `400 VALIDATION_ERROR`. Sets `seen_at` of earned, unseen ones → `{ updated }`. Unknown or unearned codes are ignored; a repeat updates 0.
+- `GET /api/v1/me/home` adds `recentAchievements`: up to 3 latest awards (newest `awarded_at` first), the item shape with `progress: null`.
+- `GET /api/v1/admin/users/:userId/achievements` (`progress.read`): the `/me/achievements` response for staff in the `/admin/users/:userId/analytics` scope (owner/admin; a teacher of the student's group or course with `canViewResults`; course-limited teachers included). Outside it `404 USER_NOT_FOUND`.
+- **Catalog** (`achievements`, thresholds in `criteria`, editable without code; `is_active = false` hides a row):
+
+| code | criteria |
+|---|---|
+| `first_step` | a counted finished attempt of any origin |
+| `first_mock` | a counted finished mock exam |
+| `solver_bronze/silver/gold` | 100 / 500 / 1000 different trainer questions solved with full marks (first solve, the activity-board rule) |
+| `mistakes_fixed` | 50 questions answered with less than full marks in a training or mock exam (rule of 2026-11-22) and later answered with full marks there |
+| `subject_ready` | readiness D3 of one subject ≥ 85 % over the last `TRAINER_READINESS_WINDOW` (5) standard trainings, with ≥ 30 questions in them |
+| `perfect_score` | 100 % in an authored or standalone test of ≥ 10 questions |
+| `first_try_5` | 5 different authored/standalone tests passed (`passPercent` of the attempt) on attempt 1 |
+| `on_time_5` | 5 group assignments in a row (by `closes_at`) handed in before `closes_at` |
+| `mock_120` | a mock exam with ≥ 120 of 160 |
+| `lessons_25` | 25 completed lessons |
+| `course_completed` | every published lesson of published modules of a course with a current enrollment completed |
+| `streak_bronze/silver/gold` | 3 / 7 / 30 consecutive local days (profile time zone) with activity |
+| `group_top3` | place ≤ 3 in a weekly snapshot (any board) of a group with ≥ 5 participants, score > 0; shared places count |
+
+- **Counted attempt:** finished (`graded`/`expired`), origin filtered explicitly per check, at least one and at least half of the questions answered, ≥ 3 s per answered question.
+- **Evaluation:** job `achievements.evaluate` (key `achievements.evaluate:<userId>:<source>`) queued in the same transaction as an attempt finish (`attempt:<id>`), a regrade (`regrade:<auditId>`), a lesson completion by video/manual/test link (`lesson:<id>`). A group assignment queues `achievements.assignment` at its `closes_at` and, when `closes_at` changes, also at once; it evaluates the members with a finished attempt. Each check replays the whole history, so the award time is when the history reached it. Awards: `INSERT ... ON CONFLICT DO NOTHING`; each new one queues `achievement.unlocked` (in-app always, `targetPath: /achievements`; Telegram off by default). Awards are never revoked.
+- **Scheduled (`worker:jobs`, checked every 5 min, Asia/Dushanbe, one job per period key):** `achievements.streaks:<date>` at 00:01 (users with activity since the previous day); `ranking.snapshot:week:<monday>` on Monday 00:05; `ranking.snapshot:month:<first>` on the 1st at 00:10. A snapshot writes every group with an active member, both boards, only for a finished period (`SNAPSHOT_PERIOD_NOT_FINISHED` otherwise), `ON CONFLICT DO NOTHING` (a repeat writes nothing); the weekly one queues the `group_top3` candidates.
+- **`group_ranking_snapshots`** `(group_id, board, period_kind week|month, period_start DATE local, user_id, rank, score, details { formulaVersion, breakdown, onTime, lastCountedAt }, computed_at)`, PK on group/board/period/user; participants without a place have `rank` and `score` `null`.
+- **Backfill:** `npm run backfill:achievements` — `--dry-run` (default, READ ONLY), `--apply` (one transaction per learner), `--notify` (with `--apply`; without it no notifications and `seen_at = now`), `--user <id>`.
+
 ## My staff rights (2026-11-20)
 
 - `GET /api/v1/me/staff-capabilities`: read-only, own data only (the user id comes from the session; query parameters are ignored). For the frontend to decide which staff screens to open; every staff route still checks permission and scope itself.
@@ -1013,7 +1047,7 @@ Only active accounts receive notifications. The text is rendered in `user_profil
    - the master switch and the event switch are on.
 - The message is plain text: title, body and the link `APP_URL + targetPath`. Rules are in decisions.md (2026-11-21, M14 PR 2).
 - `GET /api/v1/me/notification-settings` → `{ telegramEnabled, quietHours: { start, end } | null, timeZone, messagingConnected, events: { "<eventCode>": { telegram } } }`.
-   - Defaults without saved settings: Telegram on for every event, quiet hours `22:00`–`08:00` in the profile time zone.
+   - Defaults without saved settings: Telegram on for every event except `achievement.unlocked` (off until the student turns it on, 2026-11-26), quiet hours `22:00`–`08:00` in the profile time zone.
 - `PUT /api/v1/me/notification-settings`: partial body with any of `telegramEnabled`, `quietHours` (`{ start, end }` as `HH:MM`, different; `null` = off) and `events`. Returns the full settings.
    - Errors: `400 VALIDATION_ERROR`, `401`, `403 ACCOUNT_NOT_ACTIVE` and CSRF errors for cookie requests.
    - Switches apply to messages already queued.

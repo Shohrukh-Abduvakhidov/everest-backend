@@ -1,10 +1,17 @@
 # EVEREST backend progress
 
-Updated: 2026-11-25. M13 in progress: branch `feat/m13-group-ranking` (group ranking) open for review, not deployed. Deployed 2026-11-25: backend up to PR #79, frontend up to everestlc #66. Previously: M14 Done (PR 3 #73).
+Updated: 2026-11-26. M13 Done with branch `feat/m13-achievements-snapshots` (achievements and ranking snapshots, open for review, not deployed); the ranking PR is merged (#80), not deployed. Deployed 2026-11-25: backend up to PR #79, frontend up to everestlc #66. Previously: M14 Done (PR 3 #73).
 
 ## Current increment
 
 M12 is Done: PR 3 (staff progress views, #64) and the 2026-11-20 follow-ups (#65 time zone cache, #66 `GET /me/staff-capabilities`, #67 cosmetic question text rules) are merged into main. Deployed on the temporary VPS on 2026-11-19: backend up to PR #62 (M12 PR 1 and PR 2, the question text repair applied to 2 rows, refresh resilience), frontend up to PR #47. Not deployed yet: PRs #63 to #67 (no migration, no new env variable). `fix-question-text.js --apply` with the new cosmetic rules has not been run on any database. Next milestone: M13 (group ranking), which waits for the owner to approve the formula.
+
+## 2026-11-26 — M13 achievements and ranking snapshots (`feat/m13-achievements-snapshots`)
+
+- **What:** migration `20261126010000000_add-achievements` (`achievements` + family/category/tier/translations/icon/position and the 17-row catalog, `user_achievements.metadata/seen_at`, `group_ranking_snapshots`); pure checks `src/utils/achievement-rules.js`; `src/services/achievement-service.js` with the job handlers `achievements.evaluate`, `achievements.assignment`, `achievements.streaks`, `ranking.snapshot` and the schedule in `scripts/job-worker.js`; evaluation queued in the transaction of an attempt finish, regrade, lesson completion (video/manual, missed test-lesson completion) and assignment close-time set/move; `achievement.unlocked` (in-app, Telegram off by default: `telegramDefault` flag, settings and sender SQL); `GET /me/achievements`, `POST /me/achievements/seen`, `recentAchievements` on `/me/home`, `GET /admin/users/:userId/achievements`; `npm run backfill:achievements`; OpenAPI. Decisions 2026-11-26.
+- **Tests:** new `tests/unit/achievement-rules.test.js` (15) and `tests/integration/achievements.test.js` (10 subtests); `notification-texts` test given the new parameter. `npm test` (disposable database): first run 688 tests, 687 passed, 1 failed (`tests/unit/video-player.test.js`: the fake transaction client had no `query` for the new lesson-completion job; fixed by an `enqueueAchievements` dependency, the test now asserts the queued `lesson:3`); second run 688/688 passed, exit 0. `test:migrations` 45/45/44/45. `scripts/verify-database.js` counts brought up to date (97 tables, 802 columns, 185 FKs, 361 indexes, 45 migrations; seeds 93 role permissions and 16 teacher grants, checked on a fresh database) → valid on local `everest_db`.
+- **Local `everest_db`:** `migrate:up` applied `20261126010000000`. `backfill:achievements` dry run: 1 learner checked, 2 awards would be written (user 2240: `first_step` 2026-11-05T16:27:59Z, `streak_bronze` 2026-11-14T14:44:01Z). `--apply` not run anywhere.
+- **Not done:** frontend; the server; a read API for past snapshots; catching up periods missed while `worker:jobs` was down longer than a week/month.
 
 ## 2026-11-25 — M13 group ranking (`feat/m13-group-ranking`)
 

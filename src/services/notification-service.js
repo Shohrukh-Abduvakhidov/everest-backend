@@ -215,6 +215,16 @@ function enqueueModuleOpened(client, { grantId, auditId, beginsAt }, overrides) 
    }, overrides)
 }
 
+// A new achievement (M13). Keyed by user and achievement: an award exists once, so the
+// notification does too.
+function enqueueAchievementUnlocked(client, { userId, achievementId }, overrides) {
+   return enqueueFanout(client, {
+      event: 'achievement.unlocked',
+      payload: { userId: id(userId), achievementId: id(achievementId) },
+      dedupeKey: `achievement.unlocked:${id(userId)}:${id(achievementId)}`,
+   }, overrides)
+}
+
 // ---------------------------------------------------------------- fanout resolvers
 
 // Each resolver re-checks the source now and returns the notifications to write (one entry per
@@ -354,6 +364,20 @@ const resolvers = {
          params: { test: attempt.test_title },
          targetPath: attemptResultPath(attempt),
          dedupeKey: `attempt.expired:${attempt.id}`,
+      }]
+   },
+
+   async 'achievement.unlocked'(repository, payload, db) {
+      const award = await repository.findAchievementAwardSource(payload.userId, payload.achievementId, db)
+      if (!award || !award.is_active) return []
+      const titles = Object.fromEntries(Object.entries(award.translations ?? {})
+         .map(([language, text]) => [language, text?.title ?? award.code]))
+      return [{
+         eventCode: 'achievement.unlocked',
+         userIds: [award.user_id],
+         params: { achievement: Object.keys(titles).length ? titles : { ru: award.code } },
+         targetPath: '/achievements',
+         dedupeKey: `achievement.unlocked:${award.id}`,
       }]
    },
 
@@ -554,6 +578,7 @@ export {
    createNotificationJobHandlers,
    countUnreadNotificationsService,
    enqueueAccountEvent,
+   enqueueAchievementUnlocked,
    enqueueAssignmentCloseEvents,
    enqueueAttemptExpired,
    enqueueResultUpdated,

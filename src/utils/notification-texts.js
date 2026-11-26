@@ -99,6 +99,16 @@ const templates = {
          en: (p) => `Time is up: your attempt at “${p.test}” was submitted.`,
       },
    },
+   // M13 (2026-11-26). On the site always; on Telegram only when the student turns it on.
+   'achievement.unlocked': {
+      telegramDefault: false,
+      title: { ru: 'Новое достижение', tg: 'Дастоварди нав', en: 'New achievement' },
+      body: {
+         ru: (p) => `Вы получили достижение «${p.achievement}».`,
+         tg: (p) => `Шумо дастоварди «${p.achievement}»-ро гирифтед.`,
+         en: (p) => `You earned the achievement “${p.achievement}”.`,
+      },
+   },
    'telegram.disconnected': {
       telegram: false,
       title: { ru: 'Telegram отключён', tg: 'Telegram ҷудо шуд', en: 'Telegram disconnected' },
@@ -115,6 +125,16 @@ const notificationEventCodes = Object.freeze(Object.keys(templates))
 const telegramEventCodes = Object.freeze(
    notificationEventCodes.filter((code) => templates[code].telegram !== false),
 )
+
+// Events whose Telegram copy is off until the student turns it on (no notification_preferences
+// row means this default).
+const telegramOffByDefault = Object.freeze(
+   telegramEventCodes.filter((code) => templates[code].telegramDefault === false),
+)
+
+function telegramDefaultEnabled(eventCode) {
+   return !telegramOffByDefault.includes(eventCode)
+}
 
 function resolveLanguage(languageCode) {
    return languageAliases[languageCode] || defaultLanguage
@@ -148,6 +168,8 @@ function shorten(value) {
 }
 
 // params: plain values; keys ending in "At" are dates and are formatted in the recipient's zone.
+// A value { ru, tg, en } is already translated: the recipient's language is taken (Russian when
+// that one is missing), e.g. an achievement title from the catalog.
 function renderNotification(eventCode, params, { languageCode, timeZone } = {}) {
    const template = templates[eventCode]
    if (!template) throw new Error(`Unknown notification event: ${eventCode}`)
@@ -155,6 +177,7 @@ function renderNotification(eventCode, params, { languageCode, timeZone } = {}) 
    const values = Object.fromEntries(Object.entries(params || {}).map(([key, value]) => {
       if (value === null || value === undefined) return [key, null]
       if (key.endsWith('At')) return [key, formatDateTime(value, timeZone)]
+      if (typeof value === 'object') return [key, shorten(value[language] ?? value[defaultLanguage] ?? '')]
       return [key, shorten(value)]
    }))
    return { title: template.title[language], body: template.body[language](values) }
@@ -185,6 +208,8 @@ export {
    notificationExpiresAt,
    renderNotification,
    resolveLanguage,
+   telegramDefaultEnabled,
    telegramEventCodes,
+   telegramOffByDefault,
    telegramMessageText,
 }

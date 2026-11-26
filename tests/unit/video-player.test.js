@@ -110,9 +110,14 @@ test('progress reports are throttled and complete only at 90 percent unique time
    const writes = []
    const watch = []
    const completions = []
+   const evaluations = []
    const transactionClient = { fake: true }
    const overrides = {
       progressMinIntervalSeconds: 10,
+      enqueueAchievements: async (db, job) => {
+         assert.equal(db, transactionClient)
+         evaluations.push(job.source)
+      },
       transaction: async (work) => work(transactionClient),
       activity: {
          addWatchSeconds: async (values, db) => {
@@ -162,4 +167,5 @@ test('progress reports are throttled and complete only at 90 percent unique time
    // Only the growth of unique watched time is recorded, and completion once.
    assert.deepEqual(watch, [10, 79, 1])
    assert.deepEqual(completions, ['lesson_completed:3'])
+   assert.deepEqual(evaluations, ['lesson:3'])
 })

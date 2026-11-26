@@ -5,16 +5,16 @@ import env from '../src/configs/env.js';
 const { Client } = pg;
 const client = new Client(env.database);
 
-// Catalog after migration 20261121010000000 (42 migrations). Update together with every migration.
+// Catalog after migration 20261126010000000 (45 migrations). Update together with every migration.
 const expected = {
-  tables: 95,
-  columns: 781,
-  foreignKeys: 181,
-  indexes: 354,
+  tables: 97,
+  columns: 802,
+  foreignKeys: 185,
+  indexes: 361,
   functions: 7,
   triggers: 11,
   roles: 4,
-  migrations: 42,
+  migrations: 45,
   identityColumns: 73,
 };
 
@@ -156,8 +156,8 @@ try {
     && remainingUuidColumns.rows.map((row) => `${row.table_name}.${row.column_name}`).join(',')
       === allowedUuidColumns.join(',')
     && authorizationSeeds.rows[0].permissions === 38
-    && authorizationSeeds.rows[0].role_permissions === 92
-    && authorizationSeeds.rows[0].teacher_grants === 15
+    && authorizationSeeds.rows[0].role_permissions === 93
+    && authorizationSeeds.rows[0].teacher_grants === 16
     && authorizationSeeds.rows[0].student_grants === 1
     && permissionConstraintCode === '23514'
     && generatedIdentity.type === 'bigint'
