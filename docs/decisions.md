@@ -15,6 +15,21 @@ Landing content moves from the frontend code to the database and the admin panel
 9. **Video providers:** YouTube and Vimeo by host and path, `file` = an https .mp4/.webm URL; YouTube without an uploaded thumbnail gets `hqdefault` (480×360).
 10. **Seed:** colours come from `subjectKey` (as `subjectVisual` in the app), so no colour column; chemistry/physics "for whom" fixed; "Student Platform"/"preview" are not in the seed (they live in frontend components); vacancies get `FULL_TIME` as a placeholder until the owner confirms.
 
+## 2026-11-28 — Domain everestlc.tj
+
+1. **Hosts.** `app.everestlc.tj` serves the student app, `api.everestlc.tj` the API and `files.everestlc.tj`
+   presigned S3 URLs. `everestlc.tj` sends a 301 to the app until the landing is deployed, and `www` sends a 301
+   to the apex. The sslip.io hosts keep working in parallel until the owner turns them off.
+2. **Auth cookies stay host-only** (no `COOKIE_DOMAIN`). The session is not visible to the landing or to future
+   subdomains, and a `Domain=.everestlc.tj` cookie would be rejected on the sslip host during the transition.
+   A shared domain is only for the landing's language cookie (frontend, next step).
+3. **Certificates use the webroot method**, so certbot never edits the shared nginx; renewal reloads nginx.
+   New hosts get their own `everestlc-*` files next to the untouched sslip files.
+4. **One files host for both app hosts.** `S3_PUBLIC_ENDPOINT` is a single value, so the sslip app also gets URLs
+   on `files.everestlc.tj`. Both app origins are in the bucket CORS.
+5. **Telegram login moves to `app.everestlc.tj` only.** There is one redirect URI, and the state cookie is
+   host-bound. Password login works on both hosts.
+
 ## 2026-11-26 — M13: achievements and ranking snapshots
 
 The owner fixed the catalog (17 rows: `first_step`, `first_mock`, `solver` ×3, `mistakes_fixed`, `subject_ready`, `perfect_score`, `first_try_5`, `on_time_5`, `mock_120`, `lessons_25`, `course_completed`, `streak` ×3, `group_top3`), the tables, the evaluation through `background_jobs`, the schedule, the `achievement.unlocked` notification (Telegram off by default), the API and the backfill script; achievements move from M16 to M13. Rules as built: `docs/api.md` → "Achievements and ranking snapshots". Decided while building it unattended (please review):

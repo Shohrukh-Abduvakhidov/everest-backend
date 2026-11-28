@@ -54,19 +54,19 @@ compose project "everest": db · backend · worker-attempts · worker-jobs · wo
 4. `deploy/scripts/deploy.sh all`, then
    `docker compose -p everest -f deploy/docker-compose.prod.yml up -d s3` and
    `docker compose -p everest -f deploy/docker-compose.prod.yml run --rm storage-configure`.
-5. Install the nginx examples as separate `sites-available/everest-*` files (procedure below), then
-   `sudo certbot --nginx -d <app host> -d <files host>`.
+5. Install the nginx examples as separate `sites-available/everest-*` files (procedure below), then issue
+   certificates. The current server uses the webroot method described in "Domains" → "Certificates".
 6. Backups: copy `deploy/backup.env.example` to `/etc/everest/backup.env` (600) and add cron entries:
    `30 22 * * * /opt/everest/backend/deploy/scripts/backup-db.sh` and
    `0 23 * * 0 /opt/everest/backend/deploy/scripts/restore-check.sh`.
 
 ### Changing shared nginx safely
 
-The host nginx also serves other sites. Only touch `everest-*` files:
+The host nginx also serves other sites. Only touch `everest-*` and `everestlc-*` files:
 
 1. `sudo tar czf /var/backups/nginx-$(date +%Y%m%d-%H%M%S).tar.gz /etc/nginx`
 2. Record `curl -s -o /dev/null -w '%{http_code}'` for every site on the host.
-3. Edit `sites-available/everest-*`, `sudo nginx -t`, then `sudo systemctl reload nginx` (never restart).
+3. Edit `sites-available/everest-*` or `everestlc-*`, `sudo nginx -t`, then `sudo systemctl reload nginx` (never restart).
 4. Repeat the status check; the other sites must answer exactly as before.
 
 ## Deploying
@@ -130,6 +130,8 @@ Backend variables are validated in `src/configs/env.js`; the full list with defa
 | `APP_URL_MARKETING` | Frontend build time: landing URL used in links (the app URL while there is no landing) |
 | `TELEGRAM_*` | Telegram login; empty keeps it disabled |
 | `APP_URL` | Backend: student app root used for links in Telegram notifications (`https://app.<host>`, no trailing slash). Validated at start: an invalid value stops the backend and the workers. Without it Telegram messages are sent without a link |
+| `API_PUBLIC_URL` | Backend: public origin of the API for absolute image URLs of the marketing site (`https://api.everestlc.tj`); see "Marketing site module" |
+| `SITE_REVALIDATE_URL`, `SITE_REVALIDATE_SECRET` | Backend: revalidation webhook of the landing; empty = no webhook, see "Marketing site module" |
 | `JOB_WORKER_INTERVAL_MS`, `JOB_LEASE_SECONDS` | `worker:jobs` idle poll (5000) and job lease (60 s, renewed while a job runs) |
 
 `API_ORIGIN` for the frontend is fixed to `http://backend:4100` in compose and does not depend on the host.
@@ -166,27 +168,235 @@ Backend variables are validated in `src/configs/env.js`; the full list with defa
 - **Changing the bot:** a new `TELEGRAM_CLIENT_ID` stops deliveries to connections of the old bot. Users link Telegram again.
 - **Not in M14:** Web Push and broadcast campaigns (after the launch).
 
-## Moving to the final domain
+## Domains (everestlc.tj)
 
-Cookies have no `Domain` attribute, so they belong to the host that set them: after a host change every
-user signs in again. Presigned URLs live 15 minutes and the database stores object keys, not URLs.
+Moved on 2026-11-28. The sslip.io hosts still answer in parallel during the transition.
 
-| What | Change |
+| Host | Host nginx file | Target |
+|---|---|---|
+| `app.everestlc.tj` | `everestlc-app` | `/api/v1/*` → `127.0.0.1:4100`, rest → `127.0.0.1:3100` |
+| `api.everestlc.tj` | `everestlc-api` | `127.0.0.1:4100` |
+| `files.everestlc.tj` | `everestlc-files` | `127.0.0.1:8333` (SeaweedFS S3, `Host` passed unchanged) |
+| `everestlc.tj` | `everestlc-site` | 301 → `https://app.everestlc.tj$request_uri` until the landing is deployed |
+| `www.everestlc.tj` | `everestlc-site` | 301 → `https://everestlc.tj$request_uri` |
+| `app.`, `api.`, `files.51-83-197-15.sslip.io` | `everest-app`, `everest-api`, `everest-files` | Unchanged, kept for the transition |
+
+DNS: A records `@`, `www`, `app`, `api` and `files` point to `51.83.197.15`. They are managed at the registrar
+(navjucloud.tj); there is no Cloudflare and no AAAA record. `deploy/nginx/everestlc-site.conf` is the example for
+the apex and `www`. `everestlc-app`, `everestlc-api` and `everestlc-files` copy the sslip files, change
+`server_name` and the certificate paths, and add the port 80 block shown under "Certificates".
+
+### Environment on the domain
+
+| Variable | Value |
 |---|---|
-| DNS | A records for `app` and `files` → server IP |
-| `CORS_ORIGINS` | `https://app.<domain>` (keep the old host too during the transition) |
-| `STORAGE_CORS_ORIGINS` | `https://app.<domain>`, then `run --rm storage-configure` |
-| `S3_PUBLIC_ENDPOINT` | `https://files.<domain>` |
-| `TELEGRAM_REDIRECT_URI` | New callback URL; also update the domain in BotFather |
-| `STUDENT_HOSTS` | `app.<domain>` (runtime; recreate `frontend`) |
-| `APP_URL_STUDENT` | `https://app.<domain>` (build time; `deploy.sh frontend`) |
-| `APP_URL` | `https://app.<domain>` (backend runtime; links in Telegram notifications, for example `https://app.everestlc.tj`). Recreate `backend` and `worker-jobs` |
-| `APP_URL_MARKETING` | `https://<domain>` once the landing exists (build time) |
-| `API_ORIGIN` | No change (`http://backend:4100`) |
-| nginx | New `server_name` in `everest-app` and `everest-files`; optional 301 from the old hosts |
-| Certificates | `sudo certbot --nginx -d app.<domain> -d files.<domain>` |
+| `CORS_ORIGINS` | `https://app.everestlc.tj,https://everestlc.tj,https://app.51-83-197-15.sslip.io` |
+| `STORAGE_CORS_ORIGINS` | `https://app.everestlc.tj,https://app.51-83-197-15.sslip.io,https://api.51-83-197-15.sslip.io`, then `run --rm storage-configure` |
+| `S3_PUBLIC_ENDPOINT` | `https://files.everestlc.tj`. A single value: the sslip app also gets files URLs on this host, and its origin stays in the bucket CORS |
+| `STUDENT_HOSTS` | `app.everestlc.tj,app.51-83-197-15.sslip.io`. Read at runtime: recreate `frontend` |
+| `APP_URL` | `https://app.everestlc.tj`. Backend runtime: recreate `backend` and the workers |
+| `APP_URL_STUDENT`, `APP_URL_MARKETING` | `https://app.everestlc.tj`. Build time: `deploy.sh frontend`. `APP_URL_MARKETING` becomes `https://everestlc.tj` once the landing is live |
+| `TELEGRAM_REDIRECT_URI` | `https://app.everestlc.tj/auth/telegram/callback`; set the same URL in BotFather |
+| `API_ORIGIN` | No change (`http://backend:4100`): the browser calls `/api/v1` on the app host |
 
-Then recreate the services: `up -d backend worker-attempts worker-jobs worker-imports frontend`.
+- Auth cookies have no `Domain` attribute (decision of 2026-11-28). A cookie belongs to the host that set it,
+  so a session on `app.everestlc.tj` is separate from one on the sslip host, and users sign in again on the new host.
+- Telegram login works on one host only, `app.everestlc.tj`: there is one redirect URI, and the state cookie is
+  host-bound. Password login works on both hosts.
+- The database stores object keys, not URLs. A check on 2026-11-28 found no `sslip.io` in `everest_prod`, so no
+  data changes with the host.
+
+### Certificates
+
+There are four Let's Encrypt certificates: `app.everestlc.tj`, `api.everestlc.tj`, `files.everestlc.tj`, and
+`everestlc.tj` with `www.everestlc.tj`. They use the webroot method, so certbot never edits nginx files. Every
+`everestlc-*` site has the same port 80 block:
+
+```nginx
+server {
+    listen 80;
+    server_name app.everestlc.tj;
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/letsencrypt;
+        default_type text/plain;
+    }
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+```
+
+- `certbot.timer` renews them. Each renewal config has `authenticator = webroot` and `renew_hook = systemctl reload nginx`.
+- To check: `sudo certbot certificates` and `sudo certbot renew --dry-run --cert-name app.everestlc.tj`.
+- To reissue or add a name, the port 80 block must exist and nginx must be reloaded first. Run with `--dry-run`,
+  then run the same command without it:
+
+  ```bash
+  sudo certbot certonly --webroot -w /var/www/letsencrypt --cert-name app.everestlc.tj -d app.everestlc.tj \
+    --deploy-hook "systemctl reload nginx" --dry-run
+  ```
+
+- If a renewal fails, read `sudo journalctl -u certbot -n 50`. Then put a test file into
+  `/var/www/letsencrypt/.well-known/acme-challenge/` and check that `http://<host>/.well-known/acme-challenge/<file>`
+  serves it.
+
+### Checks after a change
+
+```bash
+curl -sI https://app.everestlc.tj/login | head -1                # 200
+curl -s https://api.everestlc.tj/api/v1/ready                    # ready
+curl -sI 'https://everestlc.tj/a?b=1' | grep -i location         # https://app.everestlc.tj/a?b=1
+curl -sI https://www.everestlc.tj/ | grep -i location            # https://everestlc.tj/
+curl -s -o /dev/null -D - -X OPTIONS -H 'Origin: https://app.everestlc.tj' \
+  -H 'Access-Control-Request-Method: PUT' https://files.everestlc.tj/everest-media/x | grep -i '^access-control-allow-origin'
+```
+
+Also check the co-hosted site's status codes (see "Changing shared nginx safely").
+
+### Rolling back to the sslip.io hosts
+
+The sslip nginx sites and certificates are untouched, so a rollback changes only the env. Backups taken before the move:
+`deploy/.env.bak-domain-20261128-161927` (env) and `/var/backups/nginx-20261128-161927.tar.gz` (nginx).
+
+```bash
+cd /opt/everest/backend/deploy
+cp -p .env .env.bak-before-rollback-$(date +%Y%m%d-%H%M%S)
+cp -p .env.bak-domain-20261128-161927 .env      # previous sslip values, same secrets
+docker compose -p everest -f docker-compose.prod.yml up -d --no-deps backend worker-attempts worker-jobs worker-imports
+docker compose -p everest -f docker-compose.prod.yml run --rm storage-configure
+cd .. && deploy/scripts/deploy.sh frontend --no-pull   # APP_URL_* are build time
+```
+
+A faster frontend rollback is the previous image, which was built with the sslip values:
+`docker tag everest-frontend:prev everest-frontend:current`, then
+`docker compose -p everest -f deploy/docker-compose.prod.yml up -d --no-deps frontend`. After the next frontend
+deploy, `:prev` holds the domain build instead, so use `deploy.sh` then.
+
+Then set the Telegram redirect URL in BotFather back to the sslip host. To take the new hosts offline as well
+(the certificates can stay):
+
+```bash
+sudo tar czf /var/backups/nginx-$(date +%Y%m%d-%H%M%S).tar.gz /etc/nginx
+sudo rm /etc/nginx/sites-enabled/everestlc-app /etc/nginx/sites-enabled/everestlc-api \
+  /etc/nginx/sites-enabled/everestlc-files /etc/nginx/sites-enabled/everestlc-site
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+### Turning the sslip.io hosts off (after the transition)
+
+1. Remove the sslip origins from `CORS_ORIGINS`, `STORAGE_CORS_ORIGINS` and `STUDENT_HOSTS`. Recreate the backend,
+   the workers and the frontend, then `run --rm storage-configure`.
+2. Delete `sites-enabled/everest-app`, `everest-api` and `everest-files`, or replace them with a 301 to the new hosts.
+3. Once nginx no longer references the sslip certificates, check `nginx -t`, then run
+   `sudo certbot delete --cert-name app.51-83-197-15.sslip.io` (and the same for `api.` and `files.`).
+
+### Landing on everestlc.tj (next step)
+
+1. In `everestlc-site`, replace the apex redirect with a proxy to the frontend (`127.0.0.1:3100`, same headers as `everestlc-app`).
+2. Set `APP_URL_MARKETING=https://everestlc.tj` and the landing's env: `COOKIE_DOMAIN=.everestlc.tj` (language
+   cookie), `REVALIDATE_SECRET` and `SITE_IMAGE_HOSTS=api.everestlc.tj` (images are served by the API host and redirect
+   to `files.everestlc.tj`). Turn the backend webhook on afterwards ("Marketing site module" → "Turning the webhook on").
+3. Rebuild the frontend.
+
+## Marketing site module (Site)
+
+Content for the landing on `everestlc.tj`: public reads at `/api/v1/public/site/*`, admin at `/api/v1/admin/site/*`
+(permission `site.manage`, owner and admin). Contract: `docs/site-api.md`. Deployed on 2026-11-28 (backend `dadc7cb`).
+
+### Environment
+
+| Variable | Value |
+|---|---|
+| `API_PUBLIC_URL` | `https://api.everestlc.tj`, no trailing slash. Host of the absolute image URLs in site responses (`/api/v1/public/site/images/{id}`). Without it the request's own host is used, which is the internal `http://backend:4100` when the landing calls the API server-side. Set |
+| `SITE_REVALIDATE_URL` | `https://everestlc.tj/api/revalidate`. **Not set yet**: set it only when the apex serves the landing (see "Turning the webhook on") |
+| `SITE_REVALIDATE_SECRET` | Shared secret, generated on the server; the landing reads the same value as `REVALIDATE_SECRET`. Not set yet |
+| `SITE_REVALIDATE_TIMEOUT_MS`, `SITE_CACHE_MAX_AGE_SECONDS` | Optional: webhook timeout (3000) and `Cache-Control` max-age of the public reads (60) |
+
+With the URL or the secret unset no webhook job is queued and saving content works as usual.
+
+### Deploy
+
+1. Back up `deploy/.env`, add the variables, then `deploy/scripts/deploy.sh backend` (pre-deploy dump, build, `migrate`,
+   restart of the API and the three workers; `worker-jobs` must restart to load the `site.revalidate` handler).
+2. Migrations: `20261128010000000_add-site-content` (10 `site_*` tables, permission `site.manage`) and
+   `20261128020000000_seed-site-content` (idempotent seed). Both are additive: the previous code ignores the tables.
+3. Seeded content: 4 courses `published` (biology, chemistry, physics, tajik; no covers); 3 vacancies and 3 events
+   `draft`; no videos; settings live with empty contacts, statistics filled but `stats_enabled=false`; texts in ru, tg, en.
+4. nginx: uploading a cover (JPEG or PNG up to 5 MB, raw body) needs its own location, because the app and API sites
+   cap bodies at 2 MB. Put it before `location /api/v1/ {` in `everestlc-app`, `everestlc-api`, `everest-app` and
+   `everest-api` (and in any new site that proxies the API):
+
+   ```nginx
+   location = /api/v1/admin/site/images {
+       client_max_body_size 6m;
+       proxy_read_timeout 120s;
+       proxy_pass http://127.0.0.1:4100;
+   }
+   ```
+
+   Then the usual procedure: backup, `nginx -t`, `reload`. Check without a session: a 4.5 MB body gets `401`, a 7 MB body
+   gets `413`, any other admin path still stops at 2 MB.
+
+### Checks
+
+```bash
+B=https://api.everestlc.tj/api/v1/public/site
+curl -s "$B/courses?lang=tj"                       # { "data": [ ... ] }, a bare array
+curl -s -o /dev/null -w '%{http_code}\n' "$B/courses/nope"      # 404
+curl -sI "$B/courses" | grep -i -E '^(etag|cache-control)'      # weak ETag, public, max-age=60
+curl -s -o /dev/null -w '%{http_code}\n' "$B/images/999999"     # 404 (a real id: 302 to files.everestlc.tj)
+```
+
+Lists contain published items only; vacancies past `validThrough` and events that are over are left out. The settings
+save can be exercised without writing anything by running `updateSiteSettingsService` inside a transaction that is
+rolled back (once with the webhook unset: no job in `background_jobs`; once with a URL: one job).
+
+### Turning the webhook on
+
+Do this after the landing is deployed and the apex proxies to the frontend (`everestlc-site`), not before: while the
+apex redirects to the app every save would queue a job that fails four times.
+
+1. `curl -s -o /dev/null -w '%{http_code}' -X POST https://everestlc.tj/api/revalidate` must answer `401` or `403`
+   (the route exists and checks the secret), not `301` or `404`.
+2. Generate the secret on the server, put the same value into the landing's `REVALIDATE_SECRET` and
+   `SITE_REVALIDATE_SECRET`, set `SITE_REVALIDATE_URL=https://everestlc.tj/api/revalidate`.
+3. Recreate the API and `worker-jobs` (the landing's side as its own deploy).
+4. Save something in the admin and watch the queue:
+   `SELECT status, attempts, last_error_code, count(*) FROM background_jobs WHERE job_type = 'site.revalidate' GROUP BY 1, 2, 3`.
+   The job is sent by `worker-jobs` within seconds. A failed attempt is retried after 30, 60 and 120 s; after four attempts
+   the job stays `failed`. A redirect in the answer counts as a failure (the secret is never passed on to another host).
+   Saving never waits for the webhook.
+
+Time passing is not an event: an event that is over disappears from the list on its own, so the landing needs a fallback
+revalidation interval besides the tags.
+
+### Rolling back the module
+
+- **Code only** (the tables stay, the previous code ignores them):
+  `docker tag everest-backend:prev everest-backend:current`, then
+  `docker compose -p everest -f deploy/docker-compose.prod.yml up -d --no-deps backend worker-attempts worker-jobs worker-imports`.
+  `deploy.sh backend` does this by itself when the health check fails. The public site routes then answer `404`.
+- **Migrations.** Do not run `migrate:down` on the server for this: the first migration drops all `site_*` tables with the
+  content the admins entered; the second one removes only the seeded rows. If the module must be removed anyway, restore the
+  pre-deploy dump (below) or take a dump of the `site_*` tables first.
+- **Restoring the dump.** The pre-deploy dump of this deploy is
+  `/var/backups/everest/db/predeploy/everest_prod-20261128T170616Z.dump` (kept 14 days). Restore into a new database, never
+  over the live one:
+
+  ```bash
+  cd /opt/everest/backend/deploy
+  docker compose -p everest -f docker-compose.prod.yml exec -T db sh -c 'createdb -U "$POSTGRES_USER" everest_restore'
+  docker compose -p everest -f docker-compose.prod.yml exec -T db sh -c \
+    'pg_restore -U "$POSTGRES_USER" -d everest_restore --no-owner --role="$EVEREST_APP_DB_USER" --no-privileges' \
+    < /var/backups/everest/db/predeploy/everest_prod-20261128T170616Z.dump
+  ```
+
+  Check the row counts, then switch `DB_NAME=everest_restore` in `deploy/.env`, recreate the API and the workers. Data
+  written after the dump (answers, progress) is lost; weigh that against fixing forward.
+- **nginx.** The four files before the change are in `/var/backups/site-images-nginx-170756/`; the whole tree is in
+  `/var/backups/nginx-20261128-170743.tar.gz`. Restore a file, `sudo nginx -t`, `sudo systemctl reload nginx`, then the
+  other site's status codes.
+- **Env.** `deploy/.env.bak-site-20261128-170602` is the file before `API_PUBLIC_URL`.
 
 ## Moving to a separate server
 
