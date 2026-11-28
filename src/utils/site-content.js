@@ -445,6 +445,18 @@ function dushanbeToday(now = new Date()) {
    return new Date(now.getTime() + dushanbeOffsetMs).toISOString().slice(0, 10)
 }
 
+// An event is over once it ended. Without an end it stays visible through its own Dushanbe day
+// (an open lesson at 10:00 is still listed that afternoon). startsAt/endsAt: Date or ISO string;
+// no start (a draft): never past.
+function isPastEvent({ startsAt, endsAt }, now = new Date()) {
+   if (!startsAt) return false
+   const dayMs = 24 * 3600 * 1000
+   const start = new Date(startsAt).getTime()
+   const endOfDay = Math.floor((start + dushanbeOffsetMs) / dayMs) * dayMs + dayMs - dushanbeOffsetMs
+   const end = endsAt ? new Date(endsAt).getTime() : endOfDay
+   return end <= now.getTime()
+}
+
 // A Tajik number may be given without the country code (9 digits) or with 992 and no plus;
 // the result is E.164 as everywhere in the project (normalizePhone). +992 needs 9 digits.
 function normalizeSitePhone(value, fieldName) {
@@ -622,6 +634,7 @@ export {
    eventTypes,
    fallbackLanguage,
    imageDimensions,
+   isPastEvent,
    isPlainObject,
    labelToApi,
    languages,

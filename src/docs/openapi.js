@@ -2459,7 +2459,7 @@ const sitePublicNames = { courses: 'PublicSiteCourse', vacancies: 'PublicSiteVac
 const siteSingular = { courses: 'course', vacancies: 'vacancy', events: 'event', videos: 'video' }
 const siteNotFound = { courses: 'SITE_COURSE_NOT_FOUND', vacancies: 'SITE_VACANCY_NOT_FOUND', events: 'SITE_EVENT_NOT_FOUND', videos: 'SITE_VIDEO_NOT_FOUND' }
 const siteLang = { name: 'lang', schema: enumOf(['ru', 'tj', 'en'], { default: 'ru' }), description: 'tj = Tajik (stored as tg). Each text falls back to Russian when empty.' }
-const sitePublicCache = 'Cache-Control: public, max-age=60, stale-while-revalidate=300; weak ETag, If-None-Match answers 304. Each object has lang: the requested language when the object has its own title in it, otherwise ru.'
+const sitePublicCache = 'Cache-Control: public, max-age=60, stale-while-revalidate=300; weak ETag, If-None-Match answers 304. Each object has lang: the requested language when the object has its own title in it, otherwise ru. A list is a bare array in data.'
 const objectLang = () => enumOf(apiLanguages, { description: 'Language the object is shown in after the fallback to ru' })
 const settingsTranslatable = {
    whatsappTemplate: 'template', whatsappCourseTemplate: 'template', address: 'text', whyEverest: 'steps', stages: 'steps',
@@ -2551,7 +2551,7 @@ const siteQuery = {
 const siteListNotes = {
    courses: '',
    vacancies: ' Vacancies past validThrough (Asia/Dushanbe date) are left out.',
-   events: '',
+   events: ' Events that are over are left out: endsAt passed, or, without endsAt, the end of the startsAt day in Asia/Dushanbe.',
    videos: ' Filter with placement and courseSlug.',
 }
 
@@ -2563,7 +2563,7 @@ routes.push(
    ...['courses', 'vacancies', 'events', 'videos'].map((collection) => ['get', `/public/site/${collection}`, {
       tag: 'Public site', auth: 'public', summary: `Published ${collection} in admin order`,
       description: `${sitePublicCache}${siteListNotes[collection]}`, query: siteQuery[collection],
-      response: obj({ lang: enumOf(apiLanguages, { description: 'The requested language' }), [collection]: arr(ref(sitePublicNames[collection])) }),
+      response: arr(ref(sitePublicNames[collection])),
    }]),
    ['get', '/public/site/courses/:slug', {
       tag: 'Public site', auth: 'public', summary: 'One published course by slug',

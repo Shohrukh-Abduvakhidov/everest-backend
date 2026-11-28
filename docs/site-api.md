@@ -6,7 +6,7 @@
 
 - База: `/api/v1`. Успех: `{ "data": ... }`, ошибка: `{ "error": { "code", "message", "details": [{ "field", "message" }] } }`. Идентификаторы — десятичные строки.
 - **Языки.** В публичных запросах `?lang=ru|tj|en` (по умолчанию `ru`; `tg` принимается как синоним `tj`; другое значение → `400 VALIDATION_ERROR`). Каждый переводимый текст берётся на запрошенном языке, а если там пусто — на русском (по каждому полю отдельно; пустой список тоже заменяется русским).
-- **`lang` у каждого объекта** — язык, в котором объект показан: запрошенный, если у объекта есть свой заголовок на этом языке, иначе `ru`. У настроек: запрошенный, если на нём заполнено хоть одно поле. У списков есть ещё верхний `lang` — это запрошенный язык.
+- **`lang` у каждого объекта** — язык, в котором объект показан: запрошенный, если у объекта есть свой заголовок на этом языке, иначе `ru`. У настроек: запрошенный, если на нём заполнено хоть одно поле. Списки (`courses`, `vacancies`, `events`, `videos`) — массив прямо в `data`, без обёртки; язык каждого элемента — его `lang`.
 - **Кэш.** Все `GET /public/site/*` (кроме картинок) отдают `Cache-Control: public, max-age=60, stale-while-revalidate=300` (max-age задаётся `SITE_CACHE_MAX_AGE_SECONDS`) и слабый `ETag`; `If-None-Match` → `304`.
 - **Публикация.** Публично видны только `published`. Неизвестный или черновой slug → `404 SITE_COURSE_NOT_FOUND`.
 - **Изображение (публично):** `{ "url", "width", "height", "alt" }`. `url` абсолютный, на хосте API (`API_PUBLIC_URL`, если не задан — origin запроса): `GET /api/v1/public/site/images/{id}` отвечает `302` на подписанную ссылку хранилища. Ссылка внутри 10-минутного окна одинаковая (кэшируется браузером и next/image), живёт ~70 минут. Ширина и высота читаются из файла при загрузке. `alt` — на языке запроса; если alt не задан, берётся заголовок объекта.
@@ -79,7 +79,7 @@
 
 ### GET /public/site/courses?lang=
 
-`{ "data": { "lang": "en", "courses": [ <курс>, ... ] } }` — опубликованные, в порядке админки (`order`). Объект курса — как в детальном ответе ниже.
+`{ "data": [ <курс>, ... ] }` — массив прямо в `data`: опубликованные, в порядке админки (`order`). Объект курса — как в детальном ответе ниже. Язык, на котором показан курс, — его собственное поле `lang`.
 
 ### GET /public/site/courses/:slug?lang=
 
@@ -119,19 +119,16 @@
 
 ```json
 {
-  "data": {
-    "lang": "ru",
-    "vacancies": [{
-      "id": "1", "lang": "ru", "slug": "biology-teacher", "employmentType": "FULL_TIME",
-      "title": "Преподаватель биологии", "location": "Душанбе",
-      "description": "Работа с мотивированными школьниками и подготовка к НЦТ.",
-      "requirements": ["Профильное образование", "Умение объяснять сложное"],
-      "conditions": ["Официальное оформление"],
-      "salary": { "min": 4000, "max": 6000, "currency": "TJS" },
-      "datePosted": "2026-11-28", "validThrough": "2027-01-31",
-      "order": 1, "updatedAt": "2026-11-28T10:10:24.338Z"
-    }]
-  }
+  "data": [{
+    "id": "1", "lang": "ru", "slug": "biology-teacher", "employmentType": "FULL_TIME",
+    "title": "Преподаватель биологии", "location": "Душанбе",
+    "description": "Работа с мотивированными школьниками и подготовка к НЦТ.",
+    "requirements": ["Профильное образование", "Умение объяснять сложное"],
+    "conditions": ["Официальное оформление"],
+    "salary": { "min": 4000, "max": 6000, "currency": "TJS" },
+    "datePosted": "2026-11-28", "validThrough": "2027-01-31",
+    "order": 1, "updatedAt": "2026-11-28T10:10:24.338Z"
+  }]
 }
 ```
 
@@ -141,41 +138,35 @@
 
 ```json
 {
-  "data": {
-    "lang": "ru",
-    "events": [{
-      "id": "2", "lang": "ru", "type": "mock-nct", "mode": "offline",
-      "title": "Пробный НЦТ",
-      "description": "Дата и условия диагностики знаний будут подтверждены центром.",
-      "location": "Душанбе, учебный центр EVEREST",
-      "startsAt": "2026-12-12T10:00:00+05:00", "endsAt": "2026-12-12T13:00:00+05:00",
-      "timeZone": "Asia/Dushanbe",
-      "image": { "url": "https://api.everestlc.tj/api/v1/public/site/images/1", "width": 1200, "height": 630, "alt": "Пробный НЦТ" },
-      "order": 2, "updatedAt": "2026-11-28T10:10:24.383Z"
-    }]
-  }
+  "data": [{
+    "id": "2", "lang": "ru", "type": "mock-nct", "mode": "offline",
+    "title": "Пробный НЦТ",
+    "description": "Дата и условия диагностики знаний будут подтверждены центром.",
+    "location": "Душанбе, учебный центр EVEREST",
+    "startsAt": "2026-12-12T10:00:00+05:00", "endsAt": "2026-12-12T13:00:00+05:00",
+    "timeZone": "Asia/Dushanbe",
+    "image": { "url": "https://api.everestlc.tj/api/v1/public/site/images/1", "width": 1200, "height": 630, "alt": "Пробный НЦТ" },
+    "order": 2, "updatedAt": "2026-11-28T10:10:24.383Z"
+  }]
 }
 ```
 
-`type`: `enrollment | mock-nct | open-lesson | other`; `mode`: `online | offline`. Время в ISO 8601 со смещением `+05:00`. У опубликованного события `startsAt` всегда есть; `endsAt`, `location`, `image` могут быть `null`. После сида все 3 события — черновики.
+`type`: `enrollment | mock-nct | open-lesson | other`; `mode`: `online | offline`. Время в ISO 8601 со смещением `+05:00`. У опубликованного события `startsAt` всегда есть; `endsAt`, `location`, `image` могут быть `null`. Прошедшие события в список не попадают: закончилось (`endsAt` прошёл) или, если `endsAt` нет, наступил следующий день по Душанбе после `startsAt`. Время уходит само, вебхук при этом не вызывается, поэтому лендингу нужен запасной интервал ревалидации. После сида все 3 события — черновики.
 
 ### GET /public/site/videos?lang=&placement=&courseSlug=
 
 ```json
 {
-  "data": {
-    "lang": "ru",
-    "videos": [{
-      "id": "1", "lang": "ru", "provider": "youtube", "videoId": "dQw4w9WgXcQ",
-      "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-      "embedUrl": "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ",
-      "title": "Как проходит занятие", "description": "Фрагмент урока биологии",
-      "thumbnail": { "url": "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg", "width": 480, "height": 360, "alt": "Как проходит занятие" },
-      "duration": "PT3M33S", "uploadDate": "2026-11-28",
-      "placement": "course", "courseSlug": "biology",
-      "order": 1, "updatedAt": "2026-11-28T10:10:24.420Z"
-    }]
-  }
+  "data": [{
+    "id": "1", "lang": "ru", "provider": "youtube", "videoId": "dQw4w9WgXcQ",
+    "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    "embedUrl": "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ",
+    "title": "Как проходит занятие", "description": "Фрагмент урока биологии",
+    "thumbnail": { "url": "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg", "width": 480, "height": 360, "alt": "Как проходит занятие" },
+    "duration": "PT3M33S", "uploadDate": "2026-11-28",
+    "placement": "course", "courseSlug": "biology",
+    "order": 1, "updatedAt": "2026-11-28T10:10:24.420Z"
+  }]
 }
 ```
 
@@ -474,7 +465,7 @@
 - `POST {SITE_REVALIDATE_URL}` (это `{MARKETING_ORIGIN}/api/revalidate`), заголовки `Content-Type: application/json` и `x-revalidate-secret: {SITE_REVALIDATE_SECRET}`, тело `{ "tags": [...] }`, таймаут 3 с (`SITE_REVALIDATE_TIMEOUT_MS`). Ответ 2xx — успех, всё остальное — ошибка.
 - Теги: всегда `site`, плюс `site:settings`, `site:courses` (+ `site:course:{slug}`, при смене slug — старый и новый), `site:vacancies`, `site:events`, `site:videos` (+ `site:course:{slug}` для видео курса).
 - Когда: изменение, удаление, снятие и публикация опубликованного элемента, перестановка в сущности с опубликованными элементами, любое сохранение настроек. Изменения черновиков вебхук не вызывают.
-- Как: задача `site.revalidate` кладётся в `background_jobs` в той же транзакции, что и сохранение; отправляет `worker:jobs` (обычно через несколько секунд). При ошибке — 3 повтора с бэкоффом 30 с, 60 с, 120 с, потом задача остаётся `failed`. Сохранение никогда не ждёт вебхук и не ломается из-за него.
+- Как: задача `site.revalidate` кладётся в `background_jobs` в той же транзакции, что и сохранение; отправляет `worker:jobs` (обычно через несколько секунд). При ошибке — 3 повтора с бэкоффом 30 с, 60 с, 120 с, потом задача остаётся `failed`. Сохранение никогда не ждёт вебхук и не ломается из-за него. Редирект в ответе (например, apex пока ведёт на app) не выполняется: 3xx считается ошибкой, и задача повторяется; секрет на другой хост не уходит.
 - Если `SITE_REVALIDATE_URL` или `SITE_REVALIDATE_SECRET` не заданы, задача не создаётся.
 
 Примеры тел, которые сделал прогон: `{"tags":["site","site:courses","site:course:biology"]}`, `{"tags":["site","site:vacancies"]}`, `{"tags":["site","site:videos","site:course:biology"]}`, `{"tags":["site","site:settings"]}`.
