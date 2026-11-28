@@ -6,6 +6,7 @@ import { createSiteJobHandlers } from '../../src/services/site-content-service.j
 import {
    adminTranslatables,
    imageDimensions,
+   isPastEvent,
    localize,
    mergeTranslations,
    normalizeSitePhone,
@@ -192,9 +193,37 @@ test('site: the revalidation webhook sends x-revalidate-secret, never throws, an
    const refused = createSiteRevalidationProvider({ url: 'https://site.test/x', secret: 's' }, async () => ({ ok: false, status: 500 }))
    assert.deepEqual(await refused.revalidate({ tags: ['site'] }), { ok: false, status: 500 })
 
+   // A redirect is not followed: it would turn the POST into a GET and pass the secret to another host.
+   assert.equal(request.init.redirect, 'manual')
+   const redirected = createSiteRevalidationProvider({ url: 'https://site.test/x', secret: 's' }, async () => ({ ok: false, status: 301 }))
+   assert.deepEqual(await redirected.revalidate({ tags: ['site'] }), { ok: false, status: 301 })
+   await assert.rejects(createSiteJobHandlers(redirected)['site.revalidate']({ tags: ['site'] }), (error) => error.code === 'SITE_REVALIDATE_FAILED')
+
    // The job handler turns a failure into an error, which worker:jobs retries with backoff.
    const failingJob = createSiteJobHandlers(refused)['site.revalidate']
    await assert.rejects(failingJob({ tags: ['site'] }), (error) => error.code === 'SITE_REVALIDATE_FAILED')
    await createSiteJobHandlers(ok)['site.revalidate']({ tags: ['site:settings'] })
    await createSiteJobHandlers(createSiteRevalidationProvider({ url: null, secret: null }))['site.revalidate']({ tags: ['site'] })
+})
+
+test('site: an event is past once it ended; without an end it stays through its Dushanbe day', () => {
+   const at = (value) => new Date(value)
+   // With an end: over from that moment.
+   const timed = { startsAt: '2026-12-05T10:00:00+05:00', endsAt: '2026-12-05T12:00:00+05:00' }
+   assert.equal(isPastEvent(timed, at('2026-12-05T11:59:59+05:00')), false)
+   assert.equal(isPastEvent(timed, at('2026-12-05T12:00:00+05:00')), true)
+   assert.equal(isPastEvent(timed, at('2026-12-06T09:00:00+05:00')), true)
+   // The start passed but the event is not over yet.
+   assert.equal(isPastEvent(timed, at('2026-12-05T11:00:00+05:00')), false)
+   // Without an end: until 00:00 of the next day in Asia/Dushanbe (UTC+5), whatever the server zone.
+   const open = { startsAt: '2026-12-05T10:00:00+05:00', endsAt: null }
+   assert.equal(isPastEvent(open, at('2026-12-05T23:59:59+05:00')), false)
+   assert.equal(isPastEvent(open, at('2026-12-06T00:00:00+05:00')), true)
+   assert.equal(isPastEvent(open, at('2026-12-04T10:00:00+05:00')), false)
+   // An evening start is judged by its Dushanbe day, not the UTC day: 23:30 +05:00 is 18:30 UTC.
+   const late = { startsAt: new Date('2026-12-05T18:30:00Z'), endsAt: null }
+   assert.equal(isPastEvent(late, at('2026-12-05T18:59:00Z')), false)
+   assert.equal(isPastEvent(late, at('2026-12-05T19:00:00Z')), true)
+   // pg returns Date objects; a draft without a start is never past.
+   assert.equal(isPastEvent({ startsAt: null, endsAt: null }, at('2030-01-01T00:00:00Z')), false)
 })

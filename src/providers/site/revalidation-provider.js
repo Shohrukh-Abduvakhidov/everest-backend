@@ -16,6 +16,9 @@ function createSiteRevalidationProvider(config = env.siteRevalidate, fetchImpl =
                   'x-revalidate-secret': config.secret,
                },
                body: JSON.stringify({ tags }),
+               // A redirect (for example the apex still sending visitors to the app) is a failure: following
+               // it would turn the POST into a GET and pass the secret header to another host.
+               redirect: 'manual',
                signal: AbortSignal.timeout(config.timeoutMs || 3000),
             })
             if (!response.ok) return { ok: false, status: response.status }

@@ -5,6 +5,7 @@ import AppError from '../utils/app-error.js'
 import { normalizeInternalId } from '../utils/internal-id.js'
 import {
    dushanbeToday,
+   isPastEvent,
    localize,
    localizeLabel,
    parseApiLanguage,
@@ -13,7 +14,6 @@ import {
    placeLocalized,
    requireCollection,
    resolvedLanguage,
-   dbToApi,
    timeZone,
    toDateString,
    toDushanbeIso,
@@ -118,13 +118,15 @@ function publicItemDto(collection, row, language, baseUrl) {
    }
 }
 
-const listKeys = Object.freeze({ courses: 'courses', vacancies: 'vacancies', events: 'events', videos: 'videos' })
-
-// Filters: vacancies past validThrough are hidden; videos by placement and courseSlug.
+// Filters: vacancies past validThrough and events that are over are hidden; videos by placement and
+// courseSlug.
 function publicFilter(collection, query, now) {
    if (collection === 'vacancies') {
       const today = dushanbeToday(now)
       return (row) => !row.valid_through || toDateString(row.valid_through) >= today
+   }
+   if (collection === 'events') {
+      return (row) => !isPastEvent({ startsAt: row.starts_at, endsAt: row.ends_at }, now)
    }
    if (collection === 'videos') {
       const placement = query.placement === undefined ? null : parseEnum(query.placement, videoPlacements, 'placement')
@@ -140,10 +142,8 @@ async function listPublicSiteItemsService(collectionValue, query = {}, overrides
    const language = parseApiLanguage(query.lang)
    const keep = publicFilter(collection, query, deps.clock())
    const rows = await deps.repository.listItems(collection, { status: 'published' })
-   return {
-      lang: dbToApi[language],
-      [listKeys[collection]]: rows.filter(keep).map((row) => publicItemDto(collection, row, language, deps.baseUrl)),
-   }
+   // A bare array: the language each object is shown in is its own `lang`.
+   return rows.filter(keep).map((row) => publicItemDto(collection, row, language, deps.baseUrl))
 }
 
 async function getPublicSiteCourseService(slugValue, query = {}, overrides) {

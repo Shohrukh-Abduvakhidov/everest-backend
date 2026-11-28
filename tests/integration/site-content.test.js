@@ -90,7 +90,7 @@ test('marketing site: public reads, admin-only writes, validation, webhook queue
    await t.test('the seed: 4 published courses, drafts hidden, stats off', async () => {
       const courses = await call('GET', '/public/site/courses')
       assert.equal(courses.status, 200)
-      const seeded = courses.body.data.courses.filter((course) => ['biology', 'chemistry', 'physics', 'tajik'].includes(course.slug))
+      const seeded = courses.body.data.filter((course) => ['biology', 'chemistry', 'physics', 'tajik'].includes(course.slug))
       assert.deepEqual(seeded.map((course) => course.slug), ['biology', 'chemistry', 'physics', 'tajik'])
       for (const course of seeded) {
          assert.equal(course.audience, 'Школьники и абитуриенты')
@@ -104,8 +104,8 @@ test('marketing site: public reads, admin-only writes, validation, webhook queue
       assert.equal(tajik.body.data.lang, 'tj')
       assert.ok(!JSON.stringify(courses.body).includes('Student Platform'))
       assert.ok(!JSON.stringify(courses.body).includes('AI-помощник'))
-      assert.deepEqual((await call('GET', '/public/site/vacancies')).body.data.vacancies, [])
-      assert.deepEqual((await call('GET', '/public/site/events')).body.data.events, [])
+      assert.deepEqual((await call('GET', '/public/site/vacancies')).body.data, [])
+      assert.deepEqual((await call('GET', '/public/site/events')).body.data, [])
       const settings = (await call('GET', '/public/site/settings')).body.data
       assert.deepEqual(settings.stats, { enabled: false, items: [] })
       assert.equal(settings.whyEverest.length, 6)
@@ -159,7 +159,7 @@ test('marketing site: public reads, admin-only writes, validation, webhook queue
       assert.equal((await siteJobs()).length, jobsBefore, 'a draft change queues no webhook')
 
       assert.equal((await call('GET', `/public/site/courses/${slug}`)).status, 404)
-      assert.ok(!(await call('GET', '/public/site/courses')).body.data.courses.some((course) => course.slug === slug))
+      assert.ok(!(await call('GET', '/public/site/courses')).body.data.some((course) => course.slug === slug))
 
       const published = await call('POST', `/admin/site/courses/${courseId}/publish`, { as: 'admin' })
       assert.equal(published.status, 200)
@@ -321,9 +321,31 @@ test('marketing site: public reads, admin-only writes, validation, webhook queue
       assert.equal(early.body.error.code, 'SITE_EVENT_START_REQUIRED')
       await call('PATCH', `/admin/site/events/${event.body.data.id}`, { as: 'admin', body: { startsAt: '2026-12-05T10:00', endsAt: '2026-12-05T12:00' } })
       assert.equal((await call('POST', `/admin/site/events/${event.body.data.id}/publish`, { as: 'admin' })).status, 200)
-      const publicEvent = (await call('GET', '/public/site/events')).body.data.events[0]
-      assert.equal(publicEvent.startsAt, '2026-12-05T10:00:00+05:00')
-      assert.equal(publicEvent.type, 'open-lesson')
+
+      // The public list hides events that are over. The clock is fixed so the dates never go stale:
+      // 2026-12-05 11:00 in Dushanbe (the first event is still on).
+      site.clock = () => new Date('2026-12-05T11:00:00+05:00')
+      try {
+         const publish = async (title, startsAt, endsAt) => {
+            const created = await call('POST', '/admin/site/events', { as: 'admin', body: { title: { ru: title }, startsAt, ...(endsAt ? { endsAt } : {}) } })
+            assert.equal(created.status, 201, JSON.stringify(created.body))
+            assert.equal((await call('POST', `/admin/site/events/${created.body.data.id}/publish`, { as: 'admin' })).status, 200)
+         }
+         await publish('Ended this morning', '2026-12-05T08:00', '2026-12-05T09:00')
+         await publish('Yesterday, no end', '2026-12-04T15:00')
+         await publish('Earlier today, no end', '2026-12-05T09:00')
+         await publish('Tomorrow', '2026-12-06T10:00')
+         const listed = await call('GET', '/public/site/events')
+         assert.ok(Array.isArray(listed.body.data), 'a list is a bare array in data')
+         assert.deepEqual(listed.body.data.map((item) => item.title), ['Открытый урок', 'Earlier today, no end', 'Tomorrow'])
+         assert.equal(listed.body.data[0].startsAt, '2026-12-05T10:00:00+05:00')
+         assert.equal(listed.body.data[0].type, 'open-lesson')
+         // Ten minutes after midnight (Dushanbe) the no-end event of "earlier today" is over too.
+         site.clock = () => new Date('2026-12-06T00:10:00+05:00')
+         assert.deepEqual((await call('GET', '/public/site/events')).body.data.map((item) => item.title), ['Tomorrow'])
+      } finally {
+         delete site.clock
+      }
 
       const vacancy = await call('POST', '/admin/site/vacancies', {
          as: 'admin',
@@ -331,7 +353,7 @@ test('marketing site: public reads, admin-only writes, validation, webhook queue
       })
       assert.equal(vacancy.status, 201, JSON.stringify(vacancy.body))
       await call('POST', `/admin/site/vacancies/${vacancy.body.data.id}/publish`, { as: 'admin' })
-      const publicVacancy = (await call('GET', '/public/site/vacancies')).body.data.vacancies.find((item) => item.slug === `math-${suffix}`)
+      const publicVacancy = (await call('GET', '/public/site/vacancies')).body.data.find((item) => item.slug === `math-${suffix}`)
       assert.match(publicVacancy.datePosted, /^\d{4}-\d{2}-\d{2}$/, 'filled on publish')
       assert.deepEqual(publicVacancy.salary, { min: 3000, max: null, currency: 'TJS' })
 
