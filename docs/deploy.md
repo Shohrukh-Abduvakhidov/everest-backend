@@ -130,6 +130,8 @@ Backend variables are validated in `src/configs/env.js`; the full list with defa
 | `APP_URL_MARKETING` | Frontend build time: landing URL used in links (the app URL while there is no landing) |
 | `TELEGRAM_*` | Telegram login; empty keeps it disabled |
 | `APP_URL` | Backend: student app root used for links in Telegram notifications (`https://app.<host>`, no trailing slash). Validated at start: an invalid value stops the backend and the workers. Without it Telegram messages are sent without a link |
+| `API_PUBLIC_URL` | Backend: public origin of the API for absolute image URLs of the marketing site (`https://api.everestlc.tj`); see "Marketing site module" |
+| `SITE_REVALIDATE_URL`, `SITE_REVALIDATE_SECRET` | Backend: revalidation webhook of the landing; empty = no webhook, see "Marketing site module" |
 | `JOB_WORKER_INTERVAL_MS`, `JOB_LEASE_SECONDS` | `worker:jobs` idle poll (5000) and job lease (60 s, renewed while a job runs) |
 
 `API_ORIGIN` for the frontend is fixed to `http://backend:4100` in compose and does not depend on the host.
@@ -292,8 +294,109 @@ sudo nginx -t && sudo systemctl reload nginx
 
 1. In `everestlc-site`, replace the apex redirect with a proxy to the frontend (`127.0.0.1:3100`, same headers as `everestlc-app`).
 2. Set `APP_URL_MARKETING=https://everestlc.tj` and the landing's env: `COOKIE_DOMAIN=.everestlc.tj` (language
-   cookie), `REVALIDATE_SECRET` and `SITE_IMAGE_HOSTS`.
+   cookie), `REVALIDATE_SECRET` and `SITE_IMAGE_HOSTS=api.everestlc.tj` (images are served by the API host and redirect
+   to `files.everestlc.tj`). Turn the backend webhook on afterwards ("Marketing site module" → "Turning the webhook on").
 3. Rebuild the frontend.
+
+## Marketing site module (Site)
+
+Content for the landing on `everestlc.tj`: public reads at `/api/v1/public/site/*`, admin at `/api/v1/admin/site/*`
+(permission `site.manage`, owner and admin). Contract: `docs/site-api.md`. Deployed on 2026-11-28 (backend `dadc7cb`).
+
+### Environment
+
+| Variable | Value |
+|---|---|
+| `API_PUBLIC_URL` | `https://api.everestlc.tj`, no trailing slash. Host of the absolute image URLs in site responses (`/api/v1/public/site/images/{id}`). Without it the request's own host is used, which is the internal `http://backend:4100` when the landing calls the API server-side. Set |
+| `SITE_REVALIDATE_URL` | `https://everestlc.tj/api/revalidate`. **Not set yet**: set it only when the apex serves the landing (see "Turning the webhook on") |
+| `SITE_REVALIDATE_SECRET` | Shared secret, generated on the server; the landing reads the same value as `REVALIDATE_SECRET`. Not set yet |
+| `SITE_REVALIDATE_TIMEOUT_MS`, `SITE_CACHE_MAX_AGE_SECONDS` | Optional: webhook timeout (3000) and `Cache-Control` max-age of the public reads (60) |
+
+With the URL or the secret unset no webhook job is queued and saving content works as usual.
+
+### Deploy
+
+1. Back up `deploy/.env`, add the variables, then `deploy/scripts/deploy.sh backend` (pre-deploy dump, build, `migrate`,
+   restart of the API and the three workers; `worker-jobs` must restart to load the `site.revalidate` handler).
+2. Migrations: `20261128010000000_add-site-content` (10 `site_*` tables, permission `site.manage`) and
+   `20261128020000000_seed-site-content` (idempotent seed). Both are additive: the previous code ignores the tables.
+3. Seeded content: 4 courses `published` (biology, chemistry, physics, tajik; no covers); 3 vacancies and 3 events
+   `draft`; no videos; settings live with empty contacts, statistics filled but `stats_enabled=false`; texts in ru, tg, en.
+4. nginx: uploading a cover (JPEG or PNG up to 5 MB, raw body) needs its own location, because the app and API sites
+   cap bodies at 2 MB. Put it before `location /api/v1/ {` in `everestlc-app`, `everestlc-api`, `everest-app` and
+   `everest-api` (and in any new site that proxies the API):
+
+   ```nginx
+   location = /api/v1/admin/site/images {
+       client_max_body_size 6m;
+       proxy_read_timeout 120s;
+       proxy_pass http://127.0.0.1:4100;
+   }
+   ```
+
+   Then the usual procedure: backup, `nginx -t`, `reload`. Check without a session: a 4.5 MB body gets `401`, a 7 MB body
+   gets `413`, any other admin path still stops at 2 MB.
+
+### Checks
+
+```bash
+B=https://api.everestlc.tj/api/v1/public/site
+curl -s "$B/courses?lang=tj"                       # { "data": [ ... ] }, a bare array
+curl -s -o /dev/null -w '%{http_code}\n' "$B/courses/nope"      # 404
+curl -sI "$B/courses" | grep -i -E '^(etag|cache-control)'      # weak ETag, public, max-age=60
+curl -s -o /dev/null -w '%{http_code}\n' "$B/images/999999"     # 404 (a real id: 302 to files.everestlc.tj)
+```
+
+Lists contain published items only; vacancies past `validThrough` and events that are over are left out. The settings
+save can be exercised without writing anything by running `updateSiteSettingsService` inside a transaction that is
+rolled back (once with the webhook unset: no job in `background_jobs`; once with a URL: one job).
+
+### Turning the webhook on
+
+Do this after the landing is deployed and the apex proxies to the frontend (`everestlc-site`), not before: while the
+apex redirects to the app every save would queue a job that fails four times.
+
+1. `curl -s -o /dev/null -w '%{http_code}' -X POST https://everestlc.tj/api/revalidate` must answer `401` or `403`
+   (the route exists and checks the secret), not `301` or `404`.
+2. Generate the secret on the server, put the same value into the landing's `REVALIDATE_SECRET` and
+   `SITE_REVALIDATE_SECRET`, set `SITE_REVALIDATE_URL=https://everestlc.tj/api/revalidate`.
+3. Recreate the API and `worker-jobs` (the landing's side as its own deploy).
+4. Save something in the admin and watch the queue:
+   `SELECT status, attempts, last_error_code, count(*) FROM background_jobs WHERE job_type = 'site.revalidate' GROUP BY 1, 2, 3`.
+   The job is sent by `worker-jobs` within seconds. A failed attempt is retried after 30, 60 and 120 s; after four attempts
+   the job stays `failed`. A redirect in the answer counts as a failure (the secret is never passed on to another host).
+   Saving never waits for the webhook.
+
+Time passing is not an event: an event that is over disappears from the list on its own, so the landing needs a fallback
+revalidation interval besides the tags.
+
+### Rolling back the module
+
+- **Code only** (the tables stay, the previous code ignores them):
+  `docker tag everest-backend:prev everest-backend:current`, then
+  `docker compose -p everest -f deploy/docker-compose.prod.yml up -d --no-deps backend worker-attempts worker-jobs worker-imports`.
+  `deploy.sh backend` does this by itself when the health check fails. The public site routes then answer `404`.
+- **Migrations.** Do not run `migrate:down` on the server for this: the first migration drops all `site_*` tables with the
+  content the admins entered; the second one removes only the seeded rows. If the module must be removed anyway, restore the
+  pre-deploy dump (below) or take a dump of the `site_*` tables first.
+- **Restoring the dump.** The pre-deploy dump of this deploy is
+  `/var/backups/everest/db/predeploy/everest_prod-20261128T170616Z.dump` (kept 14 days). Restore into a new database, never
+  over the live one:
+
+  ```bash
+  cd /opt/everest/backend/deploy
+  docker compose -p everest -f docker-compose.prod.yml exec -T db sh -c 'createdb -U "$POSTGRES_USER" everest_restore'
+  docker compose -p everest -f docker-compose.prod.yml exec -T db sh -c \
+    'pg_restore -U "$POSTGRES_USER" -d everest_restore --no-owner --role="$EVEREST_APP_DB_USER" --no-privileges' \
+    < /var/backups/everest/db/predeploy/everest_prod-20261128T170616Z.dump
+  ```
+
+  Check the row counts, then switch `DB_NAME=everest_restore` in `deploy/.env`, recreate the API and the workers. Data
+  written after the dump (answers, progress) is lost; weigh that against fixing forward.
+- **nginx.** The four files before the change are in `/var/backups/site-images-nginx-170756/`; the whole tree is in
+  `/var/backups/nginx-20261128-170743.tar.gz`. Restore a file, `sudo nginx -t`, `sudo systemctl reload nginx`, then the
+  other site's status codes.
+- **Env.** `deploy/.env.bak-site-20261128-170602` is the file before `API_PUBLIC_URL`.
 
 ## Moving to a separate server
 
