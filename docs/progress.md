@@ -1,10 +1,20 @@
 # EVEREST backend progress
 
-Updated: 2026-11-28. Module "Site" (marketing landing content) on branch `feat/site-content`, open for review, not deployed. Before that: M13 Done with branch `feat/m13-achievements-snapshots` (achievements and ranking snapshots, open for review, not deployed); the ranking PR is merged (#80), not deployed. Deployed 2026-11-25: backend up to PR #79, frontend up to everestlc #66. Previously: M14 Done (PR 3 #73).
+Updated: 2026-11-28. Moved to the domain everestlc.tj (app, api, files; apex and www redirect to the app; sslip.io hosts kept in parallel). Module "Site" (marketing landing content) deployed to the server (backend `dadc7cb`, 47 migrations). Before that: M13 Done with branch `feat/m13-achievements-snapshots` (achievements and ranking snapshots, open for review, not deployed); the ranking PR is merged (#80), not deployed. Deployed 2026-11-25: backend up to PR #79, frontend up to everestlc #66. Previously: M14 Done (PR 3 #73).
 
 ## Current increment
 
 M12 is Done: PR 3 (staff progress views, #64) and the 2026-11-20 follow-ups (#65 time zone cache, #66 `GET /me/staff-capabilities`, #67 cosmetic question text rules) are merged into main. Deployed on the temporary VPS on 2026-11-19: backend up to PR #62 (M12 PR 1 and PR 2, the question text repair applied to 2 rows, refresh resilience), frontend up to PR #47. Not deployed yet: PRs #63 to #67 (no migration, no new env variable). `fix-question-text.js --apply` with the new cosmetic rules has not been run on any database. Next milestone: M13 (group ranking), which waits for the owner to approve the formula.
+
+## 2026-11-28 — Module "Site" deployed (backend `dadc7cb`, PRs #82 and #83)
+
+- **Server:** `deploy.sh backend` after a pre-deploy dump (`everest_prod-20261128T170616Z.dump`, 1.1 MB, `pg_restore --list` readable, 98 tables with data). Migrations `20261128010000000_add-site-content` and `20261128020000000_seed-site-content` applied (47 in `pgmigrations`). Backend and the three workers healthy, no errors in the logs. The frontend was not rebuilt.
+- **Env:** `API_PUBLIC_URL=https://api.everestlc.tj` (backup `deploy/.env.bak-site-20261128-170602`). `SITE_REVALIDATE_URL` and `SITE_REVALIDATE_SECRET` are not set: the apex still redirects to the app, so no webhook is queued.
+- **nginx:** `location = /api/v1/admin/site/images` with `client_max_body_size 6m` in `everestlc-app`, `everestlc-api`, `everest-app` and `everest-api` (backup `/var/backups/nginx-20261128-170743.tar.gz`). A 4.5 MB body reaches the backend (401 without a session), 7 MB gets 413, other admin paths keep the 2 MB limit.
+- **Seeded and live:** 4 courses `published` (biology, chemistry, physics, tajik; no covers); 3 vacancies and 3 events `draft`; no videos; settings live with empty contacts, `stats` filled and `stats_enabled=false`; texts in ru, tg, en. No site images yet.
+- **Checked:** public endpoints on `api.everestlc.tj` (200, `{ "data": ... }`, lists are arrays, `lang` ru/tj/en, weak ETag and 304, `Cache-Control: public, max-age=60, stale-while-revalidate=300`, unknown slug 404, bad `lang` 400, unknown image id 404); a settings save inside a rolled-back transaction with the webhook unset queues no job (with a URL configured it queues one); the platform (`/ready`, login path with a wrong password 401); the co-hosted site 200/200/301/403 after every step.
+- **Not checked:** the 302 of `/public/site/images/{id}` to `files.everestlc.tj` (no image is uploaded yet), the live webhook, the admin screens (not built), the landing.
+- **Next:** landing deploy, then the webhook (`docs/deploy.md` → "Marketing site module").
 
 ## 2026-11-28 — Module "Site": marketing landing content (`feat/site-content`)
 
@@ -12,6 +22,35 @@ M12 is Done: PR 3 (staff progress views, #64) and the 2026-11-20 follow-ups (#65
 - **Contract changed mid-task** to the frontend audit (field-level `{ ru, tj, en }`, new enums and fields, absolute images with size and alt, webhook header and queue); the migrations were rewritten before being applied anywhere.
 - **Tests:** new `tests/unit/site-content.test.js` (6) and `tests/integration/site-content.test.js` (8 subtests: seed, 401/403 for teacher and student on admin routes, drafts hidden and per-field fallback, Cache-Control/ETag 304, video and phone validation, failing webhook retried by the queue without breaking the save and nothing queued without env, images, order/events/vacancies). During development the two files ran alone on disposable databases. One full `npm test` (disposable database): 703/703, exit 0. `npm run test:migrations` (updated: 47/47/46/45/47, both new migrations rolled down and re-applied): exit 0. `scripts/verify-database.js` counts updated (107 tables, 921 columns, 205 FKs, 378 indexes, 78 identity columns, 47 migrations, 39 permissions, 95 role permissions) → valid on a fresh database and on local `everest_db` after `migrate:up`.
 - **Not done:** frontend (landing and admin screens); the server; Tajik review; real contacts; a live webhook call to the frontend (only test doubles).
+
+## 2026-11-28 — Domain everestlc.tj (`chore/domain-everestlc`)
+
+- **Server, nginx:** new sites `everestlc-app`, `everestlc-api`, `everestlc-files` (copies of the sslip sites with
+  another `server_name` and certificate) and `everestlc-site` (`everestlc.tj` → 301 `https://app.everestlc.tj$request_uri`,
+  `www` → 301 apex). Port 80 on every new host serves ACME from `/var/www/letsencrypt` and sends everything else to
+  https. The sslip sites are unchanged. Backups: `/var/backups/nginx-20261128-152804.tar.gz` (before),
+  `/var/backups/nginx-20261128-161927.tar.gz` (before env).
+- **Certificates:** Let's Encrypt (webroot, renew hook `systemctl reload nginx`) for `app.`, `api.` and `files.everestlc.tj`
+  and `everestlc.tj` + `www`, valid to 2027-02-26. `renew --dry-run` passed for all four.
+- **Env** (`deploy/.env`, backup `.env.bak-domain-20261128-161927`, 8 lines): `CORS_ORIGINS`, `STORAGE_CORS_ORIGINS`,
+  `S3_PUBLIC_ENDPOINT`, `STUDENT_HOSTS`, `APP_URL`, `APP_URL_STUDENT`, `APP_URL_MARKETING`, `TELEGRAM_REDIRECT_URI` (values in
+  `docs/deploy.md` → "Domains"). The backend and workers were recreated, `storage-configure` applied the bucket CORS, and the
+  frontend was rebuilt from the same commit (`deploy.sh frontend --no-pull`). The lowest MemAvailable during the build was 1078 MB.
+- **Checked on the server and from outside:**
+  - TLS on all five names; redirects keep path and query.
+  - `/api/v1/ready` 200 on both API hosts.
+  - The API CORS allows the three origins and no others.
+  - Bucket preflight from `https://app.everestlc.tj` gets 200; a foreign origin gets 403.
+  - Presigned GET on `files.everestlc.tj` with `Range: bytes=0-1023` gets 206, and its signature sent to the sslip host
+    gets 403 `SignatureDoesNotMatch` (the signature binds the Host).
+  - A presigned part PUT from the new origin (200, ETag exposed), complete, Range GET with equal bytes, delete.
+  - A lesson video (45.9 MB) answers Range with 206 and CORS for the new origin.
+  - A wrong password gets 401 `INVALID_CREDENTIALS`.
+  - The bundle contains `https://app.everestlc.tj` only (no sslip.io), and there are no `http://` assets on `/login`.
+  - `everest_prod` has no `sslip.io` (streamed `pg_dump --data-only`, 98 tables).
+  - The co-hosted site answered 200/200/301/403 after every step and in 20 samples during the build.
+- **Not checked:** a real password login, Telegram login (needs BotFather), a browser upload into a lesson, phones.
+- **Remaining:** owner: BotFather redirect URL, browser checks. Later: landing on the apex, turning the sslip hosts off (`docs/deploy.md`).
 
 ## 2026-11-26 — M13 achievements and ranking snapshots (`feat/m13-achievements-snapshots`)
 

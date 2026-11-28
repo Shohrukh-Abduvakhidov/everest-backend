@@ -453,9 +453,9 @@ This roadmap orders implementation; it does not replace the [current architectur
 
 ## M21 — Deployment
 
-- **Status:** In progress (partial). Running on a temporary VPS shared with another project, on sslip.io hosts.
+- **Status:** In progress (partial). Running on a temporary VPS shared with another project, on `app.`, `api.` and `files.everestlc.tj` since 2026-11-28 (sslip.io hosts kept for the transition).
 - **Done:** docker compose stack (PostgreSQL 18, backend, two workers, SeaweedFS, frontend) with memory limits; `deploy.sh` with `:prev` image rollback and a pre-deploy dump; host nginx sites `everest-app`, `everest-api`, `everest-files` (large parts, Range, streaming) with Let's Encrypt TLS; daily local backups and weekly restore check; `TRUST_PROXY`; data moved to `everest_prod` (PRs #51, #52, #56). Last deploy 2026-11-19: backend up to PR #62 (no new migration, 41 applied), frontend up to PR #47, the question text fix applied (2 rows).
-- **Remaining:** stage 2c server hardening; off-site encrypted backups (Backblaze B2); Telegram alerts, uptime and disk monitoring; the final domain `everestlc.tj` (env, storage CORS, frontend rebuild, certificates).
+- **Remaining:** stage 2c server hardening; off-site encrypted backups (Backblaze B2); Telegram alerts, uptime and disk monitoring; the landing on `everestlc.tj` and turning the sslip.io hosts off.
 - **Goal:** Operate EVEREST safely in production.
 - **Dependencies:** M20 and approved infrastructure/provider choices.
 - **Deliverables:** VPS, PostgreSQL, PM2, Nginx/TLS, secret management, storage, daily backups, monitoring, log rotation, deployment and rollback runbooks.
