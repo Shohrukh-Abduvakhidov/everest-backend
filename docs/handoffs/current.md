@@ -1,13 +1,19 @@
 ---
 project: EVEREST Backend
-current_milestone: M13
-status: done
-branch: feat/m13-achievements-snapshots
-base_commit: 7eb2a5f
-updated_at: 2026-11-26
+current_milestone: Site
+status: in review
+branch: feat/site-content
+base_commit: 7dd1153
+updated_at: 2026-11-28
 ---
 
 # Current handoff
+
+## Module "Site": marketing landing content (branch `feat/site-content`, not merged, not deployed)
+
+- **Built:** 10 tables and the landing seed (migrations `20261128010000000`, `20261128020000000`), public `/public/site/*` (published only, `lang` ru/tj/en with fallback to ru, Cache-Control + ETag), admin `/admin/site/*` (`site.manage`: CRUD, publish/unpublish, order, settings, image upload), revalidation webhook as a `site.revalidate` job of `worker:jobs`. Contract for the frontend: `docs/site-api.md`; decisions 2026-11-28; Tajik texts to review: `docs/i18n-review-tj.md`.
+- **Verified:** see `docs/progress.md` (2026-11-28): `npm test` 703/703, `test:migrations`, `verify-database.js` valid; local `everest_db` migrated (47).
+- **After merge (operator):** deploy with `migrate:up` (two migrations); set `API_PUBLIC_URL` (API origin), `SITE_REVALIDATE_URL` (`{MARKETING_ORIGIN}/api/revalidate`) and `SITE_REVALIDATE_SECRET` for backend and `worker:jobs`, restart both. Frontend: landing reads the API, admin screens, revalidate route that checks `x-revalidate-secret`; fix "Student Platform"/"preview"/"AI-помощник" in its components.
 
 ## M13 achievements and ranking snapshots (branch `feat/m13-achievements-snapshots`, not merged, not deployed)
 
@@ -65,6 +71,8 @@ updated_at: 2026-11-26
 - Not verified there: a real lesson video in a browser (upload, seek, offline); an interrupted multi-GB upload resumed.
 
 ## Next concrete task
+
+0. Review and merge `feat/site-content` (module "Site"), deploy with the three env values, have a native speaker check `docs/i18n-review-tj.md`, then the frontend switches the landing to `/public/site/*`.
 
 1. Deploy PRs #63 to #67 (no migration). The frontend can build the teacher screens (staff progress, rights) from `docs/frontend-handoff.md`.
 2. M13: review and merge the achievements PR, deploy, backfill (dry run first). M10 stays open until its two listed deliverables are built or dropped.

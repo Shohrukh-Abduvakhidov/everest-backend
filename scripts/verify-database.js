@@ -5,17 +5,17 @@ import env from '../src/configs/env.js';
 const { Client } = pg;
 const client = new Client(env.database);
 
-// Catalog after migration 20261126010000000 (45 migrations). Update together with every migration.
+// Catalog after migration 20261128020000000 (47 migrations). Update together with every migration.
 const expected = {
-  tables: 97,
-  columns: 802,
-  foreignKeys: 185,
-  indexes: 361,
+  tables: 107,
+  columns: 921,
+  foreignKeys: 205,
+  indexes: 378,
   functions: 7,
   triggers: 11,
   roles: 4,
-  migrations: 45,
-  identityColumns: 73,
+  migrations: 47,
+  identityColumns: 78,
 };
 
 // UUID columns that are opaque values, not entity identifiers: the SMS idempotency key and the
@@ -155,8 +155,8 @@ try {
     && invalidForeignKeys.rowCount === 0
     && remainingUuidColumns.rows.map((row) => `${row.table_name}.${row.column_name}`).join(',')
       === allowedUuidColumns.join(',')
-    && authorizationSeeds.rows[0].permissions === 38
-    && authorizationSeeds.rows[0].role_permissions === 93
+    && authorizationSeeds.rows[0].permissions === 39
+    && authorizationSeeds.rows[0].role_permissions === 95
     && authorizationSeeds.rows[0].teacher_grants === 16
     && authorizationSeeds.rows[0].student_grants === 1
     && permissionConstraintCode === '23514'

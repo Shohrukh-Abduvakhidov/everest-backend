@@ -205,6 +205,20 @@ import {
    getStaffGroupRankingController,
    updateRankingSettingsController,
 } from '../controllers/group-ranking-controller.js'
+import {
+   createSiteItemController,
+   deleteSiteItemController,
+   getSiteItemController,
+   getSiteSettingsController,
+   listSiteItemsController,
+   publishSiteItemController,
+   reorderSiteItemsController,
+   unpublishSiteItemController,
+   updateSiteItemController,
+   updateSiteSettingsController,
+   uploadSiteImageController,
+} from '../controllers/site-controller.js'
+import { manageSiteAuthorizationMiddleware, siteImageBodyMiddleware } from '../middleware/site-admin-middleware.js'
 
 const adminRouter = express.Router()
 
@@ -940,5 +954,36 @@ adminRouter.post(
    adminMutationRateMiddleware,
    grantExtraAttemptsController,
 )
+
+// Marketing site (permission site.manage). Collections are registered one by one so every
+// path is explicit; the controller reads the collection from the route path.
+adminRouter.get('/site/settings', manageSiteAuthorizationMiddleware, getSiteSettingsController)
+adminRouter.put(
+   '/site/settings',
+   manageSiteAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   updateSiteSettingsController,
+)
+adminRouter.post(
+   '/site/images',
+   manageSiteAuthorizationMiddleware,
+   authenticatedCsrfMiddleware,
+   adminMutationRateMiddleware,
+   siteImageBodyMiddleware,
+   uploadSiteImageController,
+)
+for (const collection of ['courses', 'vacancies', 'events', 'videos']) {
+   const base = `/site/${collection}`
+   const mutation = [manageSiteAuthorizationMiddleware, authenticatedCsrfMiddleware, adminMutationRateMiddleware]
+   adminRouter.get(base, manageSiteAuthorizationMiddleware, listSiteItemsController)
+   adminRouter.post(base, ...mutation, createSiteItemController)
+   adminRouter.patch(`${base}/order`, ...mutation, reorderSiteItemsController)
+   adminRouter.get(`${base}/:itemId`, manageSiteAuthorizationMiddleware, getSiteItemController)
+   adminRouter.patch(`${base}/:itemId`, ...mutation, updateSiteItemController)
+   adminRouter.delete(`${base}/:itemId`, ...mutation, deleteSiteItemController)
+   adminRouter.post(`${base}/:itemId/publish`, ...mutation, publishSiteItemController)
+   adminRouter.post(`${base}/:itemId/unpublish`, ...mutation, unpublishSiteItemController)
+}
 
 export default adminRouter

@@ -1196,6 +1196,7 @@ const permissionDescriptions = {
    'accounts.reject': 'owner, admin',
    'accounts.block': 'owner, admin',
    'accounts.unblock': 'owner, admin',
+   'site.manage': 'owner, admin',
 }
 
 function errorResponse(description) {
@@ -1207,7 +1208,7 @@ function operation(method, path, spec) {
       name,
       in: 'path',
       required: true,
-      schema: id(),
+      schema: spec.pathParams?.[name] || id(),
    }))
    const auth = spec.auth ?? 'session'
    const mutating = method !== 'get'
@@ -2384,6 +2385,259 @@ const routes = [
       errors: { 400: ['VALIDATION_ERROR', 'INVALID_TEST_ID', 'INVALID_ASSIGNMENT_ID'], 404: ['TEST_NOT_FOUND', 'ASSIGNMENT_NOT_FOUND'], 409: ['ASSIGNMENT_NOT_ACTIVE'] },
    }],
 ]
+
+// --- Marketing site (module "Site") --------------------------------------------------------
+
+const apiLanguages = ['ru', 'tj', 'en']
+const siteStep = () => obj({ title: str(), text: str() }, ['title', 'text'])
+const siteProgram = () => obj({ title: str(), items: arr(str()) }, ['title', 'items'])
+const siteKinds = { title: () => str(), text: () => str(), long: () => str(), template: () => str(), strings: () => arr(str()), steps: () => arr(siteStep()), program: () => arr(siteProgram()) }
+const siteListKinds = ['strings', 'steps', 'program']
+const siteFields = {
+   courses: { title: 'title', summary: 'text', description: 'long', audience: 'title', duration: 'title', label: 'title', topics: 'strings', learn: 'strings', howItWorks: 'strings', program: 'program', coverAlt: 'title', 'seo.title': 'title', 'seo.description': 'text' },
+   vacancies: { title: 'title', location: 'title', description: 'long', requirements: 'strings', conditions: 'strings' },
+   events: { title: 'title', description: 'long', location: 'title', imageAlt: 'title' },
+   videos: { title: 'title', description: 'long', thumbnailAlt: 'title' },
+}
+const localized = (kind, input = false) => {
+   const inner = siteKinds[kind]()
+   const value = siteListKinds.includes(kind) ? inner : nullable(inner)
+   return obj(Object.fromEntries(apiLanguages.map((language) => [language, input ? nullable(inner) : value])), input ? [] : apiLanguages, {
+      strict: input,
+      description: input ? 'Only the languages sent change; null clears one.' : 'Every language key is present; missing values are null or [].',
+   })
+}
+// Builds { field: schema } from 'a.b' keys, grouping dotted ones (seo.title -> seo: { title }).
+function grouped(fields, schemaOf, strict = false) {
+   const result = {}
+   for (const [name, kind] of Object.entries(fields)) {
+      const [first, second] = name.split('.')
+      if (second) {
+         result[first] ||= obj({}, [], { strict })
+         result[first].properties[second] = schemaOf(kind)
+      } else {
+         result[first] = schemaOf(kind)
+      }
+   }
+   return result
+}
+const siteAdminImage = () => nullable(ref('SiteAdminImage'))
+const sitePublicImage = () => nullable(ref('SiteImage'))
+const siteItemMeta = { id: id(), status: enumOf(['draft', 'published']), order: int(), publishedAt: nullable(dt()), createdAt: dt(), updatedAt: dt() }
+const dushanbeTime = () => nullable(str({ description: 'ISO 8601 with the +05:00 offset (Asia/Dushanbe)', examples: ['2026-12-05T10:00:00+05:00'] }))
+const siteDate = () => nullable(str({ format: 'date' }))
+const siteSalary = () => nullable(obj({ min: nullable(int()), max: nullable(int()), currency: str({ const: 'TJS' }) }, ['currency']))
+const slugSchema = () => str({ pattern: '^[a-z0-9]+(-[a-z0-9]+)*$', maxLength: 64 })
+const sitePlain = {
+   courses: {
+      slug: slugSchema(), subjectKey: enumOf(['biology', 'chemistry', 'physics', 'tajik']),
+      format: enumOf(['online', 'offline', 'hybrid']), coverAssetId: nullable(id()), platformCourseId: nullable(id()),
+   },
+   vacancies: {
+      slug: slugSchema(), employmentType: enumOf(['FULL_TIME', 'PART_TIME', 'CONTRACTOR', 'INTERN']),
+      salary: siteSalary(), datePosted: siteDate(), validThrough: siteDate(),
+   },
+   events: {
+      type: enumOf(['enrollment', 'mock-nct', 'open-lesson', 'other']), mode: enumOf(['online', 'offline']),
+      startsAt: nullable(str({ description: 'Input: ISO 8601 with an offset, or local YYYY-MM-DDTHH:mm read as Asia/Dushanbe' })),
+      endsAt: nullable(str()), imageAssetId: nullable(id()),
+   },
+   videos: {
+      url: str({ description: 'youtube.com / youtu.be / vimeo.com link or an https .mp4/.webm file; provider and videoId are derived' }),
+      thumbnailAssetId: nullable(id()), duration: nullable(str({ description: 'ISO 8601, e.g. PT4M13S' })), uploadDate: siteDate(),
+      placement: enumOf(['home', 'course']), courseSlug: nullable(slugSchema()),
+   },
+}
+const siteAdminExtra = {
+   courses: { cover: siteAdminImage() },
+   vacancies: {},
+   events: { startsAt: dushanbeTime(), endsAt: dushanbeTime(), timeZone: str({ const: 'Asia/Dushanbe' }), image: siteAdminImage() },
+   videos: { provider: enumOf(['youtube', 'vimeo', 'file']), videoId: nullable(str()), thumbnail: siteAdminImage() },
+}
+const siteSchemaNames = { courses: 'SiteCourse', vacancies: 'SiteVacancy', events: 'SiteEvent', videos: 'SiteVideo' }
+const sitePublicNames = { courses: 'PublicSiteCourse', vacancies: 'PublicSiteVacancy', events: 'PublicSiteEvent', videos: 'PublicSiteVideo' }
+const siteSingular = { courses: 'course', vacancies: 'vacancy', events: 'event', videos: 'video' }
+const siteNotFound = { courses: 'SITE_COURSE_NOT_FOUND', vacancies: 'SITE_VACANCY_NOT_FOUND', events: 'SITE_EVENT_NOT_FOUND', videos: 'SITE_VIDEO_NOT_FOUND' }
+const siteLang = { name: 'lang', schema: enumOf(['ru', 'tj', 'en'], { default: 'ru' }), description: 'tj = Tajik (stored as tg). Each text falls back to Russian when empty.' }
+const sitePublicCache = 'Cache-Control: public, max-age=60, stale-while-revalidate=300; weak ETag, If-None-Match answers 304. Each object has lang: the requested language when the object has its own title in it, otherwise ru.'
+const objectLang = () => enumOf(apiLanguages, { description: 'Language the object is shown in after the fallback to ru' })
+const settingsTranslatable = {
+   whatsappTemplate: 'template', whatsappCourseTemplate: 'template', address: 'text', whyEverest: 'steps', stages: 'steps',
+   'hero.title': 'title', 'hero.subtitle': 'text', 'hero.primaryCta': 'title', 'hero.secondaryCta': 'title', 'hero.imageAlt': 'title',
+   'seo.title': 'title', 'seo.description': 'text', 'seo.ogImageAlt': 'title',
+}
+const timeOfDay = () => str({ pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$' })
+const hoursSchema = () => arr(obj({ days: arr(enumOf(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'])), opens: timeOfDay(), closes: timeOfDay() }, ['days', 'opens', 'closes']))
+const geoSchema = () => nullable(obj({ lat: num(), lng: num() }, ['lat', 'lng']))
+const labelSchema = (input) => (input ? nullable(localized('title', true)) : localized('title'))
+
+function settingsAdminSchema(input) {
+   const text = grouped(settingsTranslatable, (kind) => localized(kind, input), input)
+   const plain = {
+      phones: arr(obj({ number: str({ examples: ['+992901234567'] }), label: labelSchema(input) }, ['number'], { strict: input }), { maxItems: 10 }),
+      whatsapp: nullable(str({ description: 'E.164; a 9-digit Tajik number gets +992' })),
+      telegram: nullable(str({ description: input ? 'username, @username or https://t.me/… link' : 'https://t.me/<username>' })),
+      instagram: nullable(str({ description: input ? 'username, @username or instagram.com link' : 'https://www.instagram.com/<username>' })),
+      playMarketUrl: nullable(str()),
+      geo: geoSchema(),
+      hours: hoursSchema(),
+      stats: obj({ enabled: bool(), items: arr(obj({ value: str(), label: labelSchema(input) }, ['value'], { strict: input })) }, [], { strict: input }),
+   }
+   text.hero.properties.imageAssetId = nullable(id())
+   text.seo.properties.ogImageAssetId = nullable(id())
+   if (!input) {
+      text.hero.properties.image = siteAdminImage()
+      text.seo.properties.ogImage = siteAdminImage()
+   }
+   return { ...plain, ...text, ...(input ? {} : { updatedAt: dt() }) }
+}
+
+Object.assign(schemas, {
+   SiteImage: obj({
+      url: str({ description: 'Absolute URL on the API host (API_PUBLIC_URL), /api/v1/public/site/images/{id}: 302 to the file' }),
+      width: nullable(int()), height: nullable(int()), alt: nullable(str()),
+   }, ['url', 'width', 'height', 'alt']),
+   SiteAdminImage: obj({ assetId: id(), url: str(), width: nullable(int()), height: nullable(int()), mimeType: str() }, ['assetId', 'url']),
+   SiteUploadedImage: obj({ assetId: id(), url: str(), width: int(), height: int(), mimeType: str(), fileName: str(), sizeBytes: int(), createdAt: dt() }),
+   SiteSettings: obj(settingsAdminSchema(false)),
+   PublicSiteSettings: obj({
+      lang: objectLang(),
+      phones: arr(obj({ number: str(), label: nullable(str()) })),
+      whatsapp: nullable(str()), whatsappTemplate: nullable(str()), whatsappCourseTemplate: nullable(str()),
+      whatsappUrl: nullable(str({ description: 'https://wa.me/<digits>?text=<whatsappTemplate>' })),
+      telegram: nullable(str()), instagram: nullable(str()), playMarketUrl: nullable(str()),
+      address: nullable(str()), geo: geoSchema(), hours: hoursSchema(),
+      stats: obj({ enabled: bool(), items: arr(obj({ value: str(), label: nullable(str()) })) }, [], { description: 'items is empty while enabled is false' }),
+      hero: obj({ title: nullable(str()), subtitle: nullable(str()), primaryCta: nullable(str()), secondaryCta: nullable(str()), image: sitePublicImage() }),
+      whyEverest: arr(siteStep()), stages: arr(siteStep()),
+      seo: obj({ title: nullable(str()), description: nullable(str()), ogImage: sitePublicImage() }),
+      updatedAt: dt(),
+   }),
+   ...Object.fromEntries(Object.entries(siteSchemaNames).map(([collection, name]) => [name, obj({
+      ...siteItemMeta, ...sitePlain[collection], ...siteAdminExtra[collection],
+      ...grouped(siteFields[collection], (kind) => localized(kind)),
+   })])),
+   PublicSiteCourse: obj({
+      id: id(), lang: objectLang(), slug: str(), subjectKey: str(), format: str(),
+      ...grouped(
+         Object.fromEntries(Object.entries(siteFields.courses).filter(([name]) => name !== 'coverAlt')),
+         (kind) => (siteListKinds.includes(kind) ? siteKinds[kind]() : nullable(str())),
+      ),
+      cover: sitePublicImage(), platformCourseId: nullable(id()), order: int(), updatedAt: dt(),
+   }),
+   PublicSiteVacancy: obj({
+      id: id(), lang: objectLang(), slug: str(), employmentType: str(), title: nullable(str()), location: nullable(str()),
+      description: nullable(str()), requirements: arr(str()), conditions: arr(str()), salary: siteSalary(),
+      datePosted: siteDate(), validThrough: siteDate(), order: int(), updatedAt: dt(),
+   }),
+   PublicSiteEvent: obj({
+      id: id(), lang: objectLang(), type: str(), mode: str(), title: nullable(str()), description: nullable(str()),
+      location: nullable(str()), startsAt: dushanbeTime(), endsAt: dushanbeTime(), timeZone: str({ const: 'Asia/Dushanbe' }),
+      image: sitePublicImage(), order: int(), updatedAt: dt(),
+   }),
+   PublicSiteVideo: obj({
+      id: id(), lang: objectLang(), provider: enumOf(['youtube', 'vimeo', 'file']), videoId: nullable(str()), url: str(),
+      embedUrl: nullable(str()), title: nullable(str()), description: nullable(str()), thumbnail: sitePublicImage(),
+      duration: nullable(str()), uploadDate: siteDate(), placement: str(), courseSlug: nullable(str()), order: int(), updatedAt: dt(),
+   }),
+})
+
+const siteQuery = {
+   courses: [siteLang],
+   vacancies: [siteLang],
+   events: [siteLang],
+   videos: [siteLang, { name: 'placement', schema: enumOf(['home', 'course']) }, { name: 'courseSlug', schema: slugSchema() }],
+}
+const siteListNotes = {
+   courses: '',
+   vacancies: ' Vacancies past validThrough (Asia/Dushanbe date) are left out.',
+   events: '',
+   videos: ' Filter with placement and courseSlug.',
+}
+
+routes.push(
+   ['get', '/public/site/settings', {
+      tag: 'Public site', auth: 'public', summary: 'Site settings: contacts, WhatsApp, hours, hero, stats, why EVEREST, stages, SEO',
+      description: sitePublicCache, query: [siteLang], response: ref('PublicSiteSettings'),
+   }],
+   ...['courses', 'vacancies', 'events', 'videos'].map((collection) => ['get', `/public/site/${collection}`, {
+      tag: 'Public site', auth: 'public', summary: `Published ${collection} in admin order`,
+      description: `${sitePublicCache}${siteListNotes[collection]}`, query: siteQuery[collection],
+      response: obj({ lang: enumOf(apiLanguages, { description: 'The requested language' }), [collection]: arr(ref(sitePublicNames[collection])) }),
+   }]),
+   ['get', '/public/site/courses/:slug', {
+      tag: 'Public site', auth: 'public', summary: 'One published course by slug',
+      description: `${sitePublicCache} A draft or unknown slug: 404.`, query: [siteLang], pathParams: { slug: slugSchema() },
+      response: ref('PublicSiteCourse'),
+      errors: { 404: ['SITE_COURSE_NOT_FOUND'] },
+   }],
+   ['get', '/public/site/images/:assetId', {
+      tag: 'Public site', auth: 'public', status: 302, response: null,
+      summary: 'Site image: redirect to a signed file URL',
+      responseDescription: 'Location: signed storage URL (lives about 70 minutes, the same within a 10-minute window). Cache-Control: public, max-age=600.',
+      errors: { 404: ['SITE_IMAGE_NOT_FOUND'], 503: ['STORAGE_NOT_CONFIGURED'] },
+   }],
+   ['get', '/admin/site/settings', {
+      tag: 'Admin: site', ...adminRead('site.manage'), summary: 'Site settings with every language', response: ref('SiteSettings'),
+   }],
+   ['put', '/admin/site/settings', {
+      tag: 'Admin: site', ...admin('site.manage'), summary: 'Save site settings (always live)',
+      description: 'Fields not sent keep their value; inside { ru, tj, en } only the languages sent change. Templates accept {course}, {vacancy}, {event}. Queues the revalidation webhook with site, site:settings.',
+      body: body(settingsAdminSchema(true)),
+      response: ref('SiteSettings'),
+   }],
+   ['post', '/admin/site/images', {
+      tag: 'Admin: site', ...admin('site.manage'), created: true, summary: 'Upload a site image (JPEG or PNG, up to 5 MB)',
+      description: 'Send the bytes as the body with Content-Type image/jpeg or image/png; optional X-File-Name header (URL-encoded). Width and height are read from the file. Use assetId in coverAssetId, imageAssetId, thumbnailAssetId, hero.imageAssetId or seo.ogImageAssetId.',
+      binaryBody: 'image/jpeg',
+      response: ref('SiteUploadedImage'),
+      errors: { 400: ['VALIDATION_ERROR', 'SITE_IMAGE_UPLOAD_FAILED'], 413: ['SITE_IMAGE_TOO_LARGE'], 415: ['SITE_IMAGE_TYPE_INVALID'], 422: ['SITE_IMAGE_CONTENT_INVALID'], 503: ['STORAGE_NOT_CONFIGURED'] },
+   }],
+   ...['courses', 'vacancies', 'events', 'videos'].flatMap((collection) => {
+      const name = siteSchemaNames[collection]
+      const one = siteSingular[collection]
+      const itemErrors = { 400: ['VALIDATION_ERROR', 'INVALID_SITE_ITEM_ID'], 404: [siteNotFound[collection]] }
+      const required = { courses: ['slug', 'subjectKey', 'title'], vacancies: ['slug', 'title'], events: ['title'], videos: ['url', 'title'] }[collection]
+      const fields = { ...sitePlain[collection], ...grouped(siteFields[collection], (kind) => localized(kind, true), true) }
+      const conflict = { courses: { 409: ['SITE_COURSE_SLUG_CONFLICT'] }, vacancies: { 409: ['SITE_VACANCY_SLUG_CONFLICT'] } }[collection] || {}
+      const base = `/admin/site/${collection}`
+      return [
+         ['get', base, {
+            tag: 'Admin: site', ...adminRead('site.manage'), summary: `All site ${collection}, drafts included`,
+            query: [{ name: 'status', schema: enumOf(['draft', 'published']) }],
+            response: obj({ items: arr(ref(name)) }, ['items']),
+         }],
+         ['post', base, {
+            tag: 'Admin: site', ...admin('site.manage'), created: true, summary: `Create a site ${one} (draft, last in order)`,
+            description: 'title.ru is required.',
+            body: body(fields, required), response: ref(name), errors: conflict,
+         }],
+         ['patch', `${base}/order`, {
+            tag: 'Admin: site', ...admin('site.manage'), summary: `Reorder site ${collection}`,
+            description: 'ids: every item of the collection exactly once, in the new order; order becomes 1..n.',
+            body: body({ ids: arr(id(), { minItems: 1 }) }, ['ids']), response: obj({ items: arr(ref(name)) }, ['items']),
+         }],
+         ['get', `${base}/:itemId`, {
+            tag: 'Admin: site', ...adminRead('site.manage'), summary: `One site ${one}`, response: ref(name), errors: itemErrors,
+         }],
+         ['patch', `${base}/:itemId`, {
+            tag: 'Admin: site', ...admin('site.manage'), summary: `Change a site ${one}`,
+            description: 'Only the fields sent change. A published item queues the revalidation webhook.',
+            body: body(fields), response: ref(name), errors: { ...itemErrors, ...conflict },
+         }],
+         ['delete', `${base}/:itemId`, {
+            tag: 'Admin: site', ...admin('site.manage'), summary: `Delete a site ${one}`, response: deleted(), errors: itemErrors,
+         }],
+         ['post', `${base}/:itemId/publish`, {
+            tag: 'Admin: site', ...admin('site.manage'), summary: `Publish a site ${one} (repeating is a no-op)`, response: ref(name),
+            errors: collection === 'events' ? { ...itemErrors, 409: ['SITE_EVENT_START_REQUIRED'] } : itemErrors,
+         }],
+         ['post', `${base}/:itemId/unpublish`, {
+            tag: 'Admin: site', ...admin('site.manage'), summary: `Return a site ${one} to draft`, response: ref(name), errors: itemErrors,
+         }],
+      ]
+   }),
+)
 
 const description = `EVEREST learning platform API. All responses use \`{ data }\` on success and \`{ error: { code, message, details } }\` on failure. Identifiers are decimal strings. Lists use \`limit\`/\`offset\` and return \`pagination: { limit, offset, hasMore }\`.
 

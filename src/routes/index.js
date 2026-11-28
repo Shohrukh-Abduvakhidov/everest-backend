@@ -10,6 +10,7 @@ import meRouter from './me.js'
 import offlineDevicesRouter from './offline-devices.js'
 import offlineLicensesRouter from './offline-licenses.js'
 import profileRouter from './profile.js'
+import publicRouter from './public.js'
 import testsRouter from './tests.js'
 import trainerRouter from './trainer.js'
 
@@ -28,6 +29,7 @@ const routeMounts = Object.freeze([
    ['/offline-devices', offlineDevicesRouter],
    ['/offline-licenses', offlineLicensesRouter],
    ['/profile', profileRouter],
+   ['/public', publicRouter],
    ['/tests', testsRouter],
    ['/trainer', trainerRouter],
 ])

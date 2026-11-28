@@ -463,6 +463,12 @@ This roadmap orders implementation; it does not replace the [current architectur
 - **Documentation updates:** Deployment/operations runbooks, decisions, architecture, progress, roadmap.
 - **Exclusions:** Deployment from a documentation-only task.
 
+## Site — marketing landing content
+
+- **Status:** In review (branch `feat/site-content`, not merged, not deployed).
+- **Done:** tables, seed from the landing, public read API with language fallback and caching, admin CRUD/publish/order/images, revalidation webhook through `worker:jobs`. Contract: `docs/site-api.md`.
+- **Remaining:** frontend (landing reads the API, admin screens); Tajik review (`docs/i18n-review-tj.md`); real contacts; deploy with `API_PUBLIC_URL`, `SITE_REVALIDATE_URL`, `SITE_REVALIDATE_SECRET`.
+
 ## M22 — Release validation
 
 - **Status:** Planned
