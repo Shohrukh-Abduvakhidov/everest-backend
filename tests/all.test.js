@@ -28,6 +28,7 @@ import './unit/achievement-rules.test.js';
 import './unit/time-zone-cache.test.js';
 import './unit/notification-texts.test.js';
 import './unit/telegram-delivery.test.js';
+import './unit/site-content.test.js';
 import './integration/password-auth.test.js';
 import './integration/auth-protection.test.js';
 import './integration/account-admin.test.js';
@@ -80,5 +81,6 @@ import './integration/job-queue.test.js';
 import './integration/notifications.test.js';
 import './integration/telegram-delivery.test.js';
 import './integration/scheduled-notifications.test.js';
+import './integration/site-content.test.js';
 // Last: it ends the shared pool.
 import './integration/telegram-auth.test.js';

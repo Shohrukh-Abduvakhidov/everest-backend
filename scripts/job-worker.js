@@ -7,15 +7,16 @@ import {
    notificationJobHandlers,
    scheduleNotificationRetentionService,
 } from '../src/services/notification-service.js'
+import { siteJobHandlers } from '../src/services/site-content-service.js'
 import { startTelegramSender } from '../src/services/telegram-delivery-service.js'
 
 // General background runner: background_jobs (notification fan-out, achievements and ranking
-// snapshots) and, when the bot is
+// snapshots, site revalidation webhooks) and, when the bot is
 // configured, the Telegram sender (20 messages/s for the bot, 1/s per chat). Run exactly one
 // replica: the rate limits are kept in this process. Output has codes only, never payloads,
 // chat ids, texts or tokens.
 const log = (message, details) => console.log(message, details)
-const worker = startJobWorker({ handlers: { ...notificationJobHandlers, ...achievementJobHandlers }, log })
+const worker = startJobWorker({ handlers: { ...notificationJobHandlers, ...achievementJobHandlers, ...siteJobHandlers }, log })
 const telegramConfigured = Boolean(env.telegram.clientId && env.telegram.botToken)
 const sender = telegramConfigured
    ? startTelegramSender({ limiter: new TelegramRateLimiter({ perSecond: 20, perChatIntervalMs: 1000 }), log })

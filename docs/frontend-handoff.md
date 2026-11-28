@@ -9,6 +9,7 @@ Updated: 2026-10-31. This document describes what the backend **implements on `m
 
 Where this document and the code disagree, the code wins. Please report the difference.
 
+- **Marketing site (landing everestlc, 2026-11-28):** the whole contract — public `/public/site/*`, admin `/admin/site/*`, images, webhook — is in `docs/site-api.md`.
 - **Live, interactive reference:** Swagger UI at `GET /api/docs` and the JSON spec at `GET /api/docs/openapi.json` (not in production unless `SWAGGER_ENABLED=true`).
 - **Prose details** per domain: `docs/api.md`.
 

@@ -57,6 +57,22 @@ function readBaseUrl(name) {
   return `${url.origin}${url.pathname}`.replace(/\/+$/, '');
 }
 
+// Optional absolute http(s) URL; unlike readBaseUrl a query string is kept.
+function readRevalidateUrl(name) {
+  const raw = readString(name);
+  if (raw === undefined) return null;
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error(`Invalid URL environment variable: ${name}`);
+  }
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.hash) {
+    throw new Error(`Invalid URL environment variable: ${name}`);
+  }
+  return url.toString();
+}
+
 function readIntegerList(name, fallback, { min = 1, max = 1000 } = {}) {
   const values = readString(name, fallback).split(',').map((value) => Number(value.trim()));
   if (!values.length || values.some((value) => !Number.isSafeInteger(value) || value < min || value > max)) {
@@ -156,6 +172,18 @@ const env = Object.freeze({
   // Student app root used to build links in Telegram messages (M14). Change with the domain.
   appUrl: readBaseUrl('APP_URL'),
   trainer: readTrainerConfig(),
+  // Marketing site: webhook that tells the frontend to revalidate cached pages after published
+  // content changes. Both values unset: no call is made.
+  siteRevalidate: Object.freeze({
+    url: readRevalidateUrl('SITE_REVALIDATE_URL'),
+    secret: readString('SITE_REVALIDATE_SECRET') ?? null,
+    timeoutMs: readInteger('SITE_REVALIDATE_TIMEOUT_MS', 3000, { min: 100, max: 30000 }),
+  }),
+  // Stable public origin of this API (e.g. https://api.everestlc.tj), used for absolute image
+  // URLs in site responses. Unset: the request's own origin is used.
+  apiPublicUrl: readBaseUrl('API_PUBLIC_URL'),
+  // Public site endpoints (GET /public/site/*): Cache-Control max-age in seconds.
+  siteCacheMaxAgeSeconds: readInteger('SITE_CACHE_MAX_AGE_SECONDS', 60, { min: 0, max: 3600 }),
   progressMinIntervalSeconds: readInteger('PROGRESS_MIN_INTERVAL_SECONDS', 10, { max: 60 }),
   offline: Object.freeze({
     licenseDays: readInteger('OFFLINE_LICENSE_DAYS', 14, { max: 60 }),

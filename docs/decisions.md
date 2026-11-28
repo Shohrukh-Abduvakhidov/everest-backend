@@ -1,5 +1,20 @@
 # Decisions
 
+## 2026-11-28 — Module "Site": marketing landing content
+
+Landing content moves from the frontend code to the database and the admin panel; no forms or leads (every CTA goes to WhatsApp or a call). The contract follows the frontend audit of the same day (`docs/site-api.md`). Decided while building it (please review):
+
+1. **Storage of translations.** One translation row per language (`*_translations`, `tg` for Tajik), as subjects/sections/topics; the API speaks `{ ru, tj, en }` per field. Exception: phone labels and stat labels are `{ ru, tg, en }` inside their JSONB list entry, because they belong to one list item.
+2. **`lang` of an object** = the requested language when the object has its own title in it (settings: any own text), otherwise `ru`; texts still fall back field by field.
+3. **Settings are always live** (one row, no draft copy). `PUT /admin/site/settings` keeps fields that are not sent.
+4. **Images** use the existing file mechanism (storage provider + `assets`, `source_metadata.scope = 'site'`) through a small raw-body endpoint, not the course-scoped multipart sessions (`asset_uploads.course_id` is NOT NULL and site images are small). Width and height come from the bytes. Only site images can be attached or served publicly; any ready site image is served (drafts included) so the admin can preview.
+5. **Absolute image URLs** use `API_PUBLIC_URL`, else the request origin; the image route redirects to a signed URL that is stable within a 10-minute window.
+6. **Webhook through the job queue** (`site.revalidate`, outbox in the save's transaction, 4 attempts). Draft-only changes do not call it. The tag `site` is always sent.
+7. **Kept beyond the audit:** `label` and `howItWorks` on courses, `whyEverest` and `stages` in settings (from the original task), `platformCourseId`, `embedUrl`, `whatsappUrl`.
+8. **Publishing rules:** an event needs `startsAt`; `datePosted` (vacancy) and `uploadDate` (video) are filled on the first publish when empty; vacancies past `validThrough` are hidden; a video of `placement: course` needs an existing site course (`site_course_id`, BIGINT FK as required by the catalog check, the API speaks `courseSlug`).
+9. **Video providers:** YouTube and Vimeo by host and path, `file` = an https .mp4/.webm URL; YouTube without an uploaded thumbnail gets `hqdefault` (480×360).
+10. **Seed:** colours come from `subjectKey` (as `subjectVisual` in the app), so no colour column; chemistry/physics "for whom" fixed; "Student Platform"/"preview" are not in the seed (they live in frontend components); vacancies get `FULL_TIME` as a placeholder until the owner confirms.
+
 ## 2026-11-26 — M13: achievements and ranking snapshots
 
 The owner fixed the catalog (17 rows: `first_step`, `first_mock`, `solver` ×3, `mistakes_fixed`, `subject_ready`, `perfect_score`, `first_try_5`, `on_time_5`, `mock_120`, `lessons_25`, `course_completed`, `streak` ×3, `group_top3`), the tables, the evaluation through `background_jobs`, the schedule, the `achievement.unlocked` notification (Telegram off by default), the API and the backfill script; achievements move from M16 to M13. Rules as built: `docs/api.md` → "Achievements and ranking snapshots". Decided while building it unattended (please review):

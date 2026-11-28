@@ -56,30 +56,37 @@ try {
 
   await runMigration('up');
   const afterUp = await readState();
-  if (afterUp.migrations !== 45 || afterUp.tables !== 97 || afterUp.functions !== 7) {
+  if (afterUp.migrations !== 47 || afterUp.tables !== 107 || afterUp.functions !== 7) {
     throw new Error(`Unexpected state after up: ${JSON.stringify(afterUp)}`);
   }
 
   await runMigration('up');
   const afterNoOpUp = await readState();
-  if (afterNoOpUp.migrations !== 45) {
+  if (afterNoOpUp.migrations !== 47) {
     throw new Error(`Second up was not a no-op: ${JSON.stringify(afterNoOpUp)}`);
   }
 
+  // The last two migrations: the site content seed (no tables), then the site tables.
   await runMigration('down');
   const afterDown = await readState();
-  if (afterDown.migrations !== 44 || afterDown.tables !== 96 || afterDown.functions !== 7) {
+  if (afterDown.migrations !== 46 || afterDown.tables !== 107 || afterDown.functions !== 7) {
     throw new Error(`Down did not roll back exactly one migration: ${JSON.stringify(afterDown)}`);
+  }
+
+  await runMigration('down');
+  const afterSecondDown = await readState();
+  if (afterSecondDown.migrations !== 45 || afterSecondDown.tables !== 97 || afterSecondDown.functions !== 7) {
+    throw new Error(`Second down did not roll back the site tables: ${JSON.stringify(afterSecondDown)}`);
   }
 
   await runMigration('up');
   const afterReapply = await readState();
-  if (afterReapply.migrations !== 45 || afterReapply.tables !== 97
+  if (afterReapply.migrations !== 47 || afterReapply.tables !== 107
       || afterReapply.functions !== 7) {
     throw new Error(`Reapply did not restore the migration: ${JSON.stringify(afterReapply)}`);
   }
 
-  console.log(JSON.stringify({ afterUp, afterNoOpUp, afterDown, afterReapply }, null, 2));
+  console.log(JSON.stringify({ afterUp, afterNoOpUp, afterDown, afterSecondDown, afterReapply }, null, 2));
 } catch (error) {
   console.error('Disposable migration cycle failed', { code: error.code, message: error.message });
   process.exitCode = 1;

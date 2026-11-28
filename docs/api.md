@@ -1084,3 +1084,12 @@ Full contract with examples and error tables: `docs/frontend-handoff.md` → "NC
 - `PUT /api/v1/trainer/exams/:attemptId/answers/:attemptQuestionId` `{ answer, revision }`: single `{ optionKey }`, matching `{ pairs }`, cells `{ digits }` (1–4 digits). Errors as for attempt autosave, plus `404 MOCK_EXAM_NOT_FOUND`; `409 ATTEMPT_DEADLINE_PASSED` after the deadline.
 - `PUT /api/v1/trainer/exams/:attemptId/questions/:attemptQuestionId/flag` `{ flagged }`: `{ attemptQuestionId, flagged, flaggedAt, serverNow }`.
 - `POST /api/v1/trainer/exams/:attemptId/submit` and `GET .../result`: `MockExamResult` — per section `score`, `maxScore`, `percent`, `answered`, `correct`, and per question `awardedPoints`, `correctAnswer`, `explanation`, `sheet` (single option numbers; matching rows A–D with columns 1–5; cells digits). `409 RESULT_NOT_READY` before the end.
+
+## Marketing site (module "Site", 2026-11-28)
+
+Full contract with JSON examples for every endpoint, the webhook and the seed: `docs/site-api.md` (in Russian, for the frontend).
+
+- Public, no authentication, published content only: `GET /public/site/settings`, `/public/site/courses`, `/public/site/courses/:slug`, `/public/site/vacancies`, `/public/site/events`, `/public/site/videos` (`placement`, `courseSlug`), `/public/site/images/:assetId` (302 to a signed URL). `lang=ru|tj|en`, per-field fallback to ru, `lang` on every object, `Cache-Control: public, max-age=60, stale-while-revalidate=300` and a weak ETag (304).
+- Admin, permission `site.manage` (owner, admin): `GET/PUT /admin/site/settings`, `POST /admin/site/images` (JPEG/PNG ≤ 5 MB, raw body), and for `courses|vacancies|events|videos`: list, create, get, `PATCH`, `DELETE`, `PATCH /order`, `POST /:id/publish`, `POST /:id/unpublish`. Translatable fields are `{ ru, tj, en }` objects.
+- Webhook: a `site.revalidate` job in `background_jobs` (same transaction as the save), sent by `worker:jobs` as `POST SITE_REVALIDATE_URL` with `x-revalidate-secret` and `{ tags }`; 4 attempts (30/60/120 s backoff). Not queued when the URL or secret is unset.
+- Errors: `INVALID_SITE_ITEM_ID`, `SITE_COURSE_NOT_FOUND`, `SITE_VACANCY_NOT_FOUND`, `SITE_EVENT_NOT_FOUND`, `SITE_VIDEO_NOT_FOUND`, `SITE_COURSE_SLUG_CONFLICT`, `SITE_VACANCY_SLUG_CONFLICT`, `SITE_EVENT_START_REQUIRED`, `SITE_IMAGE_NOT_FOUND`, `SITE_IMAGE_TYPE_INVALID`, `SITE_IMAGE_TOO_LARGE`, `SITE_IMAGE_CONTENT_INVALID`, `SITE_IMAGE_UPLOAD_FAILED`.
